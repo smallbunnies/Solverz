@@ -126,19 +126,21 @@ def diag(x):
 @implements(np.transpose)
 def transpose(x):
     """
-    Generate diagonal matrix of given vector x
+    Transpose matrix x
     :param x: vector
-    :return: diagonal matrix
+    :return: The transposed matrix
     """
     return np.transpose(np.asarray(x))
 
 
 def mat_multiply(*args: Union[SolverzArray, np.ndarray, list]):
     """
-    Generate multiplication of args
+    np.multiply supports only two arguments
+    So a new function is designed to generate multiplication of args
     :param args:
     :return:
     """
+
     return reduce(lambda x, y: x * y, [SolverzArray(arg) if isinstance(arg, list) else arg for arg in args])
 
 
