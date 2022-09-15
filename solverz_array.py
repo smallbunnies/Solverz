@@ -20,7 +20,7 @@ class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
             self.array = array
             self.dtype = array.dtype.name
         else:
-            raise ValueError('List or np.ndarray required!')
+            raise TypeError('List or np.ndarray required!')
 
         if self.array.ndim == 1:
             # convert 1-dim array to 2-dim
@@ -44,7 +44,7 @@ class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
     def __getitem__(self, item):
         """
         to make PSArry object subscriptable
-        :param item:
+        :PARAM item:
         :return:
         """
         return self.array.__getitem__(item)
@@ -52,8 +52,8 @@ class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
     def __setitem__(self, key, value):
         """
         to make PSArry object support item setting
-        :param key:
-        :param value:
+        :PARAM key:
+        :PARAM value:
         :return:
         """
         self.array.__setitem__(key, value)
@@ -114,7 +114,7 @@ def implements(np_function):
 def diag(x):
     """
     Generate diagonal matrix of given vector x
-    :param x: vector
+    :PARAM x: vector
     :return: diagonal matrix
     """
     if x.column_size == 1 or x.row_size == 1:
@@ -127,7 +127,7 @@ def diag(x):
 def transpose(x):
     """
     Transpose matrix x
-    :param x: vector
+    :PARAM x: vector
     :return: The transposed matrix
     """
     return np.transpose(np.asarray(x))
@@ -137,7 +137,7 @@ def mat_multiply(*args: Union[SolverzArray, np.ndarray, list]):
     """
     np.multiply supports only two arguments
     So a new function is designed to generate multiplication of args
-    :param args:
+    :PARAM args:
     :return:
     """
 

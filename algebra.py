@@ -20,7 +20,7 @@ class Mat_Mul(Function):
     def fdiff(self, argindex=1):
 
         if isinstance(self.args[argindex - 1], Diagonal):
-            return Mul(*self.args[0:argindex - 1], Diagonal(Mul(*self.args[argindex:])))
+            return Mul(Diagonal(Mul(*self.args[argindex:])), *self.args[0:argindex - 1])
         else:
             return Mul(*self.args[0:argindex - 1])
 
@@ -37,7 +37,7 @@ class Transposes(Function):
     pass
 
 
-x, y, m, V, Ts = symbols('x,y, m, V, Ts', commutative=False)
+# x, y, m, V, Ts = symbols('x,y, m, V, Ts', commutative=False)
 # 使用locals参数指定sympify表达式中变量的namespace
 # f = sympify('Mat_Mul(Diagonal(Ts),V,m)',
 #             locals={'Mat_Mul': Mat_Mul, 'Diagonal': Diagonal, 'm': m,

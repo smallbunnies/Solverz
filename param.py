@@ -6,16 +6,18 @@ import numpy as np
 class Param:
 
     def __init__(self,
-                 name: Optional[str] = None,
+                 name: str,
                  unit: Optional[str] = None,
-                 triggerable=False,
+                 info: Optional[str] = None,
+                 trigger_able=False,
                  trigger=None,
                  trigger_fun=None,
                  ):
         self.name = name
         self.unit = unit
+        self.info = info
         self.__v = None
-        self.triggerable = False
+        self.trigger_able = False
         self.trigger = None
         self.trigger_fun = None
 
@@ -26,10 +28,10 @@ class Param:
     @v.setter
     def v(self, value: Union[SolverzArray, np.ndarray, list]):
 
-        if isinstance(value, np.ndarray) or isinstance(value, SolverzArray) or isinstance(value, list):
+        if isinstance(value, np.ndarray) or isinstance(value, list):
             self.__v = SolverzArray(value)
         else:
             self.__v = value
 
     def __repr__(self):
-        return f"Param {self.name}"
+        return f"Param: {self.name}"
