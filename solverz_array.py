@@ -10,7 +10,7 @@ Np_Mapping = {}
 class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __init__(self,
-                 array: Union[list, np.ndarray],
+                 array: Union[list, np.ndarray, float, int],
                  dtype='float'):
 
         if isinstance(array, list):
@@ -19,8 +19,11 @@ class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
         elif isinstance(array, np.ndarray):
             self.array = array
             self.dtype = array.dtype.name
+        elif isinstance(array, float) or isinstance(array, int):
+            self.dtype = dtype
+            self.array = np.array(array)
         else:
-            raise TypeError('List or np.ndarray required!')
+            raise TypeError(f'Invalid input dtype {type(array)}!')
 
         if self.array.ndim == 1:
             # convert 1-dim array to 2-dim
@@ -57,6 +60,9 @@ class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
         :return:
         """
         self.array.__setitem__(key, value)
+
+    def __len__(self):
+        return len(self.array)
 
     def __array__(self):
         return self.array

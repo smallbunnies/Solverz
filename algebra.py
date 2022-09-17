@@ -32,9 +32,9 @@ class Diagonal(Function):
         return 1  # the 1 also means Identity matrix here
 
 
-@implements_sympify('Transposes')
-class Transposes(Function):
-    pass
+# @implements_sympify('Transposes')
+# class Transposes(Function):
+#     pass
 
 
 # x, y, m, V, Ts = symbols('x,y, m, V, Ts', commutative=False)

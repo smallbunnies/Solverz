@@ -2,7 +2,7 @@ from param import Param
 import pandas as pd
 import numpy as np
 from eqn import Eqn
-from var import Var
+from var import Var, Vars
 from miscellaneous import *
 
 sys_df = pd.read_excel('4node3pipe.xlsx',
@@ -29,46 +29,46 @@ Vm.v = derive_v_minus(V.v)
 # TODO: 声明变量、数组时必须强制声明变量大小 检查变量大小/参数大小与输入的数组大小是否匹配！
 
 Touts = Var(name='Touts')
-Touts.v = sys_df['StaticHeatPipe'].Touts
+Touts.v = np.array(sys_df['StaticHeatPipe'].Touts)
 Toutr = Var(name='Toutr')
-Toutr.v = sys_df['StaticHeatPipe'].Toutr
+Toutr.v = np.array(sys_df['StaticHeatPipe'].Toutr)
 Tins = Var(name='Tins')
-Tins.v = sys_df['StaticHeatPipe'].Tins
+Tins.v = np.array(sys_df['StaticHeatPipe'].Tins)
 Tinr = Var(name='Tinr')
-Tinr.v = sys_df['StaticHeatPipe'].Tinr
+Tinr.v = np.array(sys_df['StaticHeatPipe'].Tinr)
 Ts = Var(name='Ts')
-Ts.v = sys_df['Node'].Ts
+Ts.v = np.array(sys_df['Node'].Ts)
 Tr = Var(name='Tr')
-Tr.v = sys_df['Node'].Tr
+Tr.v = np.array(sys_df['Node'].Tr)
 m = Var(name='m')
-m.v = sys_df['StaticHeatPipe'].m
+m.v = np.array(sys_df['StaticHeatPipe'].m)
 
 EqnPipe1 = Eqn(name='PipeEqn1',
                e_str='(Tins-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Touts',
-               var=[Ts, Tr, Tins, Tinr, Touts, Toutr, m],
-               param=[Cp, L, coeff_lambda, Ta],
-               commutative= True)
-EqnPipe2 = Eqn(name='PipeEqn2',
-               e_str='Tins+Transposes(Vm)*Ts',
-               var=[Ts, Tins],
-               param=Vm,
-               commutative=False)
-EqnPipe3 = Eqn(name='PipeEqn3',
-               e_str='(Tinr-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Toutr',
-               var=[Ts, Tr, Tins, Tinr, Touts, Toutr, m],
                param=[Cp, L, coeff_lambda, Ta],
                commutative=True)
+# var=[Ts, Tr, Tins, Tinr, Touts, Toutr, m],
+EqnPipe2 = Eqn(name='PipeEqn2',
+               e_str='Tins+transpose(Vm)*Ts',
+               param=Vm,
+               commutative=False)
+# var=[Ts, Tins],
+EqnPipe3 = Eqn(name='PipeEqn3',
+               e_str='(Tinr-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Toutr',
+               param=[Cp, L, coeff_lambda, Ta],
+               commutative=True)
+# var=[Ts, Tr, Tins, Tinr, Touts, Toutr, m],
 EqnPipe4 = Eqn(name='PipeEqn4',
-               e_str='Tinr-Transposes(Vp)*Tr',
-               var=[Tr, Tinr],
+               e_str='Tinr-transpose(Vp)*Tr',
                param=Vp,
                commutative=False)
-# FIXME: PipeEqn1 is not commutative why?
+
 EqnPipe = Eqn(name=['PipeEqn1', 'PipeEqn2', 'PipeEqn3', 'PipeEqn4'],
               e_str=['(Tins-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Touts',
-                     'Tins+Transposes(Vm)*Ts',
+                     'Tins+transpose(Vm)*Ts',
                      '(Tinr-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Toutr',
-                     'Tinr-Transposes(Vp)*Tr'],
-              var=[Ts, Tr, Tins, Tinr, Touts, Toutr, m],
+                     'Tinr-transpose(Vp)*Tr'],
               param=[Cp, L, coeff_lambda, Ta, Vm, Vp],
               commutative=[True, False, True, False])
+
+y = Vars([Ts, Tr, Tins, Tinr, Touts, Toutr, m])

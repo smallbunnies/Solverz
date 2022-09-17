@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from typing import Union, Optional, List
-from var import Var
+import numpy as np
+from var import Var, Vars
 from param import Param
 from algebra import Sympify_Mapping
 from solverz_array import SolverzArray, Lambdify_Mapping
 from sympy import sympify, lambdify, symbols
+from copy import deepcopy
 import warnings
 
 
@@ -17,7 +19,6 @@ class Eqn:
     def __init__(self,
                  name: Union[str, List[str]],
                  e_str: Union[str, List[str]],
-                 var: Union[List[Var], Var],
                  commutative: Union[list[bool], bool],
                  param: Union[List[Param], Param] = None):
 
@@ -43,21 +44,26 @@ class Eqn:
         else:
             self.free_symbols = set()
             self.EQN = dict()
+            self.NUM_EQN = dict()
+            self.SYMBOLS = dict()
             for i in range(0, len(self.name)):
                 self.EQN[self.name[i]] = sympify(self.e_str[i], locals=Sympify_Mapping)
                 self.free_symbols = self.free_symbols.union(self.EQN[self.name[i]].free_symbols, self.free_symbols)
                 if not self.commutative[i]:
-                    temp_sympify_mapping = Sympify_Mapping
+                    temp_sympify_mapping = deepcopy(Sympify_Mapping)
                     for symbol in self.EQN[self.name[i]].free_symbols:
                         temp_sympify_mapping[symbol.name] = symbols(symbol.name, commutative=False)
                     self.EQN[self.name[i]] = sympify(self.e_str[i], locals=temp_sympify_mapping)
+                self.SYMBOLS[self.name[i]] = list(self.EQN[self.name[i]].free_symbols)
+                self.NUM_EQN[self.name[i]] = lambdify(self.SYMBOLS[self.name[i]],
+                                                      self.EQN[self.name[i]], [Lambdify_Mapping, 'numpy'])
 
-        if isinstance(var, Var):
-            var = [var]
-
-        self.VAR = {}
-        for var_ in var:
-            self.VAR[var_.name] = var_
+        # if isinstance(var, Var):
+        #     var = [var]
+        #
+        # self.__y = {}
+        # for var_ in var:
+        #     self.__y[var_.name] = var_
 
         if param:
             if isinstance(param, Param):
@@ -67,12 +73,26 @@ class Eqn:
             for param_ in param:
                 self.PARAM[param_.name] = param_
 
-        self.check_if_var_and_param_defined()
+        # self.check_if_var_and_param_defined()
 
     def check_if_var_and_param_defined(self):
         for symbol in list(self.free_symbols):
-            if symbol.name not in self.VAR and symbol.name not in self.PARAM:
+            if symbol.name not in self.__y and symbol.name not in self.PARAM:
                 warnings.warn(f'{symbol.name} not defined')
+
+    def eval(self, eqn_name: str, *args: Union[SolverzArray, np.ndarray]):
+        return self.NUM_EQN[eqn_name](*args)
+
+    def g(self, y: Vars) -> np.ndarray:
+        pass
+
+    # @property
+    # def y(self):
+    #     return self.__y
+    #
+    # @y.setter
+    # def y(self, value):
+    #     pass
 
     def add(self,
             eqn: Union[list, str, Eqn] = None,
