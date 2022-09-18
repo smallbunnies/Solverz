@@ -1,7 +1,7 @@
 from param import Param
 import pandas as pd
 import numpy as np
-from eqn import Eqn
+from eqn import Eqn, Equations
 from var import Var, Vars
 from miscellaneous import *
 
@@ -43,32 +43,27 @@ Tr.v = np.array(sys_df['Node'].Tr)
 m = Var(name='m')
 m.v = np.array(sys_df['StaticHeatPipe'].m)
 
-EqnPipe1 = Eqn(name='PipeEqn1',
-               e_str='(Tins-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Touts',
-               param=[Cp, L, coeff_lambda, Ta],
-               commutative=True)
+E1 = Eqn(name='E1',
+         e_str='(Tins-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Touts',
+         commutative=True)
 # var=[Ts, Tr, Tins, Tinr, Touts, Toutr, m],
-EqnPipe2 = Eqn(name='PipeEqn2',
-               e_str='Tins+transpose(Vm)*Ts',
-               param=Vm,
-               commutative=False)
+E2 = Eqn(name='E2',
+         e_str='Tins+transpose(Vm)*Ts',
+         commutative=False)
 # var=[Ts, Tins],
-EqnPipe3 = Eqn(name='PipeEqn3',
-               e_str='(Tinr-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Toutr',
-               param=[Cp, L, coeff_lambda, Ta],
-               commutative=True)
+E3 = Eqn(name='E3',
+         e_str='(Tinr-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Toutr',
+         commutative=True)
 # var=[Ts, Tr, Tins, Tinr, Touts, Toutr, m],
-EqnPipe4 = Eqn(name='PipeEqn4',
-               e_str='Tinr-transpose(Vp)*Tr',
-               param=Vp,
-               commutative=False)
+E4 = Eqn(name='E4',
+         e_str='Tinr-transpose(Vp)*Tr',
+         commutative=False)
 
-EqnPipe = Eqn(name=['PipeEqn1', 'PipeEqn2', 'PipeEqn3', 'PipeEqn4'],
-              e_str=['(Tins-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Touts',
-                     'Tins+transpose(Vm)*Ts',
-                     '(Tinr-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Toutr',
-                     'Tinr-transpose(Vp)*Tr'],
-              param=[Cp, L, coeff_lambda, Ta, Vm, Vp],
-              commutative=[True, False, True, False])
+E = Equations(name='Pipe Equations',
+                    eqn=[E1, E2, E3, E4],
+                    param=[Cp, L, coeff_lambda, Ta, Vm, Vp])
 
 y = Vars([Ts, Tr, Tins, Tinr, Touts, Toutr, m])
+
+E.g_y(y, ['E2'], [Ts])
+

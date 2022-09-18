@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np
 from numbers import Number
 import numpy.lib.mixins
@@ -10,7 +11,7 @@ Np_Mapping = {}
 class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __init__(self,
-                 array: Union[list, np.ndarray, float, int],
+                 array: Union[list, np.ndarray, float, int, SolverzArray],
                  dtype='float'):
 
         if isinstance(array, list):
@@ -22,6 +23,9 @@ class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
         elif isinstance(array, float) or isinstance(array, int):
             self.dtype = dtype
             self.array = np.array(array)
+        elif isinstance(array, SolverzArray):
+            self.array = array.array
+            self.dtype = array.dtype
         else:
             raise TypeError(f'Invalid input dtype {type(array)}!')
 

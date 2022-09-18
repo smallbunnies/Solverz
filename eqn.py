@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Dict, Callable, Set
 import numpy as np
 from var import Var, Vars
 from param import Param
 from algebra import Sympify_Mapping
 from solverz_array import SolverzArray, Lambdify_Mapping
-from sympy import sympify, lambdify, symbols
+from sympy import sympify, lambdify, symbols, Symbol, Expr
 from copy import deepcopy
 import warnings
 
@@ -17,61 +17,28 @@ class Eqn:
     """
 
     def __init__(self,
-                 name: Union[str, List[str]],
-                 e_str: Union[str, List[str]],
-                 commutative: Union[list[bool], bool],
-                 param: Union[List[Param], Param] = None):
+                 name: Union[str],
+                 e_str: Union[str],
+                 commutative: Union[bool]):
 
-        if isinstance(name, str):
-            self.name = [name]
-        else:
-            self.name = name
+        self.name = name
+        self.e_str = e_str
+        self.commutative = commutative
 
-        if isinstance(e_str, str):
-            self.e_str = [e_str]
-        else:
-            self.e_str = e_str
+        self.EQN = sympify(self.e_str, locals=Sympify_Mapping)
 
-        if isinstance(commutative, bool):
-            self.commutative = [commutative]
-        else:
-            self.commutative = commutative
+        temp_sympify_mapping = deepcopy(Sympify_Mapping)
+        for symbol in self.EQN.free_symbols:
+            # commutative=False and real=True are inconsistent assumptions
+            if self.commutative:
+                temp_sympify_mapping[symbol.name] = symbols(symbol.name, commutative=self.commutative, real=True)
+            else:
+                temp_sympify_mapping[symbol.name] = symbols(symbol.name, commutative=self.commutative)
 
-        if len(self.name) > len(self.e_str):
-            raise ValueError("Equation names are more than equations!")
-        elif len(self.name) < len(self.e_str):
-            raise ValueError("Equation names are fewer than equations!")
-        else:
-            self.free_symbols = set()
-            self.EQN = dict()
-            self.NUM_EQN = dict()
-            self.SYMBOLS = dict()
-            for i in range(0, len(self.name)):
-                self.EQN[self.name[i]] = sympify(self.e_str[i], locals=Sympify_Mapping)
-                self.free_symbols = self.free_symbols.union(self.EQN[self.name[i]].free_symbols, self.free_symbols)
-                if not self.commutative[i]:
-                    temp_sympify_mapping = deepcopy(Sympify_Mapping)
-                    for symbol in self.EQN[self.name[i]].free_symbols:
-                        temp_sympify_mapping[symbol.name] = symbols(symbol.name, commutative=False)
-                    self.EQN[self.name[i]] = sympify(self.e_str[i], locals=temp_sympify_mapping)
-                self.SYMBOLS[self.name[i]] = list(self.EQN[self.name[i]].free_symbols)
-                self.NUM_EQN[self.name[i]] = lambdify(self.SYMBOLS[self.name[i]],
-                                                      self.EQN[self.name[i]], [Lambdify_Mapping, 'numpy'])
+        self.EQN = sympify(self.e_str, locals=temp_sympify_mapping)
 
-        # if isinstance(var, Var):
-        #     var = [var]
-        #
-        # self.__y = {}
-        # for var_ in var:
-        #     self.__y[var_.name] = var_
-
-        if param:
-            if isinstance(param, Param):
-                param = [param]
-
-            self.PARAM = {}
-            for param_ in param:
-                self.PARAM[param_.name] = param_
+        self.SYMBOLS: List[Symbol] = list(self.EQN.free_symbols)
+        self.NUM_EQN: Callable = lambdify(self.SYMBOLS, self.EQN, [Lambdify_Mapping, 'numpy'])
 
         # self.check_if_var_and_param_defined()
 
@@ -80,25 +47,149 @@ class Eqn:
             if symbol.name not in self.__y and symbol.name not in self.PARAM:
                 warnings.warn(f'{symbol.name} not defined')
 
+    def eval(self, *args: Union[SolverzArray, np.ndarray]) -> np.ndarray:
+        return np.asarray(self.NUM_EQN(*args))
+
+    def __repr__(self):
+        return f"Equation: {self.name}"
+
+
+class Equations:
+
+    def __init__(self,
+                 eqn: Union[List[Eqn], Eqn],
+                 name: str = None,
+                 param: Union[List[Param], Param] = None
+                 ):
+        self.name = name
+
+        self.EQNs: Dict[str, Eqn] = dict()
+        self.__eqn_diffs: Dict[str, Dict[str, Eqn]] = dict()
+        self.SYMBOLS: Dict[str, Symbol] = dict()
+        if isinstance(eqn, Eqn):
+            self.EQNs[eqn.name] = eqn
+        else:
+            for eqn_ in eqn:
+                self.EQNs[eqn_.name] = eqn_
+                for symbol_ in self.EQNs[eqn_.name].SYMBOLS:
+                    # generate bare symbols without assumptions
+                    self.SYMBOLS[symbol_.name] = symbols(symbol_.name)
+
+        if param:
+            if isinstance(param, Param):
+                param = [param]
+
+            self.PARAM: Dict[str, Param] = dict()
+            for param_ in param:
+                if not self.is_param_defined(param_.name):
+                    raise ValueError(f'Parameter {param_.name} not defined in equations!')
+                else:
+                    self.PARAM[param_.name] = param_
+
+            # generate derivatives of EQNs
+            for eqn_name, eqn_ in self.EQNs.items():
+                self.__eqn_diffs[eqn_name] = dict()
+                for symbol_ in eqn_.SYMBOLS:
+                    if symbol_.name not in self.PARAM:
+                        temp = eqn_.EQN.diff(symbol_)
+                        self.__eqn_diffs[eqn_name][symbol_.name] = Eqn(name=f'Diff {eqn_name} w.r.t. {symbol_.name}',
+                                                                       e_str=temp.__repr__(),
+                                                                       commutative=eqn_.commutative)
+
+    @property
+    def eqn_diffs(self):
+        return self.__eqn_diffs
+
+    def is_param_defined(self, param: Union[str, Param]) -> bool:
+        if isinstance(param, str):
+            pname = param
+        else:
+            pname = param.name
+        if pname in self.SYMBOLS:
+            return True
+        else:
+            return False
+
     def eval(self, eqn_name: str, *args: Union[SolverzArray, np.ndarray]):
-        return self.NUM_EQN[eqn_name](*args)
+        return self.EQNs[eqn_name].NUM_EQN(*args)
 
-    def g(self, y: Vars) -> np.ndarray:
-        pass
+    def eval_diffs(self, eqn_name: str, var_name: str, *args: Union[SolverzArray, np.ndarray]):
+        return self.eqn_diffs[eqn_name][var_name].NUM_EQN(*args)
 
-    # @property
-    # def y(self):
-    #     return self.__y
-    #
-    # @y.setter
-    # def y(self, value):
-    #     pass
+    def __obtain_eqn_args(self, y: Vars, eqn: Eqn):
+        args = []
+        for symbol in eqn.SYMBOLS:
+            if symbol.name in self.PARAM:
+                args = [*args, self.PARAM[symbol.name].v]
+            elif symbol.name in y.v:
+                args = [*args, y[symbol.name]]
+            else:
+                raise ValueError(f'Cannot find the values of variable {symbol.name}')
+        return args
+
+    def g(self, y: Vars, eqn: str = None) -> SolverzArray:
+        """
+
+        :param y:
+        :param eqn:
+        :return:
+        """
+        if not eqn:
+            temp = np.array([])
+            for eqn_name, eqn_ in self.EQNs.items():
+                args = self.__obtain_eqn_args(y, eqn_)
+                temp = np.concatenate([temp, np.asarray(self.eval(eqn_name, *args)).reshape(-1, )])
+            return SolverzArray(temp)
+        else:
+            args = self.__obtain_eqn_args(y, self.EQNs[eqn])
+            temp = self.eval(eqn, *args)
+            if isinstance(temp, np.ndarray):
+                return SolverzArray(temp)
+            else:
+                return temp
+
+    def g_y(self, y: Vars, eqn: List[str] = None, var: List[Var] = None) -> SolverzArray:
+        """
+        generate Jacobian matrices of Eqn object with respect to var object
+        :param y:
+        :param eqn:
+        :param var:
+        :return:
+        """
+        if not eqn:
+            eqn = list(self.EQNs.keys())
+        if not var:
+            var = y.VARS
+
+        #  obtain the row size of
+
+        gy = []
+        for eqn_ in eqn:
+            temp = []
+            for var_ in var:
+                args = []
+                if var_.name in self.eqn_diffs[eqn_]:
+                    args = self.__obtain_eqn_args(y, self.eqn_diffs[eqn_][var_.name])
+                    temp1 = SolverzArray(self.eval_diffs(eqn_, var_.name, *args))
+                    if isinstance(temp1, SolverzArray):
+                        if temp1.column_size == 1:
+                            temp = [*temp, np.diag(temp1)]
+                        else:
+                            temp = [*temp, np.asarray(temp1)]
+                    else:
+                        temp = [*temp, temp1 * np.identity(y.size[var_.name])]
+                else:
+                    temp = [*temp, np.zeros((y.size[var_.name], y.size[var_.name]))]
+            gy = [*gy, temp]
+        return SolverzArray(np.block(gy))
+        # return gy
 
     def add(self,
             eqn: Union[list, str, Eqn] = None,
             variable: Var = None,
             parameter: Param = None):
         # TODO:  check vars/params with the same names
+        self.is_param_defined()
         pass
 
     def __add__(self, other):
@@ -106,4 +197,4 @@ class Eqn:
         pass
 
     def __repr__(self):
-        return f"Eqn {self.name}"
+        return f"{self.name} equations"

@@ -34,4 +34,4 @@ class Param:
             self.__v = value
 
     def __repr__(self):
-        return f"Param: {self.name}"
+        return f"Param: {self.name} value: {np.transpose(self.v)}"

@@ -3,7 +3,7 @@ from solverz_array import SolverzArray
 import numpy as np
 from typing import Optional, Union, List
 from numbers import Number
-from functools import reduce
+from copy import deepcopy
 
 
 class Var:
@@ -37,7 +37,7 @@ class Var:
         pass
 
     def __repr__(self):
-        return f"Var: {self.name}"
+        return f"Var: {self.name} value: {np.transpose(self.v)}"
 
 
 class Vars:
@@ -82,12 +82,15 @@ class Vars:
         return self.v[item]
 
     def __setitem__(self, key, value):
-        self.v[key] = value
+        if key in self.v:
+            self.v[key] = value
+        else:
+            raise ValueError(f'There is no variable {key}!')
 
     def __repr__(self):
         return f'variables {list(self.v.keys())}'
 
-    def __mul__(self, other: Union[Number, Vars]):
+    def __mul__(self, other: Union[Number, Vars]) -> Vars:
         if isinstance(other, Number):
             self.array[:] = self.array * other
             return self
@@ -97,12 +100,12 @@ class Vars:
         else:
             raise TypeError(f'Input type {type(other)} invalid')
 
-    def __add__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]):
+    def __add__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
         if isinstance(other, Number):
             self.array[:] = self.array + other
             return self
         elif isinstance(other, Vars):
-            self.array[:] = self.array*other
+            self.array[:] = self.array+other.array
             return self
         elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
             if isinstance(other, np.ndarray):
@@ -112,3 +115,22 @@ class Vars:
             else:
                 self.array[:] = self.array+other.array
                 return self
+
+    def __truediv__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+        if isinstance(other, Number):
+            self.array[:] = self.array / other
+            return self
+        elif isinstance(other, Vars):
+            self.array[:] = self.array/other.array
+            return self
+        elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
+            if isinstance(other, np.ndarray):
+                other = SolverzArray(other)
+            if self.total_size != other.row_size:
+                raise ValueError('Incompatible array size')
+            else:
+                self.array[:] = self.array/other.array
+                return self
+
+    def copy(self) -> Vars:
+        return deepcopy(self)
