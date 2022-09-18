@@ -65,5 +65,5 @@ E = Equations(name='Pipe Equations',
 
 y = Vars([Ts, Tr, Tins, Tinr, Touts, Toutr, m])
 
-E.g_y(y, ['E2'], [Ts])
+A=E.g_y(y)
 

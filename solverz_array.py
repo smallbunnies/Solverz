@@ -22,7 +22,7 @@ class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
             self.dtype = array.dtype.name
         elif isinstance(array, float) or isinstance(array, int):
             self.dtype = dtype
-            self.array = np.array(array)
+            self.array = np.array([array])
         elif isinstance(array, SolverzArray):
             self.array = array.array
             self.dtype = array.dtype

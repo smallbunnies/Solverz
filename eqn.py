@@ -110,11 +110,11 @@ class Equations:
         else:
             return False
 
-    def eval(self, eqn_name: str, *args: Union[SolverzArray, np.ndarray]):
-        return self.EQNs[eqn_name].NUM_EQN(*args)
+    def eval(self, eqn_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
+        return SolverzArray(self.EQNs[eqn_name].NUM_EQN(*args))
 
-    def eval_diffs(self, eqn_name: str, var_name: str, *args: Union[SolverzArray, np.ndarray]):
-        return self.eqn_diffs[eqn_name][var_name].NUM_EQN(*args)
+    def eval_diffs(self, eqn_name: str, var_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
+        return SolverzArray(self.eqn_diffs[eqn_name][var_name].NUM_EQN(*args))
 
     def __obtain_eqn_args(self, y: Vars, eqn: Eqn):
         args = []
@@ -142,11 +142,7 @@ class Equations:
             return SolverzArray(temp)
         else:
             args = self.__obtain_eqn_args(y, self.EQNs[eqn])
-            temp = self.eval(eqn, *args)
-            if isinstance(temp, np.ndarray):
-                return SolverzArray(temp)
-            else:
-                return temp
+            return self.eval(eqn, *args)
 
     def g_y(self, y: Vars, eqn: List[str] = None, var: List[Var] = None) -> SolverzArray:
         """
@@ -161,8 +157,6 @@ class Equations:
         if not var:
             var = y.VARS
 
-        #  obtain the row size of
-
         gy = []
         for eqn_ in eqn:
             temp = []
@@ -171,18 +165,19 @@ class Equations:
                 if var_.name in self.eqn_diffs[eqn_]:
                     args = self.__obtain_eqn_args(y, self.eqn_diffs[eqn_][var_.name])
                     temp1 = SolverzArray(self.eval_diffs(eqn_, var_.name, *args))
-                    if isinstance(temp1, SolverzArray):
-                        if temp1.column_size == 1:
-                            temp = [*temp, np.diag(temp1)]
-                        else:
-                            temp = [*temp, np.asarray(temp1)]
+                    if temp1.column_size > 1 and temp1.row_size > 1:
+                        #  matrix
+                        temp = [*temp, np.asarray(temp1)]
+                    elif temp1.column_size == 1 and temp1.row_size > 1:
+                        # vector
+                        temp = [*temp, np.diag(temp1)]
                     else:
-                        temp = [*temp, temp1 * np.identity(y.size[var_.name])]
+                        # [number]
+                        temp = [*temp, np.asarray(temp1) * np.identity(y.size[var_.name])]
                 else:
                     temp = [*temp, np.zeros((y.size[var_.name], y.size[var_.name]))]
             gy = [*gy, temp]
         return SolverzArray(np.block(gy))
-        # return gy
 
     def add(self,
             eqn: Union[list, str, Eqn] = None,
