@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Union, Optional, List, Dict, Callable, Set
+from numbers import Number
+from typing import Union, Optional, List, Dict, Callable, Set, Tuple
 import numpy as np
 from var import Var, Vars
 from param import Param
@@ -144,7 +145,7 @@ class Equations:
             args = self.__obtain_eqn_args(y, self.EQNs[eqn])
             return self.eval(eqn, *args)
 
-    def g_y(self, y: Vars, eqn: List[str] = None, var: List[Var] = None) -> SolverzArray:
+    def g_y(self, y: Vars, eqn: List[str] = None, var: List[Var] = None) -> List[Tuple[str, str, np.ndarray]]:
         """
         generate Jacobian matrices of Eqn object with respect to var object
         :param y:
@@ -157,9 +158,10 @@ class Equations:
         if not var:
             var = y.VARS
 
-        gy = []
+        gy: List[Tuple[str, str, np.ndarray]] = []
+        # size: Dict[str, Dict[str, Number]] = dict()
         for eqn_ in eqn:
-            temp = []
+            max_row_size = 0
             for var_ in var:
                 args = []
                 if var_.name in self.eqn_diffs[eqn_]:
@@ -167,17 +169,15 @@ class Equations:
                     temp1 = SolverzArray(self.eval_diffs(eqn_, var_.name, *args))
                     if temp1.column_size > 1 and temp1.row_size > 1:
                         #  matrix
-                        temp = [*temp, np.asarray(temp1)]
+                        gy = [*gy, (eqn_, var_.name, np.asarray(temp1))]
                     elif temp1.column_size == 1 and temp1.row_size > 1:
                         # vector
-                        temp = [*temp, np.diag(temp1)]
+                        gy = [*gy, (eqn_, var_.name, np.diag(temp1))]
                     else:
                         # [number]
-                        temp = [*temp, np.asarray(temp1) * np.identity(y.size[var_.name])]
-                else:
-                    temp = [*temp, np.zeros((y.size[var_.name], y.size[var_.name]))]
-            gy = [*gy, temp]
-        return SolverzArray(np.block(gy))
+                        gy = [*gy, (eqn_, var_.name, np.asarray(temp1) * np.identity(y.size[var_.name]))]
+
+        return gy
 
     def add(self,
             eqn: Union[list, str, Eqn] = None,
