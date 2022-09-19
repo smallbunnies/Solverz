@@ -67,6 +67,11 @@ class Equations:
         self.EQNs: Dict[str, Eqn] = dict()
         self.__eqn_diffs: Dict[str, Dict[str, Eqn]] = dict()
         self.SYMBOLS: Dict[str, Symbol] = dict()
+        self.__a: Dict[str, List[int]] = dict()  # equation address
+        self.__size: Dict[str, int] = dict()  # equation size
+        self.__total_size: int = 0
+        self.__var_size: int = 0
+
         if isinstance(eqn, Eqn):
             self.EQNs[eqn.name] = eqn
         else:
@@ -75,6 +80,7 @@ class Equations:
                 for symbol_ in self.EQNs[eqn_.name].SYMBOLS:
                     # generate bare symbols without assumptions
                     self.SYMBOLS[symbol_.name] = symbols(symbol_.name)
+                self.__a[eqn_.name] = []
 
         if param:
             if isinstance(param, Param):
@@ -101,6 +107,26 @@ class Equations:
     def eqn_diffs(self):
         return self.__eqn_diffs
 
+    @property
+    def a(self):
+        return self.__a
+
+    @property
+    def size(self):
+        return self.__size
+
+    @property
+    def eqn_size(self):
+        return np.sum(np.array(list(self.size.values())))
+
+    @property
+    def var_size(self):
+        return self.__var_size
+
+    @var_size.setter
+    def var_size(self, value: int):
+        self.__var_size = value
+
     def is_param_defined(self, param: Union[str, Param]) -> bool:
         if isinstance(param, str):
             pname = param
@@ -110,6 +136,14 @@ class Equations:
             return True
         else:
             return False
+
+    def assign_equation_address(self, y: Vars):
+        temp = 0
+        for eqn_name in self.EQNs.keys():
+            self.a[eqn_name] = [temp, temp+self.g(y, eqn_name).row_size-1]
+            temp = temp + self.g(y, eqn_name).row_size
+            self.size[eqn_name] = self.g(y, eqn_name).row_size
+        self.var_size = y.array.shape[0]
 
     def eval(self, eqn_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
         return SolverzArray(self.EQNs[eqn_name].NUM_EQN(*args))
@@ -176,7 +210,6 @@ class Equations:
                     else:
                         # [number]
                         gy = [*gy, (eqn_, var_.name, np.asarray(temp1) * np.identity(y.size[var_.name]))]
-
         return gy
 
     def add(self,
@@ -192,4 +225,7 @@ class Equations:
         pass
 
     def __repr__(self):
-        return f"{self.name} equations"
+        if not self.eqn_size:
+            return f"{self.name} equations"
+        else:
+            return f"{self.name} equations ({self.eqn_size}×{self.var_size})"

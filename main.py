@@ -4,6 +4,7 @@ import numpy as np
 from eqn import Eqn, Equations
 from var import Var, Vars
 from miscellaneous import *
+from solver import Solver
 
 sys_df = pd.read_excel('4node3pipe.xlsx',
                        sheet_name=None,
@@ -59,11 +60,40 @@ E4 = Eqn(name='E4',
          e_str='Tinr-transpose(Vp)*Tr',
          commutative=False)
 
+E5 = Eqn(name='E5',
+         e_str='V_rs*m+A_rs*mq',
+         commutative=False)
+
+E6 = Eqn(name='E6',
+         e_str='V_l*m-A_l*mq',
+         commutative=False)
+
+E7 = Eqn(name='E7',
+         e_str='V_i*m',
+         commutative=False)
+
+E8 = Eqn(name='E8',
+         e_str='L*Diagonal(m)*Abs(m)*m',
+         commutative=False)
+
+E9 = Eqn(name='E9',
+         e_str='Diagonal(Ts)*V_p*Abs(m)-V_p*Diagonal(Touts)*Abs(m)',
+         commutative=False)
+
+E10 = Eqn(name='E10',
+          e_str='Diagonal(Tr)*V_m*Abs(m)-V_m*Diagonal(Toutr)*Abs(m)',
+          commutative=False)
+
+E11 = Eqn(name='E11',
+          e_str='A_rsl*phi-4182*Diagonal(A_rsl*mq)*(A_rsl*Ts-A_rsl*Tr)',
+          commutative=False)
+
 E = Equations(name='Pipe Equations',
-                    eqn=[E1, E2, E3, E4],
-                    param=[Cp, L, coeff_lambda, Ta, Vm, Vp])
+              eqn=[E1, E2, E3, E4],
+              param=[Cp, L, coeff_lambda, Ta, Vm, Vp])
 
 y = Vars([Ts, Tr, Tins, Tinr, Touts, Toutr, m])
 
-A=E.g_y(y)
+A = E.g_y(y)
 
+# DHSpf = Solver(E, y)
