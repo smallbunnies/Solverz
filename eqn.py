@@ -138,9 +138,12 @@ class Equations:
             return False
 
     def assign_equation_address(self, y: Vars):
+        """
+        ASSIGN ADDRESSES TO EQUATIONS
+        """
         temp = 0
         for eqn_name in self.EQNs.keys():
-            self.a[eqn_name] = [temp, temp+self.g(y, eqn_name).row_size-1]
+            self.a[eqn_name] = [temp, temp + self.g(y, eqn_name).row_size - 1]
             temp = temp + self.g(y, eqn_name).row_size
             self.size[eqn_name] = self.g(y, eqn_name).row_size
         self.var_size = y.array.shape[0]
@@ -169,6 +172,7 @@ class Equations:
         :param eqn:
         :return:
         """
+
         if not eqn:
             temp = np.array([])
             for eqn_name, eqn_ in self.EQNs.items():
@@ -212,6 +216,17 @@ class Equations:
                         gy = [*gy, (eqn_, var_.name, np.asarray(temp1) * np.identity(y.size[var_.name]))]
         return gy
 
+    def j(self, y: Vars) -> np.ndarray:
+        if not self.eqn_size:
+            self.assign_equation_address(y)
+        gy = self.g_y(y)
+        j = np.zeros((self.eqn_size, y.total_size))
+
+        for j_ in gy:
+            j[self.a[j_[0]][0]:(self.a[j_[0]][-1]+1), y.a[j_[1]][0]:(y.a[j_[1]][-1]+1)] = j_[2]
+
+        return j
+
     def add(self,
             eqn: Union[list, str, Eqn] = None,
             variable: Var = None,
@@ -226,6 +241,6 @@ class Equations:
 
     def __repr__(self):
         if not self.eqn_size:
-            return f"{self.name} equations"
+            return f"{self.name} equations with addresses uninitialized"
         else:
             return f"{self.name} equations ({self.eqn_size}×{self.var_size})"
