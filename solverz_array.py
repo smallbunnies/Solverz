@@ -143,6 +143,11 @@ def transpose(x):
     return np.transpose(np.asarray(x))
 
 
+@implements(np.amax)
+def amax(x: SolverzArray):
+    return np.amax(np.asarray(x))
+
+
 def mat_multiply(*args: Union[SolverzArray, np.ndarray, list]):
     """
     np.multiply supports only two arguments
@@ -155,4 +160,3 @@ def mat_multiply(*args: Union[SolverzArray, np.ndarray, list]):
 
 
 Lambdify_Mapping = {'Mat_Mul': mat_multiply, 'Diagonal': np.diag}
-

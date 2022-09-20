@@ -98,3 +98,12 @@ y = Vars([Ts, Tr, Tins, Tinr, Touts, Toutr, m])
 A = E.g_y(y)
 
 DHSpf = Routine(E, y, tol=1e-8, solver=nr_method)
+
+e = Eqn(name='e',
+        e_str='x**2-1')
+f = Equations(name='f',
+              eqn=e)
+x = Var(name='x')
+x.v = [2]
+x = Vars([x])
+nr_method(f, x)

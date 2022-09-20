@@ -20,7 +20,7 @@ class Eqn:
     def __init__(self,
                  name: Union[str],
                  e_str: Union[str],
-                 commutative: Union[bool]):
+                 commutative: Union[bool] = True):
 
         self.name = name
         self.e_str = e_str
@@ -73,35 +73,36 @@ class Equations:
         self.__var_size: int = 0
 
         if isinstance(eqn, Eqn):
-            self.EQNs[eqn.name] = eqn
-        else:
-            for eqn_ in eqn:
-                self.EQNs[eqn_.name] = eqn_
-                for symbol_ in self.EQNs[eqn_.name].SYMBOLS:
-                    # generate bare symbols without assumptions
-                    self.SYMBOLS[symbol_.name] = symbols(symbol_.name)
-                self.__a[eqn_.name] = []
+            eqn = [eqn]
 
+        for eqn_ in eqn:
+            self.EQNs[eqn_.name] = eqn_
+            for symbol_ in self.EQNs[eqn_.name].SYMBOLS:
+                # generate bare symbols without assumptions
+                self.SYMBOLS[symbol_.name] = symbols(symbol_.name)
+            self.__a[eqn_.name] = []
+
+        # set parameters
+        self.PARAM: Dict[str, Param] = dict()
         if param:
             if isinstance(param, Param):
                 param = [param]
 
-            self.PARAM: Dict[str, Param] = dict()
             for param_ in param:
                 if not self.is_param_defined(param_.name):
                     raise ValueError(f'Parameter {param_.name} not defined in equations!')
                 else:
                     self.PARAM[param_.name] = param_
 
-            # generate derivatives of EQNs
-            for eqn_name, eqn_ in self.EQNs.items():
-                self.__eqn_diffs[eqn_name] = dict()
-                for symbol_ in eqn_.SYMBOLS:
-                    if symbol_.name not in self.PARAM:
-                        temp = eqn_.EQN.diff(symbol_)
-                        self.__eqn_diffs[eqn_name][symbol_.name] = Eqn(name=f'Diff {eqn_name} w.r.t. {symbol_.name}',
-                                                                       e_str=temp.__repr__(),
-                                                                       commutative=eqn_.commutative)
+        # generate derivatives of EQNs
+        for eqn_name, eqn_ in self.EQNs.items():
+            self.__eqn_diffs[eqn_name] = dict()
+            for symbol_ in eqn_.SYMBOLS:
+                if symbol_.name not in self.PARAM:
+                    eqn_diff = eqn_.EQN.diff(symbol_)
+                    self.__eqn_diffs[eqn_name][symbol_.name] = Eqn(name=f'Diff {eqn_name} w.r.t. {symbol_.name}',
+                                                                   e_str=eqn_diff.__repr__(),
+                                                                   commutative=eqn_.commutative)
 
     @property
     def eqn_diffs(self):
@@ -223,7 +224,7 @@ class Equations:
         j = np.zeros((self.eqn_size, y.total_size))
 
         for j_ in gy:
-            j[self.a[j_[0]][0]:(self.a[j_[0]][-1]+1), y.a[j_[1]][0]:(y.a[j_[1]][-1]+1)] = j_[2]
+            j[self.a[j_[0]][0]:(self.a[j_[0]][-1] + 1), y.a[j_[1]][0]:(y.a[j_[1]][-1] + 1)] = j_[2]
 
         return j
 

@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import numpy as np
+
 from eqn import Equations
 from var import Vars
 from numpy import abs, max, linalg
+
+
+def inv(mat: np.ndarray):
+    return linalg.inv(mat)
 
 
 def nr_method(eqn: Equations,
@@ -11,6 +17,6 @@ def nr_method(eqn: Equations,
     df = eqn.g(y)
     while max(abs(df)) > tol:
         jacobian = eqn.j(y)
-        y = y + linalg.inv(jacobian) * df
+        y = y - inv(jacobian) * df
         df = eqn.g(y)
     return y
