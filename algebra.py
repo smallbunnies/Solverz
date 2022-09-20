@@ -30,29 +30,3 @@ class Diagonal(Function):
 
     def fdiff(self, argindex=1):
         return 1  # the 1 also means Identity matrix here
-
-
-# @implements_sympify('Transposes')
-# class Transposes(Function):
-#     pass
-
-
-# x, y, m, V, Ts = symbols('x,y, m, V, Ts', commutative=False)
-# 使用locals参数指定sympify表达式中变量的namespace
-# f = sympify('Mat_Mul(Diagonal(Ts),V,m)',
-#             locals={'Mat_Mul': Mat_Mul, 'Diagonal': Diagonal, 'm': m,
-#                     'V': V,
-#                     'Ts': Ts})
-# g = sympify('Mat_Mul(V,Diagonal(Touts),m)',
-#             locals={'Mat_Mul': Mat_Mul, 'Diagonal': Diagonal, 'm': m,
-#                     'V': V,
-#                     'Touts': Symbol('Touts', commutative=False)})
-# b = sympify('(g(x))', locals={'Matrix':Matrix,'Diagonal':Diagonal})
-
-# fm = f.diff(m)
-#
-# f1 = lambdify([Ts, V, m], f, [Lambdify_Mapping, 'numpy'])
-# fm1 = lambdify([Ts, V, m], fm, [{'Diagonal': np.diag}, 'numpy'])
-# a = PSArray([1, 2, 3])
-# a * a * a
-# mat_multiply([1, 2, 3], [1, 2, 3])
