@@ -96,46 +96,118 @@ class Vars:
         return f'variables {list(self.v.keys())}'
 
     def __mul__(self, other: Union[Number, Vars]) -> Vars:
+        new_vars = deepcopy(self)
+        new_vars.link_var_and_array()
         if isinstance(other, Number):
-            self.array[:] = self.array * other
-            return self
+            new_vars.array[:] = new_vars.array * other
+            return new_vars
         elif isinstance(other, Vars):
-            self.array[:] = other.array * self.array
-            return self
+            new_vars.array[:] = other.array * new_vars.array
+            return new_vars
+        else:
+            raise TypeError(f'Input type {type(other)} invalid')
+
+    def __rmul__(self, other: Union[Number, Vars]) -> Vars:
+        new_vars = deepcopy(self)
+        new_vars.link_var_and_array()
+        if isinstance(other, Number):
+            new_vars.array[:] = other * new_vars.array
+            return new_vars
+        elif isinstance(other, Vars):
+            new_vars.array[:] = new_vars.array * other.array
+            return new_vars
         else:
             raise TypeError(f'Input type {type(other)} invalid')
 
     def __add__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+        new_vars = deepcopy(self)
+        new_vars.link_var_and_array()
         if isinstance(other, Number):
-            self.array[:] = self.array + other
-            return self
+            new_vars.array[:] = new_vars.array + other
+            return new_vars
         elif isinstance(other, Vars):
-            self.array[:] = self.array + other.array
-            return self
+            new_vars.array[:] = new_vars.array + other.array
+            return new_vars
         elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
             if isinstance(other, np.ndarray):
                 other = SolverzArray(other)
-            if self.total_size != other.row_size:
+            if new_vars.total_size != other.row_size:
                 raise ValueError('Incompatible array size')
             else:
-                self.array[:] = self.array + other.array
-                return self
+                new_vars.array[:] = new_vars.array + other.array
+                return new_vars
+
+    def __radd__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+        new_vars = deepcopy(self)
+        new_vars.link_var_and_array()
+        if isinstance(other, Number):
+            new_vars.array[:] = other + new_vars.array
+            return new_vars
+        elif isinstance(other, Vars):
+            new_vars.array[:] = other.array + new_vars.array
+            return new_vars
+        elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
+            if isinstance(other, np.ndarray):
+                other = SolverzArray(other)
+            if new_vars.total_size != other.row_size:
+                raise ValueError('Incompatible array size')
+            else:
+                new_vars.array[:] = other.array + new_vars.array
+                return new_vars
+
+    def __sub__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+        new_vars = deepcopy(self)
+        new_vars.link_var_and_array()
+        if isinstance(other, Number):
+            new_vars.array[:] = new_vars.array - other
+            return new_vars
+        elif isinstance(other, Vars):
+            new_vars.array[:] = new_vars.array - other.array
+            return new_vars
+        elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
+            if isinstance(other, np.ndarray):
+                other = SolverzArray(other)
+            if new_vars.total_size != other.row_size:
+                raise ValueError('Incompatible array size')
+            else:
+                new_vars.array[:] = new_vars.array - other.array
+                return new_vars
+
+    def __rsub__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+        new_vars = deepcopy(self)
+        new_vars.link_var_and_array()
+        if isinstance(other, Number):
+            new_vars.array[:] = other - new_vars.array
+            return new_vars
+        elif isinstance(other, Vars):
+            new_vars.array[:] = other.array - new_vars.array
+            return new_vars
+        elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
+            if isinstance(other, np.ndarray):
+                other = SolverzArray(other)
+            if new_vars.total_size != other.row_size:
+                raise ValueError('Incompatible array size')
+            else:
+                new_vars.array[:] = other.array - new_vars.array
+                return new_vars
 
     def __truediv__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+        new_vars = deepcopy(self)
+        new_vars.link_var_and_array()
         if isinstance(other, Number):
-            self.array[:] = self.array / other
-            return self
+            new_vars.array[:] = new_vars.array / other
+            return new_vars
         elif isinstance(other, Vars):
-            self.array[:] = self.array / other.array
-            return self
+            new_vars.array[:] = new_vars.array / other.array
+            return new_vars
         elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
             if isinstance(other, np.ndarray):
                 other = SolverzArray(other)
-            if self.total_size != other.row_size:
+            if new_vars.total_size != other.row_size:
                 raise ValueError('Incompatible array size')
             else:
-                self.array[:] = self.array / other.array
-                return self
+                new_vars.array[:] = new_vars.array / other.array
+                return new_vars
 
     def copy(self) -> Vars:
         return deepcopy(self)
