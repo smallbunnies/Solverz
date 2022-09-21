@@ -1,9 +1,10 @@
 from __future__ import annotations
-import numpy as np
-from numbers import Number
-import numpy.lib.mixins
-from typing import Union
+
 from functools import reduce
+from numbers import Number
+from typing import Union
+
+import numpy as np
 
 Np_Mapping = {}
 

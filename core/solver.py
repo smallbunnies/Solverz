@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
-
-from eqn import Equations
-from var import Vars
 from numpy import abs, max, linalg
+
+from .equations import Equations
+from .variables import Vars
 
 
 def inv(mat: np.ndarray):

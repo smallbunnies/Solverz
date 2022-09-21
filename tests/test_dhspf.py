@@ -1,13 +1,14 @@
-from param import Param
 import pandas as pd
-import numpy as np
-from eqn import Eqn, Equations
-from var import Var, Vars
-from miscellaneous import *
-from routine import Routine
-from solver import *
 
-sys_df = pd.read_excel('4node3pipe.xlsx',
+from core.eqn import Eqn
+from core.miscellaneous import *
+from core.param import Param
+from core.routine import Routine
+from core.solver import *
+from core.var import Var
+from core.variables import Vars
+
+sys_df = pd.read_excel('../instances/4node3pipe.xlsx',
                        sheet_name=None,
                        engine='openpyxl',
                        )

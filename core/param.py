@@ -1,6 +1,8 @@
-from solverz_array import SolverzArray
-from typing import Callable, Iterable, List, Optional, Tuple, Type, Union
+from typing import Optional, Union
+
 import numpy as np
+
+from .solverz_array import SolverzArray
 
 
 class Param:

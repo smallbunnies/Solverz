@@ -1,3 +1,7 @@
 /.idea
 /__pycache__
 *.xlsx
+/tests/.pytest_cache/
+/.pytest_cache/
+/core/__pycache__
+/tests/__pycache__

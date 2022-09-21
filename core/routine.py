@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from eqn import Eqn, Equations
-from var import Var, Vars
-from typing import List, Union, Callable, Optional
-from solverz_array import SolverzArray
-from solver import nr_method
+from typing import List, Union, Callable
+
+from .equations import Equations
+from .solver import nr_method
+from .var import Var
+from .variables import Vars
 
 
 class Routine:

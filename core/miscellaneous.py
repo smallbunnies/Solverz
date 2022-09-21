@@ -1,5 +1,6 @@
 import numpy as np
-from solverz_array import SolverzArray
+
+from .solverz_array import SolverzArray
 
 
 def derive_incidence_matrix(f_node: np.ndarray,

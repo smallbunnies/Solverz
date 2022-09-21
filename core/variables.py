@@ -1,43 +1,13 @@
 from __future__ import annotations
-from solverz_array import SolverzArray
-import numpy as np
-from typing import Optional, Union, List, Dict
-from numbers import Number
+
 from copy import deepcopy
+from numbers import Number
+from typing import Optional, Union, List, Dict
 
+import numpy as np
 
-class Var:
-
-    def __init__(self,
-                 name: str,
-                 unit: Optional[str] = None
-                 ):
-        self.name = name
-        self.unit = unit
-        self.__v = None
-        self.initialized = False
-        self.linked = False  # if self.__v is a view of some array
-
-    @property
-    def v(self) -> SolverzArray:
-        return self.__v
-
-    @v.setter
-    def v(self, value: Union[SolverzArray, np.ndarray, list]):
-
-        if not self.initialized:
-            self.initialized = True
-
-        if isinstance(value, np.ndarray) or isinstance(value, list):
-            self.__v = SolverzArray(value)
-        else:
-            self.__v = value
-
-    def link_external(self):
-        pass
-
-    def __repr__(self):
-        return f"Var: {self.name} value: {np.transpose(self.v)}"
+from .solverz_array import SolverzArray
+from .var import Var
 
 
 class Vars:
@@ -56,8 +26,8 @@ class Vars:
         for var_ in self.VARS:
             self.__v[var_.name] = var_.v
             self.__size[var_.name] = var_.v.row_size
-            self.__a[var_.name] = [temp, temp+self.__size[var_.name]-1]
-            temp = temp+self.__size[var_.name]
+            self.__a[var_.name] = [temp, temp + self.__size[var_.name] - 1]
+            temp = temp + self.__size[var_.name]
 
         self.array = np.zeros((self.total_size, 1))
         self.link_var_and_array()
@@ -80,8 +50,8 @@ class Vars:
 
     def link_var_and_array(self):
         for var_name in self.size:
-            self.array[self.a[var_name][0]:self.a[var_name][-1]+1] = self.v[var_name].array
-            self.v[var_name].array = self.array[self.a[var_name][0]:self.a[var_name][-1]+1]
+            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1] = self.v[var_name].array
+            self.v[var_name].array = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1]
 
     def __getitem__(self, item):
         return self.v[item]
