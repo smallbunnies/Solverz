@@ -11,6 +11,7 @@ class Param:
                  name: str,
                  unit: Optional[str] = None,
                  info: Optional[str] = None,
+                 value: Union[SolverzArray, np.ndarray, list] = None,
                  trigger_able=False,
                  trigger=None,
                  trigger_fun=None,
@@ -22,6 +23,7 @@ class Param:
         self.trigger_able = False
         self.trigger = None
         self.trigger_fun = None
+        self.v = value
 
     @property
     def v(self):
@@ -36,4 +38,4 @@ class Param:
             self.__v = value
 
     def __repr__(self):
-        return f"Param: {self.name} value: {np.transpose(self.v)}"
+        return f"Param: {self.name} value: {self.v}"

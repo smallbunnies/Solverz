@@ -30,16 +30,17 @@ class Eqn:
 
         self.EQN = sympify(self.e_str, locals=Sympify_Mapping)
 
-        temp_sympify_mapping = deepcopy(Sympify_Mapping)
-        for symbol in self.EQN.free_symbols:
-            # commutative=False and real=True are inconsistent assumptions
-            if self.commutative:
-                temp_sympify_mapping[symbol.name] = symbols(symbol.name, commutative=self.commutative, real=True)
-            else:
+        # commutative=False and real=True are inconsistent assumptions
+        if self.commutative:
+            temp_sympify_mapping = dict()
+            for symbol in self.EQN.free_symbols:
+                temp_sympify_mapping[symbol.name] = symbols(symbol.name, real=True)
+        else:
+            temp_sympify_mapping = deepcopy(Sympify_Mapping)
+            for symbol in self.EQN.free_symbols:
                 temp_sympify_mapping[symbol.name] = symbols(symbol.name, commutative=self.commutative)
 
-        self.EQN = sympify(self.e_str, locals=temp_sympify_mapping)
-
+        self.EQN = sympify(self.e_str, temp_sympify_mapping)
         self.SYMBOLS: List[Symbol] = list(self.EQN.free_symbols)
         self.NUM_EQN: Callable = lambdify(self.SYMBOLS, self.EQN, [Lambdify_Mapping, 'numpy'])
 
@@ -55,5 +56,3 @@ class Eqn:
 
     def __repr__(self):
         return f"Equation: {self.name}"
-
-

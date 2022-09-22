@@ -166,11 +166,11 @@ class Equations:
                 if var_.name in self.eqn_diffs[eqn_]:
                     args = self.__obtain_eqn_args(y, self.eqn_diffs[eqn_][var_.name])
                     temp1 = SolverzArray(self.eval_diffs(eqn_, var_.name, *args))
-                    if temp1.column_size > 1 and temp1.row_size > 1:
-                        #  matrix
+                    if temp1.column_size > 1:
+                        #  matrix or row vector
                         gy = [*gy, (eqn_, var_.name, np.asarray(temp1))]
                     elif temp1.column_size == 1 and temp1.row_size > 1:
-                        # vector
+                        # column vector
                         gy = [*gy, (eqn_, var_.name, np.diag(temp1))]
                     else:
                         # [number]

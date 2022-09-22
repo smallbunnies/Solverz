@@ -13,13 +13,15 @@ class Var:
 
     def __init__(self,
                  name: str,
-                 unit: Optional[str] = None
+                 unit: Optional[str] = None,
+                 value: Union[SolverzArray, np.ndarray, list] = None
                  ):
         self.name = name
         self.unit = unit
         self.__v = None
         self.initialized = False
         self.linked = False  # if self.__v is a view of some array
+        self.v = value
 
     @property
     def v(self) -> SolverzArray:
@@ -40,7 +42,7 @@ class Var:
         pass
 
     def __repr__(self):
-        return f"Var: {self.name} value: {np.transpose(self.v)}"
+        return f"Var: {self.name} value: {self.v}"
 
 
 

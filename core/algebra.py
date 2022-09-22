@@ -1,4 +1,4 @@
-from sympy import Function, Mul
+from sympy import Function, Mul, sign
 
 Sympify_Mapping = {}
 
@@ -15,6 +15,7 @@ def implements_sympify(symbolic_func: str):
 
 @implements_sympify('Mat_Mul')
 class Mat_Mul(Function):
+    is_commutative = False
 
     def fdiff(self, argindex=1):
 
@@ -26,6 +27,20 @@ class Mat_Mul(Function):
 
 @implements_sympify('Diagonal')
 class Diagonal(Function):
+    is_commutative = False
 
     def fdiff(self, argindex=1):
         return 1  # the 1 also means Identity matrix here
+
+
+@implements_sympify('Abs')
+class Abs(Function):
+    is_commutative = False
+
+    def fdiff(self, argindex=1):
+        return Diagonal(sign(*self.args))  # the 1 also means Identity matrix here
+
+
+@implements_sympify('sign')
+class sign(Function):
+    is_commutative = False
