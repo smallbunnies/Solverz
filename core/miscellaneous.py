@@ -96,7 +96,7 @@ def derive_dhs_param_var(file: str):
     phi = Var(name='phi')
     phi.v = np.array(sys_df['Node'].phi)
 
-    L = Param(name='L',
+    m_L = Param(name='m_L',
               value=np.transpose(SolverzArray(sys_df['Loop'].loc[0].values.tolist()[2:])))
 
     K = Param(name='K',
@@ -170,7 +170,7 @@ def derive_dhs_param_var(file: str):
     var_dict = {}
     param_dict = {}
 
-    for param in [Cp, L, coeff_lambda, Ta, Vm, V_m_rsi, Vp, V_p_li, V_rs, A_li, A_rsi, V_i, V_l, A_rs, A_l, A_rsl, K, A_sl, A_i, Ts_set, Tr_set, phi_set]:
+    for param in [Cp, L, coeff_lambda, Ta, m_L, Vm, V_m_rsi, Vp, V_p_li, V_rs, A_li, A_rsi, V_i, V_l, A_rs, A_l, A_rsl, K, A_sl, A_i, Ts_set, Tr_set, phi_set]:
         param_dict[param.name] = param
     for var in [Ts, Tr, Tins, Tinr, Touts, Toutr, m, mq, phi]:
         var_dict[var.name] = var

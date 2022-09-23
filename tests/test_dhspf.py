@@ -40,7 +40,7 @@ E7 = Eqn(name='E7',
          commutative=False)
 
 E8 = Eqn(name='E8',
-         e_str='L*Diagonal(K)*Mat_Mul(Diagonal(Abs(m)),m)',
+         e_str='m_L*Diagonal(K)*Mat_Mul(Diagonal(Abs(m)),m)',
          commutative=False)
 
 E9 = Eqn(name='E9',
@@ -79,9 +79,30 @@ E = Equations(name='Pipe Equations',
               eqn=[E1, E2, E3, E4, E5, E6, E7, E8, E9, E10, E11, E12, E13, E14, E15, E16],
               param=list(param_dict.values()))
 
-y = Vars(list(var_dict.values()))
+y0 = Vars(list(var_dict.values()))
 
-# A = E.g(y, 'E1')
-# A = E.g_y(y, eqn=['E8'])
-A = E.j(y)
-# DHSpf = Routine(E, y, tol=1e-8, solver=nr_method)
+y_nr = nr_method(E, y0)
+y_cnr = continuous_nr(E, y0)
+
+sys_df = pd.read_excel('../instances/4node3pipe_bench.xlsx',
+                       sheet_name=None,
+                       engine='openpyxl',
+                       header=None
+                       )
+
+
+def test_nr_method():
+    for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
+        # find nonzero elements
+        idx_nonzero = np.nonzero(y_nr[var_name].array)
+        assert max(abs((y_nr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero]) /
+                       np.asarray(sys_df[var_name])[idx_nonzero])) <= 1e-8
+
+
+def test_cnr_method():
+    for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
+        # find nonzero elements
+        idx_nonzero = np.nonzero(y_cnr[var_name].array)
+        assert max(abs((y_cnr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero]) /
+                       np.asarray(sys_df[var_name])[idx_nonzero])) <= 1e-8
+

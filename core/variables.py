@@ -62,6 +62,9 @@ class Vars:
         else:
             raise ValueError(f'There is no variable {key}!')
 
+    def __array__(self):
+        return self.array
+
     def __repr__(self):
         return f'variables {list(self.v.keys())}'
 
