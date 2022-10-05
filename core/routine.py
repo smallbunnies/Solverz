@@ -33,7 +33,7 @@ class Routine:
         self.method = solver
 
     def run(self):
-        # TODO: SOLVE ME
+
         pass
 
     def __repr__(self):

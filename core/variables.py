@@ -15,15 +15,13 @@ class Vars:
     def __init__(self,
                  var: Union[List[Var], Var]):
         if isinstance(var, Var):
-            self.VARS = [var]
-        else:
-            self.VARS = var
+            var = [var]
 
         self.__v: Dict[str, SolverzArray] = {}
         self.__size: Dict[str, int] = {}
         self.__a: Dict[str, List[int]] = {}
         temp = 0
-        for var_ in self.VARS:
+        for var_ in var:
             self.__v[var_.name] = var_.v
             self.__size[var_.name] = var_.v.row_size
             self.__a[var_.name] = [temp, temp + self.__size[var_.name] - 1]

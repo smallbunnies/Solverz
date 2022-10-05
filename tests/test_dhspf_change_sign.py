@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+from copy import deepcopy
+
 from core.eqn import Eqn
 from core.miscellaneous import derive_dhs_param_var
 from core.param import Param
@@ -9,7 +11,7 @@ from core.solver import *
 from core.var import Var
 from core.variables import Vars
 
-var_dict, param_dict = derive_dhs_param_var('../instances/4node3pipe.xlsx')
+var_dict, param_dict = derive_dhs_param_var('../instances/4node3pipe_change_sign.xlsx')
 
 E1 = Eqn(name='E1',
          e_str='(Tins-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Touts',
@@ -81,10 +83,11 @@ E = Equations(name='Pipe Equations',
 
 y0 = Vars(list(var_dict.values()))
 
-y_nr = nr_method(E, y0)
-y_cnr = continuous_nr(E, y0)
+y_nr = nr_method(deepcopy(E), y0)
 
-sys_df = pd.read_excel('../instances/4node3pipe_bench.xlsx',
+# y_cnr = continuous_nr(deepcopy(E), deepcopy(y0))
+
+sys_df = pd.read_excel('../instances/4node3pipe_change_sign_bench.xlsx',
                        sheet_name=None,
                        engine='openpyxl',
                        header=None
@@ -99,9 +102,10 @@ def test_nr_method():
                        np.asarray(sys_df[var_name])[idx_nonzero])) <= 1e-8
 
 
-def test_cnr_method():
-    for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
-        # find nonzero elements
-        idx_nonzero = np.nonzero(y_cnr[var_name].array)
-        assert max(abs((y_cnr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero]) /
-                       np.asarray(sys_df[var_name])[idx_nonzero])) <= 1e-8
+# def test_cnr_method():
+#     for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
+#         # find nonzero elements
+#         idx_nonzero = np.nonzero(y_cnr[var_name].array)
+#         assert max(abs((y_cnr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero]) /
+#                        np.asarray(sys_df[var_name])[idx_nonzero])) <= 1e-8
+

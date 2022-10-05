@@ -119,6 +119,9 @@ class Equations:
         args = []
         for symbol in eqn.SYMBOLS:
             if symbol.name in self.PARAM:
+                if self.PARAM[symbol.name].triggerable:
+                    self.PARAM[symbol.name].v = self.PARAM[symbol.name].trigger_fun(
+                        y[self.PARAM[symbol.name].trigger_var])
                 args = [*args, self.PARAM[symbol.name].v]
             elif symbol.name in y.v:
                 args = [*args, y[symbol.name]]
@@ -144,7 +147,7 @@ class Equations:
             args = self.__obtain_eqn_args(y, self.EQNs[eqn])
             return self.eval(eqn, *args)
 
-    def g_y(self, y: Vars, eqn: List[str] = None, var: List[Var] = None) -> List[Tuple[str, str, np.ndarray]]:
+    def g_y(self, y: Vars, eqn: List[str] = None, var: List[str] = None) -> List[Tuple[str, str, np.ndarray]]:
         """
         generate Jacobian matrices of Eqn object with respect to var object
         :param y:
@@ -155,26 +158,25 @@ class Equations:
         if not eqn:
             eqn = list(self.EQNs.keys())
         if not var:
-            var = y.VARS
+            var = list(y.v.keys())
 
         gy: List[Tuple[str, str, np.ndarray]] = []
         # size: Dict[str, Dict[str, Number]] = dict()
         for eqn_ in eqn:
-            max_row_size = 0
             for var_ in var:
                 args = []
-                if var_.name in self.eqn_diffs[eqn_]:
-                    args = self.__obtain_eqn_args(y, self.eqn_diffs[eqn_][var_.name])
-                    temp1 = SolverzArray(self.eval_diffs(eqn_, var_.name, *args))
+                if var_ in self.eqn_diffs[eqn_]:
+                    args = self.__obtain_eqn_args(y, self.eqn_diffs[eqn_][var_])
+                    temp1 = SolverzArray(self.eval_diffs(eqn_, var_, *args))
                     if temp1.column_size > 1:
                         #  matrix or row vector
-                        gy = [*gy, (eqn_, var_.name, np.asarray(temp1))]
+                        gy = [*gy, (eqn_, var_, np.asarray(temp1))]
                     elif temp1.column_size == 1 and temp1.row_size > 1:
                         # column vector
-                        gy = [*gy, (eqn_, var_.name, np.diag(temp1))]
+                        gy = [*gy, (eqn_, var_, np.diag(temp1))]
                     else:
                         # [number]
-                        gy = [*gy, (eqn_, var_.name, np.asarray(temp1) * np.identity(y.size[var_.name]))]
+                        gy = [*gy, (eqn_, var_, np.asarray(temp1) * np.identity(y.size[var_]))]
         return gy
 
     def j(self, y: Vars) -> np.ndarray:
@@ -187,18 +189,6 @@ class Equations:
             j[self.a[j_[0]][0]:(self.a[j_[0]][-1] + 1), y.a[j_[1]][0]:(y.a[j_[1]][-1] + 1)] = j_[2]
 
         return j
-
-    def add(self,
-            eqn: Union[list, str, Eqn] = None,
-            variable: Var = None,
-            parameter: Param = None):
-        # TODO:  check vars/params with the same names
-        self.is_param_defined()
-        pass
-
-    def __add__(self, other):
-        # TODO OR NOT TODO. THIS IS A QUESTION.
-        pass
 
     def __repr__(self):
         if not self.eqn_size:

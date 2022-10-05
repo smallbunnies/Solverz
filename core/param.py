@@ -2,7 +2,10 @@ from typing import Optional, Union
 
 import numpy as np
 
+from typing import Callable
+
 from .solverz_array import SolverzArray
+from .var import Var
 
 
 class Param:
@@ -12,17 +15,16 @@ class Param:
                  unit: Optional[str] = None,
                  info: Optional[str] = None,
                  value: Union[SolverzArray, np.ndarray, list] = None,
-                 trigger_able=False,
-                 trigger=None,
-                 trigger_fun=None,
+                 triggerable: bool = False,
+                 trigger_var: str = None,
+                 trigger_fun: Callable = None,
                  ):
         self.name = name
         self.unit = unit
         self.info = info
-        self.__v = None
-        self.trigger_able = False
-        self.trigger = None
-        self.trigger_fun = None
+        self.triggerable = triggerable
+        self.trigger_var = trigger_var
+        self.trigger_fun = trigger_fun
         self.v = value
 
     @property

@@ -46,7 +46,7 @@ class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
         return self.array.shape[1]
 
     def __repr__(self):
-        return f"PySAS\n{self.array.__repr__()}"
+        return f"Solverz\n{self.array.__repr__()}"
         # return f"{self.__class__.__name__}: {self.dtype} ({self.row_size}, {self.column_size})"
 
     def __getitem__(self, item):
