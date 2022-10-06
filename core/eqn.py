@@ -44,13 +44,6 @@ class Eqn:
         self.SYMBOLS: List[Symbol] = list(self.EQN.free_symbols)
         self.NUM_EQN: Callable = lambdify(self.SYMBOLS, self.EQN, [Lambdify_Mapping, 'numpy'])
 
-        # self.check_if_var_and_param_defined()
-
-    def check_if_var_and_param_defined(self):
-        for symbol in list(self.free_symbols):
-            if symbol.name not in self.__y and symbol.name not in self.PARAM:
-                warnings.warn(f'{symbol.name} not defined')
-
     def eval(self, *args: Union[SolverzArray, np.ndarray]) -> np.ndarray:
         return np.asarray(self.NUM_EQN(*args))
 

@@ -18,14 +18,14 @@ class Vars:
             var = [var]
 
         self.__v: Dict[str, SolverzArray] = {}
-        self.__size: Dict[str, int] = {}
+        self.__var_size: Dict[str, int] = {}
         self.__a: Dict[str, List[int]] = {}
         temp = 0
         for var_ in var:
             self.__v[var_.name] = var_.v
-            self.__size[var_.name] = var_.v.row_size
-            self.__a[var_.name] = [temp, temp + self.__size[var_.name] - 1]
-            temp = temp + self.__size[var_.name]
+            self.__var_size[var_.name] = var_.v.row_size
+            self.__a[var_.name] = [temp, temp + self.__var_size[var_.name] - 1]
+            temp = temp + self.__var_size[var_.name]
 
         self.array = np.zeros((self.total_size, 1))
         self.link_var_and_array()
@@ -35,8 +35,8 @@ class Vars:
         return self.__v
 
     @property
-    def size(self):
-        return self.__size
+    def var_size(self):
+        return self.__var_size
 
     @property
     def a(self):
@@ -44,10 +44,10 @@ class Vars:
 
     @property
     def total_size(self):
-        return np.sum(list(self.__size.values()))
+        return np.sum(list(self.__var_size.values()))
 
     def link_var_and_array(self):
-        for var_name in self.size:
+        for var_name in self.var_size.keys():
             self.array[self.a[var_name][0]:self.a[var_name][-1] + 1] = self.v[var_name].array
             self.v[var_name].array = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1]
 

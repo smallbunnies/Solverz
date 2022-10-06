@@ -28,9 +28,8 @@ class Equations:
         self.__eqn_diffs: Dict[str, Dict[str, Eqn]] = dict()
         self.SYMBOLS: Dict[str, Symbol] = dict()
         self.__a: Dict[str, List[int]] = dict()  # equation address
-        self.__size: Dict[str, int] = dict()  # equation size
-        self.__total_size: int = 0
-        self.__var_size: int = 0
+        self.__eqn_size: Dict[str, int] = dict()  # equation size
+        self.__var_size: int = 0  # potential equation size
 
         if isinstance(eqn, Eqn):
             eqn = [eqn]
@@ -74,7 +73,7 @@ class Equations:
 
     @property
     def size(self):
-        return self.__size
+        return self.__eqn_size
 
     @property
     def eqn_size(self):
@@ -88,12 +87,9 @@ class Equations:
     def var_size(self, value: int):
         self.__var_size = value
 
-    def is_param_defined(self, param: Union[str, Param]) -> bool:
-        if isinstance(param, str):
-            pname = param
-        else:
-            pname = param.name
-        if pname in self.SYMBOLS:
+    def is_param_defined(self, param: str) -> bool:
+
+        if param in self.SYMBOLS:
             return True
         else:
             return False
@@ -107,15 +103,28 @@ class Equations:
             self.a[eqn_name] = [temp, temp + self.g(y, eqn_name).row_size - 1]
             temp = temp + self.g(y, eqn_name).row_size
             self.size[eqn_name] = self.g(y, eqn_name).row_size
-        self.var_size = y.array.shape[0]
+        self.var_size = y.total_size
 
     def eval(self, eqn_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
+        """
+        Evaluate equations
+        :param eqn_name:
+        :param args:
+        :return:
+        """
         return SolverzArray(self.EQNs[eqn_name].NUM_EQN(*args))
 
     def eval_diffs(self, eqn_name: str, var_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
+        """
+        Evaluate derivative of equations
+        :param eqn_name:
+        :param var_name:
+        :param args:
+        :return:
+        """
         return SolverzArray(self.eqn_diffs[eqn_name][var_name].NUM_EQN(*args))
 
-    def __obtain_eqn_args(self, y: Vars, eqn: Eqn):
+    def __obtain_eqn_args(self, y: Vars, eqn: Eqn) -> List[SolverzArray]:
         args = []
         for symbol in eqn.SYMBOLS:
             if symbol.name in self.PARAM:
@@ -153,7 +162,7 @@ class Equations:
         :param y:
         :param eqn:
         :param var:
-        :return:
+        :return: List[Tuple[Equation_name, var_name, np.ndarray]]
         """
         if not eqn:
             eqn = list(self.EQNs.keys())
@@ -161,22 +170,21 @@ class Equations:
             var = list(y.v.keys())
 
         gy: List[Tuple[str, str, np.ndarray]] = []
-        # size: Dict[str, Dict[str, Number]] = dict()
-        for eqn_ in eqn:
-            for var_ in var:
-                args = []
-                if var_ in self.eqn_diffs[eqn_]:
-                    args = self.__obtain_eqn_args(y, self.eqn_diffs[eqn_][var_])
-                    temp1 = SolverzArray(self.eval_diffs(eqn_, var_, *args))
-                    if temp1.column_size > 1:
+
+        for eqn_name in eqn:
+            for var_name in var:
+                if var_name in self.eqn_diffs[eqn_name]:
+                    args = self.__obtain_eqn_args(y, self.eqn_diffs[eqn_name][var_name])
+                    temp = SolverzArray(self.eval_diffs(eqn_name, var_name, *args))
+                    if temp.column_size > 1:
                         #  matrix or row vector
-                        gy = [*gy, (eqn_, var_, np.asarray(temp1))]
-                    elif temp1.column_size == 1 and temp1.row_size > 1:
+                        gy = [*gy, (eqn_name, var_name, np.asarray(temp))]
+                    elif temp.column_size == 1 and temp.row_size > 1:
                         # column vector
-                        gy = [*gy, (eqn_, var_, np.diag(temp1))]
+                        gy = [*gy, (eqn_name, var_name, np.diag(temp))]
                     else:
                         # [number]
-                        gy = [*gy, (eqn_, var_, np.asarray(temp1) * np.identity(y.size[var_]))]
+                        gy = [*gy, (eqn_name, var_name, np.asarray(temp) * np.identity(y.var_size[var_name]))]
         return gy
 
     def j(self, y: Vars) -> np.ndarray:
@@ -185,8 +193,8 @@ class Equations:
         gy = self.g_y(y)
         j = np.zeros((self.eqn_size, y.total_size))
 
-        for j_ in gy:
-            j[self.a[j_[0]][0]:(self.a[j_[0]][-1] + 1), y.a[j_[1]][0]:(y.a[j_[1]][-1] + 1)] = j_[2]
+        for gy_tuple in gy:
+            j[self.a[gy_tuple[0]][0]:(self.a[gy_tuple[0]][-1] + 1), y.a[gy_tuple[1]][0]:(y.a[gy_tuple[1]][-1] + 1)] = gy_tuple[2]
 
         return j
 

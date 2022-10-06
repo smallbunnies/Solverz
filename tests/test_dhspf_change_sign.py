@@ -83,7 +83,7 @@ E = Equations(name='Pipe Equations',
 
 y0 = Vars(list(var_dict.values()))
 
-y_nr = nr_method(deepcopy(E), y0)
+y_nr = nr_method(E, y0)
 
 # y_cnr = continuous_nr(deepcopy(E), deepcopy(y0))
 
