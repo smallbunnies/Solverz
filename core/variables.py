@@ -7,7 +7,7 @@ from typing import Optional, Union, List, Dict
 import numpy as np
 
 from .solverz_array import SolverzArray
-from .var import Var
+from .var import Var, TimeVar
 
 
 class Vars:
@@ -182,3 +182,28 @@ class Vars:
 
     def copy(self) -> Vars:
         return deepcopy(self)
+
+
+class TimeVars(Vars):
+
+    def __init__(self,
+                 var: Union[List[Var], Var]
+                 ):
+        super().__init__(var)
+
+    def __getitem__(self, item):
+        """
+
+        :param item:
+        :return: Time series frame, a Vars object
+        """
+        pass
+
+    def __setitem__(self, key, value):
+        """
+        assign the Vars object to time series frame
+        :param key:
+        :param value:
+        :return: none
+        """
+        pass

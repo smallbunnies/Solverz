@@ -4,6 +4,8 @@ import numpy as np
 
 from typing import Callable
 
+from numbers import Number
+
 from .solverz_array import SolverzArray
 from .var import Var
 
@@ -32,9 +34,9 @@ class Param:
         return self.__v
 
     @v.setter
-    def v(self, value: Union[SolverzArray, np.ndarray, list]):
+    def v(self, value: Union[SolverzArray, np.ndarray, list, Number]):
 
-        if isinstance(value, np.ndarray) or isinstance(value, list):
+        if isinstance(value, np.ndarray) or isinstance(value, list) or isinstance(value, Number):
             self.__v = SolverzArray(value)
         else:
             self.__v = value

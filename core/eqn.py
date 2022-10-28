@@ -47,5 +47,82 @@ class Eqn:
     def eval(self, *args: Union[SolverzArray, np.ndarray]) -> np.ndarray:
         return np.asarray(self.NUM_EQN(*args))
 
+    def diff(self, var: str):
+        """"""
+        pass
+
     def __repr__(self):
         return f"Equation: {self.name}"
+
+
+class Ode(Eqn):
+    """
+    The class of ordinary differential equations
+    """
+
+    def __init__(self,
+                 name: Union[str],
+                 e_str: Union[str],
+                 diff_var: str,
+                 commutative: Union[bool] = True):
+        super().__init__(name, e_str, commutative)
+        self.diff_var = diff_var
+
+    def discretize(self,
+                   scheme: str,
+                   param: Dict[str, Param] = None):
+        """
+
+        :param scheme:
+        :param param: list of parameters in the Ode
+        :return:
+        """
+
+        sym_scheme = sympify(scheme)
+
+        sym_diff_var = None
+        for symbol in self.SYMBOLS:
+            if self.diff_var == symbol.name:
+                sym_diff_var = symbol
+        if not sym_diff_var:
+            sym_diff_var = symbols(self.diff_var, commutative=self.commutative)
+
+        fx0t0 = self.EQN
+        for symbol in self.SYMBOLS:
+            if param:
+                if symbol.name not in param:
+                    fx0t0 = fx0t0.subs(symbol, symbols(symbol.name + '0', commutative=symbol.is_commutative))
+            else:
+                fx0t0 = fx0t0.subs(symbol, symbols(symbol.name + '0', commutative=symbol.is_commutative))
+
+        discretized_ode = sym_scheme.subs([(sympify('f(x,t)'), self.EQN),
+                                           (symbols('x'), sym_diff_var),
+                                           (sympify('f(x0,t0)'), fx0t0),
+                                           (symbols('x0'), symbols(sym_diff_var.name + '0',
+                                                                   commutative=sym_diff_var.is_commutative))])
+
+        # Check if the scheme introduces some new parameters like dt, etc.
+        for symbol in discretized_ode.free_symbols:
+            if param:
+                if symbol not in self.EQN.free_symbols and symbol not in fx0t0.free_symbols and symbol.name not in param and \
+                        symbol != sym_diff_var and symbol != symbols(sym_diff_var.name + '0',
+                                                                     commutative=sym_diff_var.is_commutative):
+                    param[symbol.name] = Param(symbol.name)
+            else:
+                if symbol not in self.EQN.free_symbols and symbol not in fx0t0.free_symbols and \
+                        symbol != sym_diff_var and symbol != symbols(sym_diff_var.name + '0',
+                                                                     commutative=sym_diff_var.is_commutative):
+                    param = dict()
+                    param[symbol.name] = Param(symbol.name)
+
+        return param, Eqn('d_' + self.name, e_str=discretized_ode.__str__(), commutative=self.commutative)
+
+    def __repr__(self):
+        return f"Ode: {self.name}"
+
+
+class Pde(Eqn):
+    """
+    The class of partial differential equations
+    """
+    pass

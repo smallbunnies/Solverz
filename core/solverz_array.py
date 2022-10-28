@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import reduce
 from numbers import Number
-from typing import Union
+from typing import Union, Tuple
 
 import numpy as np
 
@@ -12,7 +12,7 @@ Np_Mapping = {}
 class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __init__(self,
-                 array: Union[list, np.ndarray, float, int, SolverzArray],
+                 array: Union[list, np.ndarray, Number, SolverzArray],
                  dtype='float'):
 
         if isinstance(array, list):
@@ -21,7 +21,7 @@ class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
         elif isinstance(array, np.ndarray):
             self.array = array
             self.dtype = array.dtype.name
-        elif isinstance(array, float) or isinstance(array, int):
+        elif isinstance(array, Number):
             self.dtype = dtype
             self.array = np.array([array])
         elif isinstance(array, SolverzArray):
@@ -161,3 +161,7 @@ def mat_multiply(*args: Union[SolverzArray, np.ndarray, list]):
 
 
 Lambdify_Mapping = {'Mat_Mul': mat_multiply, 'Diagonal': np.diag}
+
+
+def zeros(shape: Tuple[int, int]) -> SolverzArray:
+    return SolverzArray(np.zeros(shape))

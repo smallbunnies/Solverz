@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 from numpy import abs, max, min, linalg, sum, sqrt
+import sympy as sp
 
 from .equations import Equations
-from .variables import Vars
+from .variables import Vars, TimeVar
+from .var import Var
 from .solverz_array import SolverzArray
 
 
@@ -37,7 +39,7 @@ def continuous_nr(eqn: Equations,
     # atol and rtol can not be too small
     ite = 0
     while max(abs(eqn.g(y))) > tol:
-        ite = ite+1
+        ite = ite + 1
         # TODO: output iteration numbers
         err = 2
         while err > 1:
@@ -56,5 +58,26 @@ def continuous_nr(eqn: Equations,
             err = sqrt(sum((err_.array.reshape(-1, ) / sc) ** 2) / temp_y.total_size)
             if err < 1:
                 y = temp_y
-            dt = dt * min([fac_max, max([fac_min, fac*(1 / err) ** (1 / 4)])])
+            dt = dt * min([fac_max, max([fac_min, fac * (1 / err) ** (1 / 4)])])
     return y
+
+
+def implicit_trapezoid(f, g, x: TimeVar, y: TimeVar, k=100):
+    xi1 = x[0]  # x_{i+1}
+    xi0 = x[0]  # x_{i}
+    yi1 = y[0]  # y_{i+1}
+    yi0 = y[0]  # y_{i}
+    dt = Var('dt')
+    f_ = xi1 - xi0 - dt / 2 * (f(xi0, yi0) + f(xi1, yi1))
+    g_ = g(xi1, yi1)
+    fg_ = Equations([f_, g_])  # derive numerical and symbolic derivatives
+
+    i = -1
+    while i < k:
+        i = i + 1
+        [xi1, yi1] = nr_method(fg_, [xi1, yi1])
+        fg_.xi0 = xi1  # Update xi0
+        fg_.yi0 = yi1  # Update yi0
+        x[i] = xi1
+        y[i] = yi1
+

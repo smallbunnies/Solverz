@@ -12,7 +12,7 @@ from .param import Param
 from .solverz_array import SolverzArray, Lambdify_Mapping
 from .var import Var
 from .variables import Vars
-from .eqn import Eqn
+from .eqn import Eqn, Ode
 
 
 class Equations:
@@ -52,16 +52,6 @@ class Equations:
                     raise ValueError(f'Parameter {param_.name} not defined in equations!')
                 else:
                     self.PARAM[param_.name] = param_
-
-        # generate derivatives of EQNs
-        for eqn_name, eqn_ in self.EQNs.items():
-            self.__eqn_diffs[eqn_name] = dict()
-            for symbol_ in eqn_.SYMBOLS:
-                if symbol_.name not in self.PARAM:
-                    eqn_diff = eqn_.EQN.diff(symbol_)
-                    self.__eqn_diffs[eqn_name][symbol_.name] = Eqn(name=f'Diff {eqn_name} w.r.t. {symbol_.name}',
-                                                                   e_str=eqn_diff.__repr__(),
-                                                                   commutative=eqn_.commutative)
 
     @property
     def eqn_diffs(self):
@@ -104,6 +94,30 @@ class Equations:
             temp = temp + self.g(y, eqn_name).row_size
             self.size[eqn_name] = self.g(y, eqn_name).row_size
         self.var_size = y.total_size
+
+
+class AE(Equations):
+
+    def __init__(self,
+                 eqn: Union[List[Eqn], Eqn],
+                 name: str = None,
+                 param: Union[List[Param], Param] = None):
+        super().__init__(eqn, name, param)
+
+        # Check if some equation in self.eqn is Eqn.
+        # If not, raise error
+        if any([isinstance(eqn_, Ode) for eqn_ in self.EQNs.values()]):
+            raise ValueError(f'Ode found. This object should be DAE!')
+
+        # generate derivatives of EQNs
+        for eqn_name, eqn_ in self.EQNs.items():
+            self.eqn_diffs[eqn_name] = dict()
+            for symbol_ in eqn_.SYMBOLS:
+                if symbol_.name not in self.PARAM:
+                    eqn_diff = eqn_.EQN.diff(symbol_)
+                    self.eqn_diffs[eqn_name][symbol_.name] = Eqn(name=f'Diff {eqn_name} w.r.t. {symbol_.name}',
+                                                                 e_str=eqn_diff.__repr__(),
+                                                                 commutative=eqn_.commutative)
 
     def eval(self, eqn_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
         """
@@ -194,12 +208,42 @@ class Equations:
         j = np.zeros((self.eqn_size, y.total_size))
 
         for gy_tuple in gy:
-            j[self.a[gy_tuple[0]][0]:(self.a[gy_tuple[0]][-1] + 1), y.a[gy_tuple[1]][0]:(y.a[gy_tuple[1]][-1] + 1)] = gy_tuple[2]
+            j[self.a[gy_tuple[0]][0]:(self.a[gy_tuple[0]][-1] + 1), y.a[gy_tuple[1]][0]:(y.a[gy_tuple[1]][-1] + 1)] = \
+                gy_tuple[2]
 
         return j
 
     def __repr__(self):
         if not self.eqn_size:
-            return f"{self.name} equations with addresses uninitialized"
+            return f"Algebraic equation {self.name} with addresses uninitialized"
         else:
-            return f"{self.name} equations ({self.eqn_size}×{self.var_size})"
+            return f"Algebraic equation {self.name} ({self.eqn_size}×{self.var_size})"
+
+
+class DAE(Equations):
+
+    def __init__(self,
+                 eqn: Union[List[Eqn], Eqn],
+                 name: str = None,
+                 param: Union[List[Param], Param] = None
+                 ):
+        super().__init__(eqn, name, param)
+
+        # Check if some equation in self.eqn is Ode.
+        # If not, raise error
+        if not any([isinstance(eqn_, Ode) for eqn_ in self.EQNs.values()]):
+            raise ValueError(f'No ODE found. Should be AE!')
+
+    def discretize(self, scheme) -> AE:
+        eqns = []
+        for eqn_ in self.EQNs.values():
+            if isinstance(eqn_, Ode):
+                self.PARAM, eqn_ = eqn_.discretize(scheme, self.PARAM)
+                eqns = eqns + [eqn_]
+            else:
+                eqns = eqns + [eqn_]
+
+        return AE(eqns, self.name, list(self.PARAM.values()))
+
+    def __repr__(self):
+        return f"DAE: {self.name}"

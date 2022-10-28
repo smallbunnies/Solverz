@@ -44,3 +44,7 @@ class Abs(Function):
 @implements_sympify('sign')
 class sign(Function):
     is_commutative = False
+
+
+class SolVar(Function):
+    pass
