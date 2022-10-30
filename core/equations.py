@@ -6,6 +6,7 @@ from typing import Union, List, Dict, Callable, Tuple
 
 import numpy as np
 from sympy import sympify, lambdify, symbols, Symbol
+from numbers import Number
 
 from .algebra import Sympify_Mapping
 from .param import Param
@@ -212,6 +213,18 @@ class AE(Equations):
                 gy_tuple[2]
 
         return j
+
+    def update_param(self, *args):
+
+        if len(args) > 1:
+            param: str = args[0]
+            value: Union[SolverzArray, np.ndarray, list, Number] = args[1]
+            self.PARAM[param].v = value
+        elif isinstance(args[0], Vars):
+            vars_: Vars = args[0]
+            for param_name in self.PARAM.keys():
+                if param_name in vars_.v.keys():
+                    self.PARAM[param_name].v = vars_.v[param_name]
 
     def __repr__(self):
         if not self.eqn_size:

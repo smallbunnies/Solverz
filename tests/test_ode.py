@@ -5,28 +5,27 @@ from core.variables import TimeVars
 from core.equations import AE, DAE
 from core.eqn import Eqn, Ode, Pde
 from core.param import Param
+from core.solver import implicit_trapezoid_ode_nonautonomous
+import matplotlib.pyplot as plt
+import pandas as pd
 
-# solve equation dx/dt=-2(x-cos(t)) y(0)=0
+# solve equation dx/dt=-2(x-cos(t)) y(0)=0 with
 
 x = TimeVar('x')
-x.v = [1, 2, 3]
-y = TimeVar('y')
-y.v = [4, 5, 6]
+x.v = [0]
 f = Ode(name='f', e_str='-2*(x-cos(t))', diff_var='x')
-g = Eqn(name='g', e_str='-2*(x-cos(t))')
-# f_ = f.discretize(scheme='x-x0-dt/2*(f(x0)+f(x))')
-scheme = 'x-x0-dt/2*(f(x0,t0)+f(x,t))'
-dt = Param('dt')
-dt.v = [0.1]
-E = DAE([f, f], 'E')
-E1 = AE(g, 'g')
-d_f = f.discretize(scheme)[1]
-E_ = DAE([f, g], 'f+g').discretize(scheme)
-f_ = DAE([f], 'f_').discretize(scheme)
-# TODO: Solve equation dx/dt=-2(x-cos(t)) y(0)=0
 # TODO: Admit more complex schemes
+x = TimeVars(x, length=201)
+x = implicit_trapezoid_ode_nonautonomous(DAE(f, param=Param('t')), x)
 
-x1 = TimeVars([x, y])
-y = x1[0]
-y.array[0:3] = [[100], [200], [300]]
-x1[1] = y
+plt.plot(np.arange(0, 20.1, 0.1), x.array.reshape((-1,)))
+
+df = pd.read_excel('../instances/ode_test.xlsx',
+                   sheet_name=None,
+                   engine='openpyxl',
+                   header=None
+                   )
+
+
+def test_ode():
+    assert max(abs((x.array - np.asarray(df['Sheet1']).reshape(1, -1))).reshape(-1, )) <= 0.0009448126743213381

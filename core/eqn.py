@@ -90,7 +90,8 @@ class Ode(Eqn):
         fx0t0 = self.EQN
         for symbol in self.SYMBOLS:
             if param:
-                if symbol.name not in param:
+                if symbol.name not in param or symbol.name == 't':
+                    # symbol.name == 't' in case of non-autonomous systems
                     fx0t0 = fx0t0.subs(symbol, symbols(symbol.name + '0', commutative=symbol.is_commutative))
             else:
                 fx0t0 = fx0t0.subs(symbol, symbols(symbol.name + '0', commutative=symbol.is_commutative))
@@ -104,14 +105,10 @@ class Ode(Eqn):
         # Check if the scheme introduces some new parameters like dt, etc.
         for symbol in discretized_ode.free_symbols:
             if param:
-                if symbol not in self.EQN.free_symbols and symbol not in fx0t0.free_symbols and symbol.name not in param and \
-                        symbol != sym_diff_var and symbol != symbols(sym_diff_var.name + '0',
-                                                                     commutative=sym_diff_var.is_commutative):
+                if symbol not in self.EQN.free_symbols and symbol.name not in param and symbol != sym_diff_var:
                     param[symbol.name] = Param(symbol.name)
             else:
-                if symbol not in self.EQN.free_symbols and symbol not in fx0t0.free_symbols and \
-                        symbol != sym_diff_var and symbol != symbols(sym_diff_var.name + '0',
-                                                                     commutative=sym_diff_var.is_commutative):
+                if symbol not in self.EQN.free_symbols and symbol != sym_diff_var:
                     param = dict()
                     param[symbol.name] = Param(symbol.name)
 

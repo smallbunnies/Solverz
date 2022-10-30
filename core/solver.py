@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from numpy import abs, max, min, linalg, sum, sqrt
+from numbers import Number
 import sympy as sp
 
 from .equations import AE, DAE
@@ -62,22 +63,51 @@ def continuous_nr(eqn: AE,
     return y
 
 
-def implicit_trapezoid(dae: DAE,
-                       x: TimeVars,
-                       y: TimeVars = None,
-                       k=100):
+def implicit_trapezoid_ode_nonautonomous(dae: DAE,
+                                         x: TimeVars):
+    i = 0
+    t = 0
+    dt = 0.1
+    T = 20
+
     xi1 = x[0]  # x_{i+1}
-    xi0 = x[0]  # x_{i}
-    yi1 = y[0]  # y_{i+1}
-    yi0 = y[0]  # y_{i}
+    xi0 = xi1.derive_alias('0')  # x_{i}
 
     ae = dae.discretize('x-x0-dt/2*(f(x0,t0)+f(x,t))')
 
-    i = -1
-    while i < k:
+    while t < T:
+
+        ae.update_param('dt', dt)
+        ae.update_param('t0', t)
+        ae.update_param('t', t + dt)
+        ae.update_param(xi0)
+
+        xi1 = nr_method(ae, xi1)
+        xi0.array[:] = xi1.array
+        ae.update_param(xi0)
+
+        x[i + 1] = xi1
+        t = t + dt
         i = i + 1
-        [xi1, yi1] = nr_method(ae, [xi1, yi1])
-        ae.xi0 = xi1  # Update xi0
-        ae.yi0 = yi1  # Update yi0
-        x[i] = xi1
-        y[i] = yi1
+
+    return x
+
+# def implicit_trapezoid(dae: DAE,
+#                        x: TimeVars,
+#                        y: TimeVars = None,
+#                        k=100):
+#     xi1 = x[0]  # x_{i+1}
+#     xi0 = x[0]  # x_{i}
+#     yi1 = y[0]  # y_{i+1}
+#     yi0 = y[0]  # y_{i}
+#
+#     ae = dae.discretize('x-x0-dt/2*(f(x0,t0)+f(x,t))')
+#
+#     i = -1
+#     while i < k:
+#         i = i + 1
+#         [xi1, yi1] = nr_method(ae, [xi1, yi1])
+#         ae.xi0 = xi1  # Update xi0
+#         ae.yi0 = yi1  # Update yi0
+#         x[i] = xi1
+#         y[i] = yi1

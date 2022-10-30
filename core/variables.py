@@ -193,6 +193,16 @@ class Vars(VarsBasic):
     def copy(self) -> Vars:
         return deepcopy(self)
 
+    def derive_alias(self, suffix: str):
+        """
+        Derive a new Vars object with names of variables altered
+        :return:
+        """
+        var_ = []
+        for var_name in self.var_size.keys():
+            var_ = [*var_, Var(var_name+suffix, value=self.v[var_name])]
+        return Vars(var_)
+
 
 class TimeVars(VarsBasic):
 
