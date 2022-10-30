@@ -10,16 +10,18 @@ from .solverz_array import SolverzArray
 from .var import Var, TimeVar
 
 
-class Vars:
+class VarsBasic:
 
     def __init__(self,
                  var: Union[List[Var], Var]):
+
         if isinstance(var, Var):
             var = [var]
 
         self.__v: Dict[str, SolverzArray] = {}
         self.__var_size: Dict[str, int] = {}
         self.__a: Dict[str, List[int]] = {}
+
         temp = 0
         for var_ in var:
             self.__v[var_.name] = var_.v
@@ -27,8 +29,13 @@ class Vars:
             self.__a[var_.name] = [temp, temp + self.__var_size[var_.name] - 1]
             temp = temp + self.__var_size[var_.name]
 
+        self.array = None
+
+    def link_var_and_array(self):
         self.array = np.zeros((self.total_size, 1))
-        self.link_var_and_array()
+        for var_name in self.var_size.keys():
+            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1] = self.v[var_name].array
+            self.v[var_name].array = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1]
 
     @property
     def v(self):
@@ -46,10 +53,13 @@ class Vars:
     def total_size(self):
         return np.sum(list(self.__var_size.values()))
 
-    def link_var_and_array(self):
-        for var_name in self.var_size.keys():
-            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1] = self.v[var_name].array
-            self.v[var_name].array = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1]
+
+class Vars(VarsBasic):
+
+    def __init__(self,
+                 var: Union[List[Var], Var]):
+        super().__init__(var)
+        self.link_var_and_array()
 
     def __getitem__(self, item):
         return self.v[item]
@@ -184,26 +194,74 @@ class Vars:
         return deepcopy(self)
 
 
-class TimeVars(Vars):
+class TimeVars(VarsBasic):
 
     def __init__(self,
-                 var: Union[List[Var], Var]
+                 time_var: Union[List[TimeVar], TimeVar],
+                 length: int = 100
                  ):
+
+        if not isinstance(time_var, list):
+            time_var = [time_var]
+
+        var = []
+
+        for time_var_ in time_var:
+            var = [*var, time_var_[0]]
+
         super().__init__(var)
+        self.len = length
+        self.link_var_and_array()
+
+    def link_var_and_array(self):
+        self.array = np.zeros((self.total_size, self.len))
+        for var_name in self.var_size.keys():
+            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, :1] = self.v[var_name].array
+            self.v[var_name].array = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, :]
 
     def __getitem__(self, item):
         """
-
+        case item==str
+        case item==number
+        case item=[str, number]
         :param item:
         :return: Time series frame, a Vars object
         """
-        pass
+        if isinstance(item, int):
+            if item > self.len:
+                raise ValueError(f'Exceed maximum indices of Time-series Variables')
+            else:
+                temp_vars: List[Var] = []
+                for var_name in self.var_size.keys():
+                    temp_vars = [*temp_vars, Var(var_name, value=self.v[var_name].array[:, item])]
+                return Vars(temp_vars)
+        else:
+            # not implemented
+            raise NotImplementedError(f'Unsupported indices')
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: int, value: Vars):
         """
         assign the Vars object to time series frame
         :param key:
         :param value:
         :return: none
         """
+        if isinstance(key, int):
+            if key > self.len:
+                raise ValueError(f'Exceed the maximum index, which is {self.len}')
+            else:
+                for var_name in self.v.keys():
+                    self.v[var_name].array[:, key] = value.v[var_name].array[:, 0].copy()
+        else:
+            raise NotImplementedError(f'Unsupported indices')
+
+    @classmethod
+    def time_vars(cls):
+        """
+        constructor of TimeVars
+        :return:
+        """
         pass
+
+    def __repr__(self):
+        return f'Time-series variables {list(self.v.keys())}'

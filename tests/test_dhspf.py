@@ -7,7 +7,7 @@ from core.param import Param
 from core.routine import Routine
 from core.solver import *
 from core.var import Var
-from core.variables import Vars
+from core.variables import Vars, TimeVars
 from core.equations import AE
 
 var_dict, param_dict = derive_dhs_param_var('../instances/4node3pipe.xlsx')
@@ -77,8 +77,8 @@ E16 = Eqn(name='E16',
           commutative=False)
 
 E = AE(name='Pipe Equations',
-              eqn=[E1, E2, E3, E4, E5, E6, E7, E8, E9, E10, E11, E12, E13, E14, E15, E16],
-              param=list(param_dict.values()))
+       eqn=[E1, E2, E3, E4, E5, E6, E7, E8, E9, E10, E11, E12, E13, E14, E15, E16],
+       param=list(param_dict.values()))
 
 y0 = Vars(list(var_dict.values()))
 

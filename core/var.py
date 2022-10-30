@@ -20,7 +20,6 @@ class Var:
         self.unit = unit
         self.__v = None
         self.initialized = False
-        self.linked = False  # if self.__v is a view of some array
         self.v = value
 
     @property
@@ -71,6 +70,7 @@ class TimeVar(Var):
             self.initialized = True
 
         if value is not None:
+            # TODO: input with column_size > 1
             if isinstance(value, np.ndarray) or isinstance(value, list):
                 temp = SolverzArray(value)
                 if temp.column_size == 1:
@@ -85,3 +85,13 @@ class TimeVar(Var):
                 else:
                     raise ValueError(f'column size of input value > 1')
 
+    def __getitem__(self, item):
+        if isinstance(item, int):
+            if item > self.len:
+                raise ValueError(f'Exceed the maximum index, which is {self.len}')
+            elif not self.initialized:
+                raise NotImplementedError(f'TimeVar {self.name} Uninitialised')
+            else:
+                return Var(self.name, self.unit, self.v[:, item])
+        else:
+            raise NotImplementedError(f'Unsupported indices')

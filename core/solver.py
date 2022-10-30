@@ -4,8 +4,8 @@ import numpy as np
 from numpy import abs, max, min, linalg, sum, sqrt
 import sympy as sp
 
-from .equations import Equations
-from .variables import Vars, TimeVar
+from .equations import AE, DAE
+from .variables import Vars, TimeVars
 from .var import Var
 from .solverz_array import SolverzArray
 
@@ -14,7 +14,7 @@ def inv(mat: np.ndarray):
     return linalg.inv(mat)
 
 
-def nr_method(eqn: Equations,
+def nr_method(eqn: AE,
               y: Vars,
               tol: float = 1e-8):
     df = eqn.g(y)
@@ -24,7 +24,7 @@ def nr_method(eqn: Equations,
     return y
 
 
-def continuous_nr(eqn: Equations,
+def continuous_nr(eqn: AE,
                   y: Vars,
                   tol: float = 1e-8):
     def f(y) -> SolverzArray:
@@ -62,22 +62,22 @@ def continuous_nr(eqn: Equations,
     return y
 
 
-def implicit_trapezoid(f, g, x: TimeVar, y: TimeVar, k=100):
+def implicit_trapezoid(dae: DAE,
+                       x: TimeVars,
+                       y: TimeVars = None,
+                       k=100):
     xi1 = x[0]  # x_{i+1}
     xi0 = x[0]  # x_{i}
     yi1 = y[0]  # y_{i+1}
     yi0 = y[0]  # y_{i}
-    dt = Var('dt')
-    f_ = xi1 - xi0 - dt / 2 * (f(xi0, yi0) + f(xi1, yi1))
-    g_ = g(xi1, yi1)
-    fg_ = Equations([f_, g_])  # derive numerical and symbolic derivatives
+
+    ae = dae.discretize('x-x0-dt/2*(f(x0,t0)+f(x,t))')
 
     i = -1
     while i < k:
         i = i + 1
-        [xi1, yi1] = nr_method(fg_, [xi1, yi1])
-        fg_.xi0 = xi1  # Update xi0
-        fg_.yi0 = yi1  # Update yi0
+        [xi1, yi1] = nr_method(ae, [xi1, yi1])
+        ae.xi0 = xi1  # Update xi0
+        ae.yi0 = yi1  # Update yi0
         x[i] = xi1
         y[i] = yi1
-
