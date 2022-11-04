@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 from numpy import abs, max, min, linalg, sum, sqrt
-from numbers import Number
-import sympy as sp
 
-from .equations import AE, DAE
-from .variables import Vars, TimeVars
-from .var import Var
-from .solverz_array import SolverzArray
 from core.algebra import AliasVar, ComputeParam, F, X, Y
+from .equations import AE, DAE
+from .solverz_array import SolverzArray
+from .variables import Vars, TimeVars
 
 
 def inv(mat: np.ndarray):
@@ -64,9 +61,8 @@ def continuous_nr(eqn: AE,
     return y
 
 
-def implicit_trapezoid_ode_nonautonomous(dae: DAE,
-                                         x: TimeVars):
-
+def implicit_trapezoid_non_autonomous(dae: DAE,
+                                      x: TimeVars):
     X0 = AliasVar(X, '0')
     Y0 = AliasVar(Y, '0')
     t = ComputeParam('t')
@@ -84,10 +80,41 @@ def implicit_trapezoid_ode_nonautonomous(dae: DAE,
     xi0 = xi1.derive_alias('0')  # x_{i}
 
     while t < T:
-
         ae.update_param('dt', dt)
         ae.update_param('t0', t)
         ae.update_param('t', t + dt)
+        ae.update_param(xi0)
+
+        xi1 = nr_method(ae, xi1)
+        xi0.array[:] = xi1.array
+
+        x[i + 1] = xi1
+        t = t + dt
+        i = i + 1
+
+    return x
+
+
+def implicit_trapezoid_autonomous(dae: DAE,
+                                  x: TimeVars):
+    X0 = AliasVar(X, '0')
+    Y0 = AliasVar(Y, '0')
+    t = ComputeParam('t')
+    t0 = ComputeParam('t0')
+    dt = ComputeParam('dt')
+    scheme = X - X0 - dt / 2 * (F(X, Y, t) + F(X0, Y0, t0))
+    ae = dae.discretize(scheme)
+
+    i = 0
+    t = 0
+    dt = 0.1
+    T = 20
+
+    xi1 = x[0]  # x_{i+1}
+    xi0 = xi1.derive_alias('0')  # x_{i}
+
+    while t < T:
+        ae.update_param('dt', dt)
         ae.update_param(xi0)
 
         xi1 = nr_method(ae, xi1)

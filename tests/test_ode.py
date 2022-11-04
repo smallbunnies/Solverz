@@ -5,7 +5,7 @@ from core.variables import TimeVars
 from core.equations import AE, DAE
 from core.eqn import Eqn, Ode, Pde
 from core.param import Param
-from core.solver import implicit_trapezoid_ode_nonautonomous
+from core.solver import implicit_trapezoid_non_autonomous
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -16,7 +16,7 @@ x.v = [0]
 f1 = Ode(name='f', e_str='-2*(x-cos(t))', diff_var='x')
 # TODO: Admit more complex schemes
 x = TimeVars(x, length=201)
-x = implicit_trapezoid_ode_nonautonomous(DAE(f1), x)
+x = implicit_trapezoid_non_autonomous(DAE(f1), x)
 
 plt.plot(np.arange(0, 20.1, 0.1), x.array.reshape((-1,)))
 

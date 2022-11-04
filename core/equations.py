@@ -267,5 +267,13 @@ class DAE(Equations):
 
         return AE(eqns, self.name, list(self.PARAM.values()))
 
+    @property
+    def is_autonomous(self):
+
+        if 't' in self.SYMBOLS.keys():
+            return True
+        else:
+            return False
+
     def __repr__(self):
         return f"DAE: {self.name}"
