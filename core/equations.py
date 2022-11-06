@@ -85,6 +85,19 @@ class Equations:
         else:
             return False
 
+    def update_param(self, *args):
+
+        if len(args) > 1:
+            # Tuple or List
+            param: str = args[0]
+            value: Union[SolverzArray, np.ndarray, list, Number] = args[1]
+            self.PARAM[param].v = value
+        elif isinstance(args[0], Vars):
+            vars_: Vars = args[0]
+            for param_name in self.PARAM.keys():
+                if param_name in vars_.v.keys():
+                    self.PARAM[param_name].v = vars_.v[param_name]
+
 
 class AE(Equations):
 
@@ -213,18 +226,6 @@ class AE(Equations):
                 gy_tuple[2]
 
         return j
-
-    def update_param(self, *args):
-
-        if len(args) > 1:
-            param: str = args[0]
-            value: Union[SolverzArray, np.ndarray, list, Number] = args[1]
-            self.PARAM[param].v = value
-        elif isinstance(args[0], Vars):
-            vars_: Vars = args[0]
-            for param_name in self.PARAM.keys():
-                if param_name in vars_.v.keys():
-                    self.PARAM[param_name].v = vars_.v[param_name]
 
     def __setitem__(self, key, value):
         """

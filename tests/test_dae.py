@@ -17,7 +17,7 @@ t = ComputeParam('t')
 t0 = ComputeParam('t0')
 dt = ComputeParam('dt')
 
-scheme = X - X0 + dt / 2 * (F(X, Y, t) + F(X0, Y0, t0))
+scheme = X - X0 - dt / 2 * (F(X, Y, t) + F(X0, Y0, t0))
 f = Ode(name='f', e_str='-x**3+0.5*y**2', diff_var='x')
 g = Eqn(name='g', e_str='x**2+y**2-2')
 dae = DAE([f, g])
