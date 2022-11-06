@@ -85,16 +85,18 @@ class Equations:
         else:
             return False
 
-    def assign_equation_address(self, y: Vars):
-        """
-        ASSIGN ADDRESSES TO EQUATIONS
-        """
-        temp = 0
-        for eqn_name in self.EQNs.keys():
-            self.a[eqn_name] = [temp, temp + self.g(y, eqn_name).row_size - 1]
-            temp = temp + self.g(y, eqn_name).row_size
-            self.size[eqn_name] = self.g(y, eqn_name).row_size
-        self.var_size = y.total_size
+    def update_param(self, *args):
+
+        if len(args) > 1:
+            # Tuple or List
+            param: str = args[0]
+            value: Union[SolverzArray, np.ndarray, list, Number] = args[1]
+            self.PARAM[param].v = value
+        elif isinstance(args[0], Vars):
+            vars_: Vars = args[0]
+            for param_name in self.PARAM.keys():
+                if param_name in vars_.v.keys():
+                    self.PARAM[param_name].v = vars_.v[param_name]
 
 
 class AE(Equations):
@@ -152,6 +154,17 @@ class AE(Equations):
             else:
                 raise ValueError(f'Cannot find the values of variable {symbol.name}')
         return args
+
+    def assign_equation_address(self, y: Vars):
+        """
+        ASSIGN ADDRESSES TO EQUATIONS
+        """
+        temp = 0
+        for eqn_name in self.EQNs.keys():
+            self.a[eqn_name] = [temp, temp + self.g(y, eqn_name).row_size - 1]
+            temp = temp + self.g(y, eqn_name).row_size
+            self.size[eqn_name] = self.g(y, eqn_name).row_size
+        self.var_size = y.total_size
 
     def g(self, y: Vars, eqn: str = None) -> SolverzArray:
         """
@@ -214,17 +227,14 @@ class AE(Equations):
 
         return j
 
-    def update_param(self, *args):
-
-        if len(args) > 1:
-            param: str = args[0]
-            value: Union[SolverzArray, np.ndarray, list, Number] = args[1]
-            self.PARAM[param].v = value
-        elif isinstance(args[0], Vars):
-            vars_: Vars = args[0]
-            for param_name in self.PARAM.keys():
-                if param_name in vars_.v.keys():
-                    self.PARAM[param_name].v = vars_.v[param_name]
+    def __setitem__(self, key, value):
+        """
+        hai mei xiang hao ke yi yong lai gan ma
+        :param key:
+        :param value:
+        :return:
+        """
+        pass
 
     def __repr__(self):
         if not self.eqn_size:
@@ -257,6 +267,14 @@ class DAE(Equations):
                 eqns = eqns + [eqn_]
 
         return AE(eqns, self.name, list(self.PARAM.values()))
+
+    @property
+    def is_autonomous(self):
+
+        if 't' in self.SYMBOLS.keys():
+            return True
+        else:
+            return False
 
     def __repr__(self):
         return f"DAE: {self.name}"

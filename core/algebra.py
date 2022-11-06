@@ -1,6 +1,69 @@
-from sympy import Function, Mul, sign
+from sympy import Symbol, Function, Mul, sign, Expr, symbols
+from typing import Union
 
 Sympify_Mapping = {}
+
+
+class StateVar(Symbol):
+
+    def __new__(cls, name):
+        return Symbol.__new__(cls, name)
+
+
+class AlgebraVar(Symbol):
+
+    def __new__(cls, name):
+        return Symbol.__new__(cls, name)
+
+
+X = StateVar('X')
+Y = AlgebraVar('Y')
+
+
+class AliasVar(Symbol):
+
+    def __new__(cls, sym: Union[StateVar, AlgebraVar], suffix: str):
+        obj = Symbol.__new__(cls, sym.name + suffix)
+        obj.alias_of = sym.name
+        obj.suffix = suffix
+        return obj
+
+
+class ComputeParam(Symbol):
+
+    def __new__(cls, name):
+        obj = Symbol.__new__(cls, name)
+        return obj
+
+
+class F(Function):
+
+    def __new__(cls, *args, **kwargs):
+        obj = Function.__new__(cls, *args, **kwargs)
+        return obj
+
+
+class G(Function):
+
+    def __new__(cls, *args, **kwargs):
+        obj = Function.__new__(cls, *args, **kwargs)
+        return obj
+
+
+class MyExpr(Expr):
+
+    def _eval_nseries(self, x, n, logx, cdir):
+        pass
+
+    def __new__(cls, *args, **kwargs):
+        pass
+
+
+def new_symbols(names, commutative: bool):
+    if commutative:
+        return symbols(names, real=True)
+    else:
+        return symbols(names, commutative=commutative)
 
 
 def implements_sympify(symbolic_func: str):

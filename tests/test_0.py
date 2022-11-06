@@ -9,14 +9,14 @@ from core.variables import Vars
 from core.equations import AE
 
 e = Eqn(name='e',
-        e_str='x**2-1')
-f = AE(name='f',
+        e_str='X**2-1')
+f = AE(name='F',
        eqn=e)
-x = Var(name='x')
+x = Var(name='X')
 x.v = [2]
 x = Vars([x])
 x = nr_method(f, x)
 
 
 def test_nr_method():
-    assert abs(x['x'] - 1) <= 1e-8
+    assert abs(x['X'] - 1) <= 1e-8

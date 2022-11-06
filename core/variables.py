@@ -245,6 +245,8 @@ class TimeVars(VarsBasic):
                 for var_name in self.var_size.keys():
                     temp_vars = [*temp_vars, Var(var_name, value=self.v[var_name].array[:, item])]
                 return Vars(temp_vars)
+        elif isinstance(item, str):
+            return self.v[item]
         else:
             # not implemented
             raise NotImplementedError(f'Unsupported indices')
@@ -274,4 +276,4 @@ class TimeVars(VarsBasic):
         pass
 
     def __repr__(self):
-        return f'Time-series variables {list(self.v.keys())}'
+        return f'Time-series (size {self.len}) {list(self.v.keys())}'

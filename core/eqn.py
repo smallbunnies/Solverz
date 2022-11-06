@@ -5,9 +5,9 @@ from copy import deepcopy
 from typing import Union, List, Dict, Callable, Tuple
 
 import numpy as np
-from sympy import sympify, lambdify, symbols, Symbol
+from sympy import sympify, lambdify, symbols, Symbol, Expr, preorder_traversal, Basic
 
-from .algebra import Sympify_Mapping
+from .algebra import Sympify_Mapping, F, G, X, Y, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols
 from .param import Param
 from .solverz_array import SolverzArray, Lambdify_Mapping
 from .var import Var
@@ -34,11 +34,11 @@ class Eqn:
         if self.commutative:
             temp_sympify_mapping = dict()
             for symbol in self.EQN.free_symbols:
-                temp_sympify_mapping[symbol.name] = symbols(symbol.name, real=True)
+                temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
         else:
             temp_sympify_mapping = deepcopy(Sympify_Mapping)
             for symbol in self.EQN.free_symbols:
-                temp_sympify_mapping[symbol.name] = symbols(symbol.name, commutative=self.commutative)
+                temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
 
         self.EQN = sympify(self.e_str, temp_sympify_mapping)
         self.SYMBOLS: List[Symbol] = list(self.EQN.free_symbols)
@@ -50,6 +50,9 @@ class Eqn:
     def diff(self, var: str):
         """"""
         pass
+
+    def subs(self, *args, **kwargs):
+        return self.EQN.subs(*args, **kwargs)
 
     def __repr__(self):
         return f"Equation: {self.name}"
@@ -69,50 +72,94 @@ class Ode(Eqn):
         self.diff_var = diff_var
 
     def discretize(self,
-                   scheme: str,
-                   param: Dict[str, Param] = None):
+                   scheme: Basic,
+                   param: Dict[str, Param] = None,
+                   extra_diff_var: List[str] = None):
         """
 
+        :param extra_diff_var: diff_var from other Eqn
         :param scheme:
         :param param: list of parameters in the Ode
         :return:
         """
 
-        sym_scheme = sympify(scheme)
+        if not extra_diff_var:
+            extra_diff_var = []
 
-        sym_diff_var = None
-        for symbol in self.SYMBOLS:
-            if self.diff_var == symbol.name:
-                sym_diff_var = symbol
-        if not sym_diff_var:
-            sym_diff_var = symbols(self.diff_var, commutative=self.commutative)
+        if not param:
+            param = dict()
 
-        fx0t0 = self.EQN
-        for symbol in self.SYMBOLS:
-            if param:
-                if symbol.name not in param or symbol.name == 't':
-                    # symbol.name == 't' in case of non-autonomous systems
-                    fx0t0 = fx0t0.subs(symbol, symbols(symbol.name + '0', commutative=symbol.is_commutative))
-            else:
-                fx0t0 = fx0t0.subs(symbol, symbols(symbol.name + '0', commutative=symbol.is_commutative))
+        funcs: Dict[F, Basic] = dict()  # function set
+        alias: Dict[AliasVar, Symbol] = dict()
+        scheme_elements = preorder_traversal(scheme)
+        for arg in scheme_elements:
+            if isinstance(arg, F):
+                # generate subs dict of FunctionClass F
+                # arg is a Function
+                f_args = arg.args
+                # args of Functions
+                symbol_dict: Dict[Symbol, Basic] = dict()
+                for symbol in self.SYMBOLS:
+                    if symbol.name in [self.diff_var] + extra_diff_var:
+                        # State Variable
+                        symbol_dict[symbol] = self._subs_state_var_in_func_args(f_args[0], symbol)
+                    elif symbol.name == 't':
+                        # Time variable of non-autonomous equations
+                        if 't' not in param.keys():
+                            param['t'] = Param('t')
+                        symbol_dict[symbol] = self._subs_t_in_func_args(f_args[2])
+                    elif symbol.name not in param.keys():
+                        # Algebra Variable
+                        symbol_dict[symbol] = self._subs_algebra_var_in_func_args(f_args[1], symbol)
+                funcs[arg] = self.subs(symbol_dict)
+                scheme_elements.skip()
+                # skip the args of function class
+            elif isinstance(arg, AliasVar):
+                if arg.alias_of == 'X':
+                    alias[arg] = new_symbols(self.diff_var + arg.suffix, commutative=self.commutative)
+                elif arg.alias_of == 'Y':
+                    raise ValueError('Really? Schemes may be wrong.')
 
-        discretized_ode = sym_scheme.subs([(sympify('f(x,t)'), self.EQN),
-                                           (symbols('x'), sym_diff_var),
-                                           (sympify('f(x0,t0)'), fx0t0),
-                                           (symbols('x0'), symbols(sym_diff_var.name + '0',
-                                                                   commutative=sym_diff_var.is_commutative))])
+        scheme = scheme.subs([(key, value) for key, value in funcs.items()])
+        scheme = scheme.subs([(key, value) for key, value in alias.items()])
+        scheme = scheme.subs([(X, new_symbols(self.diff_var, commutative=self.commutative))])
 
-        # Check if the scheme introduces some new parameters like dt, etc.
-        for symbol in discretized_ode.free_symbols:
-            if param:
-                if symbol not in self.EQN.free_symbols and symbol.name not in param and symbol != sym_diff_var:
-                    param[symbol.name] = Param(symbol.name)
-            else:
-                if symbol not in self.EQN.free_symbols and symbol != sym_diff_var:
-                    param = dict()
-                    param[symbol.name] = Param(symbol.name)
+        # Add new Param
+        for symbol in list(scheme.free_symbols):
+            if symbol not in self.SYMBOLS and symbol.name not in param and symbol.name != self.diff_var:
+                param[symbol.name] = Param(symbol.name)
 
-        return param, Eqn('d_' + self.name, e_str=discretized_ode.__str__(), commutative=self.commutative)
+        return param, Eqn('d_' + self.name, e_str=scheme.__str__(), commutative=self.commutative)
+
+    def _subs_state_var_in_func_args(self, expr: Basic, symbol: Symbol):
+        subs_dict: Dict[Union[StateVar, AliasVar, ComputeParam], Symbol] = dict()
+        for symbol_ in list(expr.free_symbols):
+            if isinstance(symbol_, StateVar):
+                subs_dict[symbol_] = symbol
+            elif isinstance(symbol_, AliasVar):
+                subs_dict[symbol_] = new_symbols(symbol.name + symbol_.suffix, commutative=self.commutative)
+            elif isinstance(symbol_, ComputeParam):
+                subs_dict[symbol_] = new_symbols(symbol_.name, commutative=self.commutative)
+        return expr.subs(subs_dict)
+
+    def _subs_t_in_func_args(self, expr: Basic):
+        # symbol=t
+        subs_dict: Dict[Union[ComputeParam], Symbol] = dict()
+        for symbol_ in list(expr.free_symbols):
+            if isinstance(symbol_, ComputeParam):
+                subs_dict[symbol_] = new_symbols(symbol_.name, commutative=self.commutative)
+        return expr.subs(subs_dict)
+
+    def _subs_algebra_var_in_func_args(self, expr: Basic, symbol: Symbol):
+        subs_dict: Dict[Union[AlgebraVar, AliasVar, ComputeParam], Symbol] = dict()
+        for symbol_ in list(expr.free_symbols):
+            if isinstance(symbol_, AlgebraVar):
+                subs_dict[symbol_] = symbol
+            elif isinstance(symbol_, AliasVar):
+                subs_dict[symbol_] = new_symbols(symbol.name + symbol_.suffix, commutative=self.commutative)
+            elif isinstance(symbol_, ComputeParam):
+                subs_dict[symbol_] = new_symbols(symbol_.name, commutative=self.commutative)
+        return expr.subs(subs_dict)
 
     def __repr__(self):
         return f"Ode: {self.name}"

@@ -47,7 +47,7 @@ class SolverzArray(np.lib.mixins.NDArrayOperatorsMixin):
 
     def __repr__(self):
         return f"Solverz\n{self.array.__repr__()}"
-        # return f"{self.__class__.__name__}: {self.dtype} ({self.row_size}, {self.column_size})"
+        # return F"{self.__class__.__name__}: {self.dtype} ({self.row_size}, {self.column_size})"
 
     def __getitem__(self, item):
         """
@@ -124,8 +124,8 @@ def implements(np_function):
 @implements(np.diag)
 def diag(x):
     """
-    Generate diagonal matrix of given vector x
-    :PARAM x: vector
+    Generate diagonal matrix of given vector X
+    :PARAM X: vector
     :return: diagonal matrix
     """
     if x.column_size == 1 or x.row_size == 1:
@@ -137,8 +137,8 @@ def diag(x):
 @implements(np.transpose)
 def transpose(x):
     """
-    Transpose matrix x
-    :PARAM x: vector
+    Transpose matrix X
+    :PARAM X: vector
     :return: The transposed matrix
     """
     return np.transpose(np.asarray(x))
