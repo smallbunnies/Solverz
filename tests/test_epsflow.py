@@ -16,7 +16,7 @@ Gpq = Param(name='Gpq')
 Bpq = Param(name='Bpq')
 
 E1 = Eqn(name='Active power',
-         e_str='-Apq*p+Mat_Mul(Diagonal(Apq*e),Gpq*e-Bpq*F)',
+         e_str='-Apq*p+Mat_Mul(Diagonal(Apq*e),Gpq*e-Bpq*f)',
          commutative=False)
 
 E = Equations(E1,

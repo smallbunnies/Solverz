@@ -14,7 +14,7 @@ import pandas as pd
 x = TimeVar('x')
 x.v = [0]
 f1 = Ode(name='f', e_str='-2*(x-cos(t))', diff_var='x')
-# TODO: Admit more complex schemes
+
 x = TimeVars(x, length=201)
 x = implicit_trapezoid_non_autonomous(DAE(f1), x)
 

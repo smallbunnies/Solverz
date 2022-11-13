@@ -54,6 +54,16 @@ class Equations:
                 else:
                     self.PARAM[param_.name] = param_
 
+        # generate derivatives of EQNs
+        for eqn_name, eqn_ in self.EQNs.items():
+            self.eqn_diffs[eqn_name] = dict()
+            for symbol_ in eqn_.SYMBOLS:
+                if symbol_.name not in self.PARAM:
+                    eqn_diff = eqn_.EQN.diff(symbol_)
+                    self.eqn_diffs[eqn_name][symbol_.name] = Eqn(name=f'Diff {eqn_name} w.r.t. {symbol_.name}',
+                                                                 e_str=eqn_diff.__repr__(),
+                                                                 commutative=eqn_.commutative)
+
     @property
     def eqn_diffs(self):
         return self.__eqn_diffs
@@ -98,6 +108,52 @@ class Equations:
                 if param_name in vars_.v.keys():
                     self.PARAM[param_name].v = vars_.v[param_name]
 
+    def eval(self, eqn_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
+        """
+        Evaluate equations
+        :param eqn_name:
+        :param args:
+        :return:
+        """
+        return SolverzArray(self.EQNs[eqn_name].NUM_EQN(*args))
+
+    def obtain_eqn_args(self, eqn: Eqn, *xys: Vars) -> List[SolverzArray]:
+        """
+        Obtain the args of equations
+        :param eqn:
+        :param xys:
+        :return:
+        """
+        args = []
+        for symbol in eqn.SYMBOLS:
+            value_obtained = False
+            if symbol.name in self.PARAM:
+                if self.PARAM[symbol.name].triggerable:
+                    for y in xys:
+                        if self.PARAM[symbol.name].trigger_var in y.v:
+                            self.PARAM[symbol.name].v = self.PARAM[symbol.name].trigger_fun(
+                                y[self.PARAM[symbol.name].trigger_var])
+                args = [*args, self.PARAM[symbol.name].v]
+                value_obtained = True
+            else:
+                for y in xys:
+                    if symbol.name in y.v:
+                        args = [*args, y[symbol.name]]
+                        value_obtained = True
+            if not value_obtained:
+                raise ValueError(f'Cannot find the values of variable {symbol.name}')
+        return args
+
+    def eval_diffs(self, eqn_name: str, var_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
+        """
+        Evaluate derivative of equations
+        :param eqn_name:
+        :param var_name:
+        :param args:
+        :return:
+        """
+        return SolverzArray(self.eqn_diffs[eqn_name][var_name].NUM_EQN(*args))
+
 
 class AE(Equations):
 
@@ -111,49 +167,6 @@ class AE(Equations):
         # If not, raise error
         if any([isinstance(eqn_, Ode) for eqn_ in self.EQNs.values()]):
             raise ValueError(f'Ode found. This object should be DAE!')
-
-        # generate derivatives of EQNs
-        for eqn_name, eqn_ in self.EQNs.items():
-            self.eqn_diffs[eqn_name] = dict()
-            for symbol_ in eqn_.SYMBOLS:
-                if symbol_.name not in self.PARAM:
-                    eqn_diff = eqn_.EQN.diff(symbol_)
-                    self.eqn_diffs[eqn_name][symbol_.name] = Eqn(name=f'Diff {eqn_name} w.r.t. {symbol_.name}',
-                                                                 e_str=eqn_diff.__repr__(),
-                                                                 commutative=eqn_.commutative)
-
-    def eval(self, eqn_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
-        """
-        Evaluate equations
-        :param eqn_name:
-        :param args:
-        :return:
-        """
-        return SolverzArray(self.EQNs[eqn_name].NUM_EQN(*args))
-
-    def eval_diffs(self, eqn_name: str, var_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
-        """
-        Evaluate derivative of equations
-        :param eqn_name:
-        :param var_name:
-        :param args:
-        :return:
-        """
-        return SolverzArray(self.eqn_diffs[eqn_name][var_name].NUM_EQN(*args))
-
-    def __obtain_eqn_args(self, y: Vars, eqn: Eqn) -> List[SolverzArray]:
-        args = []
-        for symbol in eqn.SYMBOLS:
-            if symbol.name in self.PARAM:
-                if self.PARAM[symbol.name].triggerable:
-                    self.PARAM[symbol.name].v = self.PARAM[symbol.name].trigger_fun(
-                        y[self.PARAM[symbol.name].trigger_var])
-                args = [*args, self.PARAM[symbol.name].v]
-            elif symbol.name in y.v:
-                args = [*args, y[symbol.name]]
-            else:
-                raise ValueError(f'Cannot find the values of variable {symbol.name}')
-        return args
 
     def assign_equation_address(self, y: Vars):
         """
@@ -177,11 +190,11 @@ class AE(Equations):
         if not eqn:
             temp = np.array([])
             for eqn_name, eqn_ in self.EQNs.items():
-                args = self.__obtain_eqn_args(y, eqn_)
+                args = self.obtain_eqn_args(eqn_, y)
                 temp = np.concatenate([temp, np.asarray(self.eval(eqn_name, *args)).reshape(-1, )])
             return SolverzArray(temp)
         else:
-            args = self.__obtain_eqn_args(y, self.EQNs[eqn])
+            args = self.obtain_eqn_args(self.EQNs[eqn], y)
             return self.eval(eqn, *args)
 
     def g_y(self, y: Vars, eqn: List[str] = None, var: List[str] = None) -> List[Tuple[str, str, np.ndarray]]:
@@ -202,7 +215,7 @@ class AE(Equations):
         for eqn_name in eqn:
             for var_name in var:
                 if var_name in self.eqn_diffs[eqn_name]:
-                    args = self.__obtain_eqn_args(y, self.eqn_diffs[eqn_name][var_name])
+                    args = self.obtain_eqn_args(self.eqn_diffs[eqn_name][var_name], y)
                     temp = SolverzArray(self.eval_diffs(eqn_name, var_name, *args))
                     if temp.column_size > 1:
                         #  matrix or row vector
@@ -252,10 +265,199 @@ class DAE(Equations):
                  ):
         super().__init__(eqn, name, param)
 
+        # # dict of f
+        self.f_dict: Dict[str, Eqn] = dict()
+        self.g_dict: Dict[str, Eqn] = dict()
+        self.var_address: Dict[str, List[int]] = dict()
+
+        for eqn_name, eqn_ in self.EQNs.items():
+            if isinstance(eqn_, Ode):
+                self.f_dict[eqn_name] = eqn_
+            elif isinstance(eqn_, Eqn):
+                self.g_dict[eqn_name] = eqn_
+            else:
+                raise ValueError(f'Undefined equation: {eqn_.__class__.__name__}')
+
+        self.state_num: int = 0  # number of state variables
+        self.algebra_num: int = 0  # number of algebraic variables
+
         # Check if some equation in self.eqn is Ode.
         # If not, raise error
-        if not any([isinstance(eqn_, Ode) for eqn_ in self.EQNs.values()]):
-            raise ValueError(f'No ODE found. Should be AE!')
+        if not self.f_dict:
+            raise ValueError(f'No ODE found. You should initialise AE instead!')
+
+    def assign_eqn_var_address(self, *xys: Vars):
+        """
+        ASSIGN ADDRESSES TO EQUATIONS f and g
+        """
+
+        temp = 0
+        for eqn_name in self.f_dict.keys():
+            eqn_size = self.f(eqn_name, *xys).row_size
+            self.a[eqn_name] = [temp, temp + eqn_size - 1]
+            temp = temp + eqn_size
+            self.size[eqn_name] = eqn_size
+
+        self.state_num = temp
+
+        for eqn_name in self.g_dict.keys():
+            eqn_size = self.g(eqn_name, *xys).row_size
+            self.a[eqn_name] = [temp, temp + eqn_size - 1]
+            temp = temp + eqn_size
+            self.size[eqn_name] = eqn_size
+
+        self.algebra_num = temp-self.state_num
+
+        temp = 0
+        for xy in xys:
+            for var_name, a in xy.a.items():
+                if var_name in self.SYMBOLS:
+                    self.var_address[var_name] = [temp + xy.a[var_name][0], xy.a[var_name][-1] + temp]
+                else:
+                    raise ValueError(f"DAE {self.name} has no variable {var_name}")
+            temp = temp + xy.total_size
+
+        self.var_size = temp
+
+    def f(self, *xys) -> SolverzArray:
+        """
+
+        `args` is either:
+          - two arguments, e.g. state vars x, and algebra y
+          - one argument, e.g. state vars x.
+        """
+        eqn = None
+        if isinstance(xys[0], str):
+            eqn = xys[0]
+            xys = xys[1:]
+
+        temp = np.array([])
+        if eqn:
+            if eqn in self.f_dict.keys():
+                args = self.obtain_eqn_args(self.f_dict[eqn], *xys)
+                temp = np.concatenate([temp, np.asarray(self.eval(eqn, *args)).reshape(-1, )])
+                return SolverzArray(temp)
+        else:
+            for eqn_name, eqn_ in self.f_dict.items():
+                args = self.obtain_eqn_args(eqn_, *xys)
+                temp = np.concatenate([temp, np.asarray(self.eval(eqn_name, *args)).reshape(-1, )])
+            return SolverzArray(temp)
+
+    def g(self, *xys) -> SolverzArray:
+        """
+
+        `args` is either:
+          - two arguments, e.g. state vars x, and algebra y
+          - one argument, e.g. state vars y.
+
+        """
+
+        if not self.g_dict:
+            raise ValueError(f'No AE found in {self.name}!')
+
+        eqn = None
+        if isinstance(xys[0], str):
+            eqn = xys[0]
+            xys = xys[1:]
+
+        temp = np.array([])
+        if eqn:
+            if eqn in self.g_dict.keys():
+                args = self.obtain_eqn_args(self.g_dict[eqn], *xys)
+                temp = np.concatenate([temp, np.asarray(self.eval(eqn, *args)).reshape(-1, )])
+                return SolverzArray(temp)
+        else:
+            for eqn_name, eqn_ in self.g_dict.items():
+                args = self.obtain_eqn_args(eqn_, *xys)
+                temp = np.concatenate([temp, np.asarray(self.eval(eqn_name, *args)).reshape(-1, )])
+        return SolverzArray(temp)
+
+    def f_xy(self, *xys: Vars) -> List[Tuple[str, str, np.ndarray]]:
+        """
+        generate partial derivatives of f w.r.t. vars in xys
+        :return: List[Tuple[Equation_name, var_name, np.ndarray]]
+        """
+
+        fx: List[Tuple[str, str, np.ndarray]] = []
+
+        var: List[str] = list()
+        for xy in xys:
+            var = var + list(xy.v.keys())
+
+        for eqn_name in self.f_dict:
+            for var_name in var:
+                for xy in xys:
+                    if var_name in list(xy.v):
+                        if var_name in self.eqn_diffs[eqn_name]:
+                            args = self.obtain_eqn_args(self.eqn_diffs[eqn_name][var_name], *xys)
+                            temp = SolverzArray(self.eval_diffs(eqn_name, var_name, *args))
+                            if temp.column_size > 1:
+                                #  matrix or row vector
+                                fx = [*fx, (eqn_name, var_name, np.asarray(temp))]
+                            elif temp.column_size == 1 and temp.row_size > 1:
+                                # column vector
+                                fx = [*fx, (eqn_name, var_name, np.diag(temp))]
+                            else:
+                                # [number]
+                                fx = [*fx, (eqn_name, var_name, np.asarray(temp) * np.identity(xy.var_size[var_name]))]
+        return fx
+
+    def g_xy(self, *xys: Vars) -> List[Tuple[str, str, np.ndarray]]:
+        """
+        generate partial derivatives of f w.r.t. vars in xys
+        :return: List[Tuple[Equation_name, var_name, np.ndarray]]
+        """
+
+        if not self.g_dict:
+            raise ValueError(f'No AE found in {self.name}!')
+
+        gy: List[Tuple[str, str, np.ndarray]] = []
+
+        var: List[str] = list()
+        for xy in xys:
+            var = var + list(xy.v.keys())
+
+        for eqn_name in self.g_dict:
+            for var_name in var:
+                for xy in xys:
+                    if var_name in list(xy.v):
+                        if var_name in self.eqn_diffs[eqn_name]:
+                            args = self.obtain_eqn_args(self.eqn_diffs[eqn_name][var_name], *xys)
+                            temp = SolverzArray(self.eval_diffs(eqn_name, var_name, *args))
+                            if temp.column_size > 1:
+                                #  matrix or row vector
+                                gy = [*gy, (eqn_name, var_name, np.asarray(temp))]
+                            elif temp.column_size == 1 and temp.row_size > 1:
+                                # column vector
+                                gy = [*gy, (eqn_name, var_name, np.diag(temp))]
+                            else:
+                                # [number]
+                                gy = [*gy, (eqn_name, var_name, np.asarray(temp) * np.identity(xy.var_size[var_name]))]
+        return gy
+
+    def j(self, *xys: Vars) -> np.ndarray:
+        """
+        Derive full or partial Jacobian matrices
+        :param xys:
+        :return:
+        """
+        if not self.eqn_size:
+            self.assign_eqn_var_address(*xys)
+
+        j = np.zeros((self.eqn_size, self.var_size))
+
+        fxy = self.f_xy(*xys)
+        for fxy_tuple in fxy:
+            j[self.a[fxy_tuple[0]][0]:(self.a[fxy_tuple[0]][-1] + 1),
+            self.var_address[fxy_tuple[1]][0]:(self.var_address[fxy_tuple[1]][-1] + 1)] = fxy_tuple[2]
+
+        if self.g_dict:
+            gxy = self.g_xy(*xys)
+            for gxy_tuple in gxy:
+                j[self.a[gxy_tuple[0]][0]:(self.a[gxy_tuple[0]][-1] + 1),
+                self.var_address[gxy_tuple[1]][0]:(self.var_address[gxy_tuple[1]][-1] + 1)] = gxy_tuple[2]
+
+        return j
 
     def discretize(self, scheme) -> AE:
         eqns = []

@@ -125,3 +125,110 @@ def implicit_trapezoid_autonomous(dae: DAE,
         i = i + 1
 
     return x
+
+
+def sirk_ode(ode: DAE,
+             x: TimeVars,
+             T,
+             dt):
+
+    r = 0.572816
+    r21 = -2.34199281090742
+    r31 = -0.0273333497228473
+    r32 = 0.213811780334800
+    r41 = -0.259083734468120
+    r42 = -0.190595825778459
+    r43 = -0.228030947223683
+    a21 = 1.145632
+    a31 = 0.520920769237066
+    a32 = 0.134294177986617
+    a41 = 0.520920769237066
+    a42 = 0.134294177986617
+    a43 = 0
+    b1 = 0.324534692057929
+    b2 = 0.0490865790926829
+    b3 = 0
+    b4 = 0.626378728849388
+
+    # a21 = 1
+    # a31 = 1
+    # a32 = 0
+    # r21 = (1 - 6 * r) / 2
+    # r31 = (12 * r ** 2 - 6 * r - 1) / (3 * (1 - 2 * r))
+    # r32 = (12 * r ** 2 - 12 * r + 5) / (6 * (1 - 2 * r))
+    # b1 = 2 / 3
+    # b2 = 1 / 6
+    # b3 = 1 / 6
+
+    for i in range(int(T / dt)):
+        J0 = ode.j(x[i])
+        J_inv = SolverzArray(linalg.inv(np.eye(x.total_size) - dt * J0 * r)) * dt
+        k1 = J_inv * ode.f(x[i])
+        k2 = J_inv * (ode.f(x[i] + a21 * k1) + J0 * r21 * k1)
+        k3 = J_inv * (ode.f(x[i] + a31 * k1 + a32 * k2) + J0 * (r31 * k1 + r32 * k2))
+        k4 = J_inv * (ode.f(x[i] + a41 * k1 + a42 * k2 + a43 * k3) + J0 * (r41 * k1 + r42 * k2 + r43 * k3))
+        x[i + 1] = x[i] + b1 * k1 + b2 * k2 + b3 * k3 + b4 * k4
+        # x[i + 1] = x[i] + b1 * k1 + b2 * k2 + b3 * k3
+
+    return x
+
+
+def sirk_dae(dae: DAE,
+             x: TimeVars,
+             y: TimeVars,
+             T,
+             dt):
+    r = 0.572816
+    r21 = -2.34199281090742
+    r31 = -0.0273333497228473
+    r32 = 0.213811780334800
+    r41 = -0.259083734468120
+    r42 = -0.190595825778459
+    r43 = -0.228030947223683
+    a21 = 1.145632
+    a31 = 0.520920769237066
+    a32 = 0.134294177986617
+    a41 = 0.520920769237066
+    a42 = 0.134294177986617
+    a43 = 0
+    b1 = 0.324534692057929
+    b2 = 0.0490865790926829
+    b3 = 0
+    b4 = 0.626378728849388
+
+    # a21 = 1
+    # a31 = 1
+    # a32 = 0
+    # r21 = (1 - 6 * r) / 2
+    # r31 = (12 * r ** 2 - 6 * r - 1) / (3 * (1 - 2 * r))
+    # r32 = (12 * r ** 2 - 12 * r + 5) / (6 * (1 - 2 * r))
+    # b1 = 2 / 3
+    # b2 = 1 / 6
+    # b3 = 1 / 6
+
+    dae.assign_eqn_var_address(x[0], y[0])
+    block_I = np.zeros((dae.var_size, dae.var_size))
+    block_I[np.ix_(range(dae.state_num), range(dae.state_num))] = block_I[np.ix_(range(dae.state_num),
+                                                                                 range(dae.state_num))] + np.eye(dae.state_num)
+
+    for i in range(int(T / dt)):
+        J0 = dae.j(x[i], y[i])
+        J_inv = SolverzArray(linalg.inv(block_I - dt * J0 * r)) * dt
+        k1 = J_inv * (np.concatenate((dae.f(x[i], y[i]), dae.g(x[i], y[i])), axis=0))
+        k2 = J_inv * (np.concatenate((dae.f(x[i] + a21 * k1[0:dae.state_num], y[i] + a21 * k1[dae.state_num:dae.var_size]),
+                                      dae.g(x[i] + a21 * k1[0:dae.state_num], y[i] + a21 * k1[dae.state_num:dae.var_size])), axis=0)
+                      + J0 * r21 * k1)
+        k3 = J_inv * (np.concatenate((dae.f(x[i] + a31 * k1[0:dae.state_num] + a32 * k2[0:dae.state_num], y[i] + a31 * k1[dae.state_num:dae.var_size] + a32 * k2[dae.state_num:dae.var_size]),
+                                      dae.g(x[i] + a31 * k1[0:dae.state_num] + a32 * k2[0:dae.state_num], y[i] + a31 * k1[dae.state_num:dae.var_size] + a32 * k2[dae.state_num:dae.var_size])),
+                                     axis=0) +
+                      J0 * (r31 * k1 + r32 * k2))
+        k4 = J_inv * (
+                np.concatenate(
+                    (dae.f(x[i] + a41 * k1[0:dae.state_num] + a42 * k2[0:dae.state_num] + a43 * k3[0:dae.state_num], y[i] + a41 * k1[dae.state_num:dae.var_size] + a42 * k2[dae.state_num:dae.var_size]+a43 * k3[dae.state_num:dae.var_size]),
+                     dae.g(x[i] + a41 * k1[0:dae.state_num] + a42 * k2[0:dae.state_num] + a43 * k3[0:dae.state_num], y[i] + a41 * k1[dae.state_num:dae.var_size] + a42 * k2[dae.state_num:dae.var_size]+a43 * k3[dae.state_num:dae.var_size])),
+                    axis=0) +
+                J0 * (r41 * k1 + r42 * k2 + r43 * k3))
+        x[i + 1] = x[i] + b1 * k1[0:dae.state_num] + b2 * k2[0:dae.state_num] + b3 * k3[0:dae.state_num] + b4 * k4[0:dae.state_num]
+        y[i + 1] = y[i] + b1 * k1[dae.state_num:dae.var_size] + b2 * k2[dae.state_num:dae.var_size] + b3 * k3[dae.state_num:dae.var_size] + b4 * k4[dae.state_num:dae.var_size]
+
+    return x, y
