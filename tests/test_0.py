@@ -1,12 +1,8 @@
-import sys
-
-sys.path.append('D:\\OneDrive - 东南大学\\科研\\Solverz')
 from core.eqn import Eqn
-from core.equations import Equations
+from core.equations import AE
 from core.solver import nr_method
 from core.var import Var
 from core.variables import Vars
-from core.equations import AE
 
 e = Eqn(name='e',
         e_str='X**2-1')
