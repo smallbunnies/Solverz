@@ -149,6 +149,14 @@ def amax(x: SolverzArray):
     return np.amax(np.asarray(x))
 
 
+@implements(np.concatenate)
+def concatenate(arrays, axis=None):
+    arrays_ = []
+    for array in arrays:
+        arrays_.append(np.asarray(array))
+    return np.concatenate(tuple(arrays_), axis=axis)
+
+
 def mat_multiply(*args: Union[SolverzArray, np.ndarray, list]):
     """
     np.multiply supports only two arguments

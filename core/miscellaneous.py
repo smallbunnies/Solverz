@@ -85,8 +85,6 @@ def derive_dhs_param_var(file: str):
                trigger_fun=partial(v_m_reverse_pipe, V.v, SolverzArray(np.array(sys_df['StaticHeatPipe'].m))))
     Vm.v = derive_v_minus(V.v)
 
-    # TODO: 声明变量、数组时必须强制声明变量大小 检查变量大小/参数大小与输入的数组大小是否匹配！
-
     Touts = Var(name='Touts')
     Touts.v = np.array(sys_df['StaticHeatPipe'].Touts)
     Toutr = Var(name='Toutr')

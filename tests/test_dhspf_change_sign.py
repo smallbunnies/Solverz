@@ -86,7 +86,7 @@ y0 = Vars(list(var_dict.values()))
 
 y_nr = nr_method(E, y0)
 
-# y_cnr = continuous_nr(deepcopy(E), deepcopy(Y0))
+# y_cnr = continuous_nr(deepcopy(E), deepcopy(y0))
 
 sys_df = pd.read_excel('../instances/4node3pipe_change_sign_bench.xlsx',
                        sheet_name=None,
