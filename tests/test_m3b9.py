@@ -2,14 +2,14 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from core.algebra import AliasVar, ComputeParam, F, X, Y
-from core.eqn import Ode, Eqn
-from core.equations import DAE
-from core.param import Param
-from core.solver import nr_method, implicit_trapezoid
-from core.var import TimeVar
-from core.variables import TimeVars
-from core.event import Event
+from Solverz.algebra import AliasVar, ComputeParam, F, X, Y
+from Solverz.eqn import Ode, Eqn
+from Solverz.equations import DAE
+from Solverz.param import Param
+from Solverz.solver import nr_method, implicit_trapezoid
+from Solverz.var import TimeVar
+from Solverz.variables import TimeVars
+from Solverz.event import Event
 
 rotator = Ode(name='rotator speed', e_str='(Pm-(Uxg*Ixg+Uyg*Iyg+(Ixg**2+Iyg**2)*ra)-D*(omega-1))/Tj', diff_var='omega')
 delta = Ode(name='delta', e_str='(omega-1)*omega_b', diff_var='delta')

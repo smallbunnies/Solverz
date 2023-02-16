@@ -2,7 +2,7 @@
 /__pycache__
 /tests/.pytest_cache/
 /.pytest_cache/
-/core/__pycache__
+/Solverz/__pycache__
 /tests/__pycache__
 *.docx
 *.mlx
