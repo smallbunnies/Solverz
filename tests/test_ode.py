@@ -1,11 +1,11 @@
 import sympy as sp
 import numpy as np
-from core.var import *
-from core.variables import TimeVars
-from core.equations import AE, DAE
-from core.eqn import Eqn, Ode, Pde
-from core.param import Param
-from core.solver import implicit_trapezoid
+from Solverz.var import *
+from Solverz.variables import TimeVars
+from Solverz.equations import AE, DAE
+from Solverz.eqn import Eqn, Ode, Pde
+from Solverz.param import Param
+from Solverz.solver import implicit_trapezoid
 import matplotlib.pyplot as plt
 import pandas as pd
 

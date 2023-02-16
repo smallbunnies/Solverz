@@ -3,13 +3,13 @@ import pandas as pd
 
 from copy import deepcopy
 
-from core.eqn import Eqn
-from core.miscellaneous import derive_dhs_param_var
-from core.param import Param
-from core.routine import Routine
-from core.solver import *
-from core.var import Var
-from core.variables import Vars
+from Solverz.eqn import Eqn
+from Solverz.miscellaneous import derive_dhs_param_var
+from Solverz.param import Param
+from Solverz.routine import Routine
+from Solverz.solver import *
+from Solverz.var import Var
+from Solverz.variables import Vars
 
 Apq = Param(name='Apq')
 Gpq = Param(name='Gpq')

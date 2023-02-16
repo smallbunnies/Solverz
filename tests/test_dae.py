@@ -1,10 +1,10 @@
-from core.algebra import AliasVar, ComputeParam, F, X, Y
-from core.eqn import Ode, Eqn
-from core.equations import DAE
-from core.param import Param
-from core.var import TimeVar
-from core.variables import TimeVars
-from core.solver import implicit_trapezoid
+from Solverz.algebra import AliasVar, ComputeParam, F, X, Y
+from Solverz.eqn import Ode, Eqn
+from Solverz.equations import DAE
+from Solverz.param import Param
+from Solverz.var import TimeVar
+from Solverz.variables import TimeVars
+from Solverz.solver import implicit_trapezoid
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np

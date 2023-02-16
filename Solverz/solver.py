@@ -4,7 +4,7 @@ import numpy as np
 from numpy import abs, max, min, linalg, sum, sqrt
 import tqdm
 
-from core.algebra import AliasVar, ComputeParam, F, X, Y
+from Solverz.algebra import AliasVar, ComputeParam, F, X, Y
 from .equations import AE, DAE
 from .solverz_array import SolverzArray
 from .variables import Vars, TimeVars

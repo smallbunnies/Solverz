@@ -1,9 +1,9 @@
 import sympy as sp
 import numpy as np
-from core.var import *
-from core.equations import Equations
-from core.eqn import Eqn
-from core.algebra import StateVar, AlgebraVar, AliasVar, ComputeParam, F, G
+from Solverz.var import *
+from Solverz.equations import Equations
+from Solverz.eqn import Eqn
+from Solverz.algebra import StateVar, AlgebraVar, AliasVar, ComputeParam, F, G
 
 # T = sp.Function('T')
 # dx, dt, X, t, Tn1k1, Tn0k1, Tn1k0 = sp.symbols('dx, dt, X, t, Tn1k1, Tn0k1, Tn1k0')
