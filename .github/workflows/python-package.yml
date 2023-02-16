@@ -31,5 +31,5 @@ jobs:
     - name: Test with pytest
       run: |
         dir
-        python -c "import core"
+        cd tests
         pytest
