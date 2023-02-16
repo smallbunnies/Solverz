@@ -83,38 +83,38 @@ xy = implicit_trapezoid(m3b9,
                                  length=int(T / dt) + 1),
                         dt=dt, T=T, event=e1)
 
-plt.figure(1)
-labels = []
-for i in range(3):
-    plt.plot(np.arange(0, T + dt, dt), xy.array[i + 3, :].reshape((-1,)))
-    labels.append(r'$\omega_%i$' % i)
-plt.legend(labels)
-
-plt.figure(2)
-labels = []
-for i in range(9):
-    plt.plot(np.arange(0, T + dt, dt),
-             (xy.array[i + 6, :].reshape((-1,)) ** 2 + xy.array[i + 15, :].reshape((-1,)) ** 2) ** (1 / 2))
-    labels.append(r'$U_%i$' % i)
-plt.legend(labels)
-
-plt.figure(3)
-labels = []
-for i in range(3):
-    plt.plot(np.arange(0, T + dt, dt),
-             (xy['Ixg'][i, :]))
-    labels.append(r'$I_{xg%i}$' % i)
-plt.legend(labels)
-
-plt.figure(4)
-labels = []
-for i in range(3):
-    plt.plot(np.arange(0, T + dt, dt),
-             (xy['Iyg'][i, :]))
-    labels.append(r'$I_{yg%i}$' % i)
-plt.legend(labels)
-
-plt.show()
+# plt.figure(1)
+# labels = []
+# for i in range(3):
+#     plt.plot(np.arange(0, T + dt, dt), xy.array[i + 3, :].reshape((-1,)))
+#     labels.append(r'$\omega_%i$' % i)
+# plt.legend(labels)
+#
+# plt.figure(2)
+# labels = []
+# for i in range(9):
+#     plt.plot(np.arange(0, T + dt, dt),
+#              (xy.array[i + 6, :].reshape((-1,)) ** 2 + xy.array[i + 15, :].reshape((-1,)) ** 2) ** (1 / 2))
+#     labels.append(r'$U_%i$' % i)
+# plt.legend(labels)
+#
+# plt.figure(3)
+# labels = []
+# for i in range(3):
+#     plt.plot(np.arange(0, T + dt, dt),
+#              (xy['Ixg'][i, :]))
+#     labels.append(r'$I_{xg%i}$' % i)
+# plt.legend(labels)
+#
+# plt.figure(4)
+# labels = []
+# for i in range(3):
+#     plt.plot(np.arange(0, T + dt, dt),
+#              (xy['Iyg'][i, :]))
+#     labels.append(r'$I_{yg%i}$' % i)
+# plt.legend(labels)
+#
+# plt.show()
 
 
 def test_m3b9():
