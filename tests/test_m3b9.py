@@ -1,15 +1,15 @@
 import numpy as np
 import pandas as pd
-import tqdm
 import matplotlib.pyplot as plt
 
 from core.algebra import AliasVar, ComputeParam, F, X, Y
 from core.eqn import Ode, Eqn
 from core.equations import DAE
 from core.param import Param
-from core.solver import nr_method
+from core.solver import nr_method, implicit_trapezoid
 from core.var import TimeVar
 from core.variables import TimeVars
+from core.event import Event
 
 rotator = Ode(name='rotator speed', e_str='(Pm-(Uxg*Ixg+Uyg*Iyg+(Ixg**2+Iyg**2)*ra)-D*(omega-1))/Tj', diff_var='omega')
 delta = Ode(name='delta', e_str='(omega-1)*omega_b', diff_var='delta')
@@ -72,57 +72,16 @@ Uy.v = [9.38266043832060e-07, 0.165293825576865, 0.0833635512998016, -0.03967601
 Uyg = TimeVar('Uyg')
 Uyg.v = [9.38266043832060e-07, 0.165293825576865, 0.0833635512998016]
 
-
-def implicit_trapezoid_autonomous(dae: DAE,
-                                  x: TimeVars,
-                                  dt,
-                                  T):
-    X0 = AliasVar(X, '0')
-    Y0 = AliasVar(Y, '0')
-    t = ComputeParam('t')
-    t0 = ComputeParam('t0')
-    Dt = ComputeParam('Dt')
-    scheme = X - X0 - Dt / 2 * (F(X, Y, t) + F(X0, Y0, t0))
-    ae = dae.discretize(scheme)
-
-    i = 0
-    t = 0
-
-    xi1 = x[0]  # x_{i+1}
-    xi0 = xi1.derive_alias('0')  # x_{i}
-
-    pbar = tqdm.tqdm(total=T)
-    while abs(t - T) > dt / 10:
-        ae.update_param('Dt', dt)
-
-        if t >= 0.000:
-            G = np.asarray(df['G'])
-            G[6, 6] = 10000
-            ae.update_param('G', G)
-        if t >= 0.030:
-            G = np.asarray(df['G'])
-            ae.update_param('G', G)
-
-        ae.update_param(xi0)
-
-        xi1 = nr_method(ae, xi1)
-        xi0.array[:] = xi1.array
-
-        x[i + 1] = xi1
-        pbar.update(dt)
-        t = t + dt
-        i = i + 1
-
-    return x
-
-
 dt = np.array(0.003)
 T = np.array(3)
 
-xy = implicit_trapezoid_autonomous(m3b9,
-                                   TimeVars([delta, omega, Ux, Uy, Uxg, Uyg, Ixg, Iyg],
-                                            length=int(T / dt) + 1),
-                                   dt=dt, T=T)
+e1 = Event(name='three phase fault', time=[0, 0.03, T])
+e1.add_var('G', [10000, np.asarray(df['G'])[6, 6], np.asarray(df['G'])[6, 6]], (6, 6))
+
+xy = implicit_trapezoid(m3b9,
+                        TimeVars([delta, omega, Ux, Uy, Uxg, Uyg, Ixg, Iyg],
+                                 length=int(T / dt) + 1),
+                        dt=dt, T=T, event=e1)
 
 plt.figure(1)
 labels = []
@@ -154,6 +113,8 @@ for i in range(3):
              (xy['Iyg'][i, :]))
     labels.append(r'$I_{yg%i}$' % i)
 plt.legend(labels)
+
+plt.show()
 
 
 def test_m3b9():

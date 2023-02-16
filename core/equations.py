@@ -14,6 +14,7 @@ from .solverz_array import SolverzArray, Lambdify_Mapping
 from .var import Var
 from .variables import Vars
 from .eqn import Eqn, Ode
+from .event import Event
 
 
 class Equations:
@@ -97,16 +98,26 @@ class Equations:
 
     def update_param(self, *args):
 
-        if len(args) > 1:
-            # Tuple or List
+        if isinstance(args[0], str):
+            # Update specified params
             param: str = args[0]
             value: Union[SolverzArray, np.ndarray, list, Number] = args[1]
-            self.PARAM[param].v = value
+            try:
+                self.PARAM[param].v = value
+            except KeyError:
+                print(f'Param warning: {param}')
         elif isinstance(args[0], Vars):
+            # Update params with Vars. For example, to update x0 in trapezoid rules.
             vars_: Vars = args[0]
             for param_name in self.PARAM.keys():
                 if param_name in vars_.v.keys():
                     self.PARAM[param_name].v = vars_.v[param_name]
+        elif isinstance(args[0], Event):
+            # Update params with Event object
+            event = args[0]
+            t = args[1]
+            for param_name in event.var_value.keys():
+                self.PARAM[param_name].v[event.index[param_name]] = event.interpolate(param_name, t)
 
     def eval(self, eqn_name: str, *args: Union[SolverzArray, np.ndarray]) -> SolverzArray:
         """
@@ -186,7 +197,7 @@ class AE(Equations):
         :param eqn:
         :return:
         """
-
+        # FIXME: deprecate np.concatenate() here. The functions should be concatenated/combined first and then lambdified
         if not eqn:
             temp = np.array([])
             for eqn_name, eqn_ in self.EQNs.items():
@@ -306,7 +317,7 @@ class DAE(Equations):
             temp = temp + eqn_size
             self.size[eqn_name] = eqn_size
 
-        self.algebra_num = temp-self.state_num
+        self.algebra_num = temp - self.state_num
 
         temp = 0
         for xy in xys:
@@ -346,7 +357,7 @@ class DAE(Equations):
     def g(self, *xys) -> SolverzArray:
         """
 
-        `args` is either:
+        `xys` is either:
           - two arguments, e.g. state vars x, and algebra y
           - one argument, e.g. state vars y.
 

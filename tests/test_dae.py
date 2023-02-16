@@ -4,7 +4,7 @@ from core.equations import DAE
 from core.param import Param
 from core.var import TimeVar
 from core.variables import TimeVars
-from core.solver import implicit_trapezoid_autonomous
+from core.solver import implicit_trapezoid
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -26,7 +26,7 @@ x.v = [1]
 y = TimeVar('y')
 y.v = [1]
 
-xy = implicit_trapezoid_autonomous(dae, TimeVars([x, y], length=201))
+xy = implicit_trapezoid(dae, TimeVars([x, y], length=201), 0.1, 20)
 plt.plot(np.arange(0, 20.1, 0.1), xy.array[0, :].reshape((-1,)))
 plt.plot(np.arange(0, 20.1, 0.1), xy.array[1, :].reshape((-1,)))
 

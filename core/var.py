@@ -71,7 +71,7 @@ class TimeVar(Var):
 
         if value is not None:
             # TODO: input with column_size > 1
-            if isinstance(value, np.ndarray) or isinstance(value, list):
+            if isinstance(value, np.ndarray) or isinstance(value, list) or isinstance(value, Number):
                 temp = SolverzArray(value)
                 if temp.column_size == 1:
                     self.__v = zeros((temp.row_size, self.len))
