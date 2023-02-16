@@ -31,4 +31,5 @@ jobs:
     - name: Test with pytest
       run: |
         dir
+        python -c "from core.eqn import Eqn"
         pytest
