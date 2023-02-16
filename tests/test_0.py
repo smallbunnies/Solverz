@@ -1,9 +1,8 @@
 from Solverz.eqn import Eqn
-from Solverz.equations import Equations
+from Solverz.equations import AE
 from Solverz.solver import nr_method
 from Solverz.var import Var
 from Solverz.variables import Vars
-from Solverz.equations import AE
 
 e = Eqn(name='e',
         e_str='X**2-1')
