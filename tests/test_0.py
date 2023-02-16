@@ -1,6 +1,3 @@
-import sys
-
-sys.path.append('D:\\OneDrive - 东南大学\\科研\\Solverz')
 from Solverz.eqn import Eqn
 from Solverz.equations import Equations
 from Solverz.solver import nr_method
