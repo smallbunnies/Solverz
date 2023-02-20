@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 from copy import deepcopy
 from typing import Union, List, Dict, Callable, Tuple
-
+import sys
 import numpy as np
 from sympy import sympify, lambdify, symbols, Symbol
 from numbers import Number
@@ -96,6 +96,9 @@ class Equations:
         else:
             return False
 
+    with warnings.catch_warnings():
+        warnings.simplefilter("once")
+
     def update_param(self, *args):
 
         if isinstance(args[0], str):
@@ -105,7 +108,7 @@ class Equations:
             try:
                 self.PARAM[param].v = value
             except KeyError:
-                print(f'Param warning: {param}')
+                warnings.warn(f'Equations have no parameter: {param}')
         elif isinstance(args[0], Vars):
             # Update params with Vars. For example, to update x0 in trapezoid rules.
             vars_: Vars = args[0]
