@@ -7,7 +7,6 @@ from typing import Callable
 from numbers import Number
 
 from .solverz_array import SolverzArray
-from .var import Var
 
 
 class Param:
@@ -34,12 +33,12 @@ class Param:
         return self.__v
 
     @v.setter
-    def v(self, value: Union[SolverzArray, np.ndarray, list, Number]):
+    def v(self, value: Union[np.ndarray, list, Number]):
 
-        if isinstance(value, np.ndarray) or isinstance(value, list) or isinstance(value, Number):
-            self.__v = SolverzArray(value)
-        else:
+        if isinstance(value, np.ndarray):
             self.__v = value
+        else:
+            self.__v = np.array(value)
 
     def __repr__(self):
         return f"Param: {self.name} value: {self.v}"

@@ -17,10 +17,10 @@ generator_ux = Eqn(name='Generator Ux', e_str='Uxg-Ag*Ux', commutative=False)
 generator_uy = Eqn(name='Generator Uy', e_str='Uyg-Ag*Uy', commutative=False)
 Ed_prime = Eqn(name='Ed_prime', e_str='Edp-sin(delta)*(Uxg+ra*Ixg-Xqp*Iyg)+cos(delta)*(Uyg+ra*Iyg+Xqp*Ixg)')
 Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
-Ixg_inject = Eqn(name='Ixg_inject', e_str='Ixg-(Mat_Mul(Ag*G,Ux)-Mat_Mul(Ag*B,Uy))', commutative=False)
-Iyg_inject = Eqn(name='Iyg_inject', e_str='Iyg-(Mat_Mul(Ag*G,Uy)+Mat_Mul(Ag*B,Ux))', commutative=False)
-Ixng_inject = Eqn(name='Ixng_inject', e_str='Mat_Mul(Ang*G,Ux)-Mat_Mul(Ang*B,Uy)', commutative=False)
-Iyng_inject = Eqn(name='Iyng_inject', e_str='Mat_Mul(Ang*G,Uy)+Mat_Mul(Ang*B,Ux)', commutative=False)
+Ixg_inject = Eqn(name='Ixg_inject', e_str='Ixg-(Ag*G*Ux-Ag*B*Uy)', commutative=False)
+Iyg_inject = Eqn(name='Iyg_inject', e_str='Iyg-(Ag*G*Uy+Ag*B*Ux)', commutative=False)
+Ixng_inject = Eqn(name='Ixng_inject', e_str='Ang*G*Ux-Ang*B*Uy', commutative=False)
+Iyng_inject = Eqn(name='Iyng_inject', e_str='Ang*G*Uy+Ang*B*Ux', commutative=False)
 
 param = [Param('Pm'), Param('ra'), Param('D'), Param('Tj'), Param('omega_b'), Param('Ag'), Param('Edp'), Param('Eqp'),
          Param('Xqp'), Param('Xdp'), Param('G'), Param('B'), Param('Ang')]
@@ -118,5 +118,5 @@ xy = implicit_trapezoid(m3b9,
 
 
 def test_m3b9():
-    assert np.abs(np.asarray(df['omega']).transpose() - xy['omega'].array).max() <= 0.003969440114605538
-    assert np.abs(np.asarray(df['delta']).transpose() - xy['delta'].array).max() <= 0.019164859675127266
+    assert np.abs(np.asarray(df['omega']).transpose() - xy['omega']).max() <= 0.003969440114605538
+    assert np.abs(np.asarray(df['delta']).transpose() - xy['delta']).max() <= 0.019164859675127266

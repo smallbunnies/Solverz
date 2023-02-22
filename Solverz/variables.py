@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from numbers import Number
-from typing import Optional, Union, List, Dict
+from typing import Union, List, Dict
 
 import numpy as np
 
-from .solverz_array import SolverzArray
 from .var import Var, TimeVar
 
 
@@ -18,14 +16,14 @@ class VarsBasic:
         if isinstance(var, Var):
             var = [var]
 
-        self.__v: Dict[str, SolverzArray] = {}
+        self.__v: Dict[str, np.ndarray] = {}
         self.__var_size: Dict[str, int] = {}
         self.__a: Dict[str, List[int]] = {}
 
         temp = 0
         for var_ in var:
             self.__v[var_.name] = var_.v
-            self.__var_size[var_.name] = var_.v.row_size
+            self.__var_size[var_.name] = var_.v.shape[0]
             self.__a[var_.name] = [temp, temp + self.__var_size[var_.name] - 1]
             temp = temp + self.__var_size[var_.name]
 
@@ -34,8 +32,8 @@ class VarsBasic:
     def link_var_and_array(self):
         self.array = np.zeros((self.total_size, 1))
         for var_name in self.var_size.keys():
-            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1] = self.v[var_name].array
-            self.v[var_name].array = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1]
+            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0] = self.v[var_name]
+            self.v[var_name] = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0]
 
     @property
     def v(self):
@@ -76,23 +74,11 @@ class Vars(VarsBasic):
     def __repr__(self):
         return f'variables {list(self.v.keys())}'
 
-    def __mul__(self, other: Union[Number, Vars]) -> Vars:
+    def __mul__(self, other: Union[int, float, Vars]) -> Vars:
         new_vars = deepcopy(self)
         new_vars.link_var_and_array()
-        if isinstance(other, Number):
+        if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = new_vars.array * other
-            return new_vars
-        elif isinstance(other, Vars):
-            new_vars.array[:] = other.array * new_vars.array
-            return new_vars
-        else:
-            raise TypeError(f'Input type {type(other)} invalid')
-
-    def __rmul__(self, other: Union[Number, Vars]) -> Vars:
-        new_vars = deepcopy(self)
-        new_vars.link_var_and_array()
-        if isinstance(other, Number):
-            new_vars.array[:] = other * new_vars.array
             return new_vars
         elif isinstance(other, Vars):
             new_vars.array[:] = new_vars.array * other.array
@@ -100,98 +86,97 @@ class Vars(VarsBasic):
         else:
             raise TypeError(f'Input type {type(other)} invalid')
 
-    def __add__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+    def __rmul__(self, other: Union[int, float, Vars]) -> Vars:
         new_vars = deepcopy(self)
         new_vars.link_var_and_array()
-        if isinstance(other, Number):
+        if isinstance(other, int) or isinstance(other, float):
+            new_vars.array[:] = other * new_vars.array
+            return new_vars
+        elif isinstance(other, Vars):
+            new_vars.array[:] = other.array * new_vars.array
+            return new_vars
+        else:
+            raise TypeError(f'Input type {type(other)} invalid')
+
+    def __add__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
+        new_vars = deepcopy(self)
+        new_vars.link_var_and_array()
+        if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = new_vars.array + other
             return new_vars
         elif isinstance(other, Vars):
             new_vars.array[:] = new_vars.array + other.array
             return new_vars
-        elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
-            if isinstance(other, np.ndarray):
-                other = SolverzArray(other)
-            if new_vars.total_size != other.row_size:
+        elif isinstance(other, np.ndarray):
+            if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = new_vars.array + other.array
+                new_vars.array[:] = new_vars.array + other.reshape(-1, 1)
                 return new_vars
 
-    def __radd__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+    def __radd__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
         new_vars = deepcopy(self)
         new_vars.link_var_and_array()
-        if isinstance(other, Number):
+        if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = other + new_vars.array
             return new_vars
         elif isinstance(other, Vars):
             new_vars.array[:] = other.array + new_vars.array
             return new_vars
-        elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
-            if isinstance(other, np.ndarray):
-                other = SolverzArray(other)
-            if new_vars.total_size != other.row_size:
+        elif isinstance(other, np.ndarray):
+            if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = other.array + new_vars.array
+                new_vars.array[:] = other.reshape(-1, 1) + new_vars.array
                 return new_vars
 
-    def __sub__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+    def __sub__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
         new_vars = deepcopy(self)
         new_vars.link_var_and_array()
-        if isinstance(other, Number):
+        if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = new_vars.array - other
             return new_vars
         elif isinstance(other, Vars):
             new_vars.array[:] = new_vars.array - other.array
             return new_vars
-        elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
-            if isinstance(other, np.ndarray):
-                other = SolverzArray(other)
-            if new_vars.total_size != other.row_size:
+        elif isinstance(other, np.ndarray):
+            if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = new_vars.array - other.array
+                new_vars.array[:] = new_vars.array - other.reshape(-1, 1)
                 return new_vars
 
-    def __rsub__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+    def __rsub__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
         new_vars = deepcopy(self)
         new_vars.link_var_and_array()
-        if isinstance(other, Number):
+        if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = other - new_vars.array
             return new_vars
         elif isinstance(other, Vars):
             new_vars.array[:] = other.array - new_vars.array
             return new_vars
-        elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
-            if isinstance(other, np.ndarray):
-                other = SolverzArray(other)
-            if new_vars.total_size != other.row_size:
+        elif isinstance(other, np.ndarray):
+            if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = other.array - new_vars.array
+                new_vars.array[:] = other.reshape(-1, 1) - new_vars.array
                 return new_vars
 
-    def __truediv__(self, other: Union[Number, Vars, SolverzArray, np.ndarray]) -> Vars:
+    def __truediv__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
         new_vars = deepcopy(self)
         new_vars.link_var_and_array()
-        if isinstance(other, Number):
+        if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = new_vars.array / other
             return new_vars
         elif isinstance(other, Vars):
             new_vars.array[:] = new_vars.array / other.array
             return new_vars
-        elif isinstance(other, SolverzArray) or isinstance(other, np.ndarray):
-            if isinstance(other, np.ndarray):
-                other = SolverzArray(other)
-            if new_vars.total_size != other.row_size:
+        elif isinstance(other, np.ndarray):
+            if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = new_vars.array / other.array
+                new_vars.array[:] = new_vars.array / other.reshape(-1, )
                 return new_vars
-
-    def copy(self) -> Vars:
-        return deepcopy(self)
 
     def derive_alias(self, suffix: str):
         """
@@ -200,7 +185,7 @@ class Vars(VarsBasic):
         """
         var_ = []
         for var_name in self.var_size.keys():
-            var_ = [*var_, Var(var_name+suffix, value=self.v[var_name])]
+            var_ = [*var_, Var(var_name + suffix, value=self.v[var_name])]
         return Vars(var_)
 
 
@@ -226,8 +211,8 @@ class TimeVars(VarsBasic):
     def link_var_and_array(self):
         self.array = np.zeros((self.total_size, self.len))
         for var_name in self.var_size.keys():
-            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, :1] = self.v[var_name].array
-            self.v[var_name].array = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, :]
+            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0] = self.v[var_name]
+            self.v[var_name] = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, :]
 
     def __getitem__(self, item):
         """
@@ -243,7 +228,7 @@ class TimeVars(VarsBasic):
             else:
                 temp_vars: List[Var] = []
                 for var_name in self.var_size.keys():
-                    temp_vars = [*temp_vars, Var(var_name, value=self.v[var_name].array[:, item])]
+                    temp_vars = [*temp_vars, Var(var_name, value=self.v[var_name][:, item])]
                 return Vars(temp_vars)
         elif isinstance(item, str):
             return self.v[item]
@@ -263,7 +248,7 @@ class TimeVars(VarsBasic):
                 raise ValueError(f'Exceed the maximum index, which is {self.len}')
             else:
                 for var_name in self.v.keys():
-                    self.v[var_name].array[:, key] = value.v[var_name].array[:, 0].copy()
+                    self.v[var_name][:, key] = value.v[var_name].copy()
         else:
             raise NotImplementedError(f'Unsupported indices')
 

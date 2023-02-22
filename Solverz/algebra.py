@@ -1,4 +1,4 @@
-from sympy import Symbol, Function, Mul, sign, Expr, symbols
+from sympy import Symbol, Function, Mul, sign, Expr, symbols, Number
 from typing import Union
 
 Sympify_Mapping = {}
@@ -50,15 +50,6 @@ class G(Function):
         return obj
 
 
-class MyExpr(Expr):
-
-    def _eval_nseries(self, x, n, logx, cdir):
-        pass
-
-    def __new__(cls, *args, **kwargs):
-        pass
-
-
 def new_symbols(names, commutative: bool):
     if commutative:
         return symbols(names, real=True)
@@ -83,7 +74,7 @@ class Mat_Mul(Function):
     def fdiff(self, argindex=1):
 
         if isinstance(self.args[argindex - 1], Diagonal):
-            return Mul(Diagonal(Mul(*self.args[argindex:])), *self.args[0:argindex - 1])
+            return Mul(*self.args[0:argindex - 1], Diagonal(Mul(*self.args[argindex:])))
         else:
             return Mul(*self.args[0:argindex - 1])
 
@@ -109,5 +100,22 @@ class sign(Function):
     is_commutative = False
 
 
-class SolVar(Function):
-    pass
+def traverse_for_mul(node: Expr):
+    """
+    traverse the expression tree and replace sympy.Mul with Mat_Mul
+    :param node:
+    :return:
+    """
+
+    if isinstance(node, Symbol) or isinstance(node, Number):
+        return node
+    elif isinstance(node, Mul):
+        args = []
+        for arg in node.args:
+            args = [*args, traverse_for_mul(arg)]
+        return Mat_Mul(*args)
+    else:
+        args = []
+        for arg in node.args:
+            args = [*args, traverse_for_mul(arg)]
+        return node.func(*args)

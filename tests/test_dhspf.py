@@ -45,11 +45,11 @@ E8 = Eqn(name='E8',
          commutative=False)
 
 E9 = Eqn(name='E9',
-         e_str='Mat_Mul(Diagonal(A_li*Ts),V_p_li,Abs(m))-V_p_li*Mat_Mul(Diagonal(Touts),Abs(m))',
+         e_str='Diagonal(A_li*Ts)*V_p_li*Abs(m)-V_p_li*Diagonal(Touts)*Abs(m)',
          commutative=False)
 
 E10 = Eqn(name='E10',
-          e_str='Mat_Mul(Diagonal(A_rsi*Tr),V_m_rsi,Abs(m))-V_m_rsi*Mat_Mul(Diagonal(Toutr),Abs(m))',
+          e_str='Diagonal(A_rsi*Tr)*V_m_rsi*Abs(m)-V_m_rsi*Diagonal(Toutr)*Abs(m)',
           commutative=False)
 
 E11 = Eqn(name='E11',
@@ -95,14 +95,14 @@ sys_df = pd.read_excel('../instances/4node3pipe_bench.xlsx',
 def test_nr_method():
     for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
         # find nonzero elements
-        idx_nonzero = np.nonzero(y_nr[var_name].array)
-        assert max(abs((y_nr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero]) /
-                       np.asarray(sys_df[var_name])[idx_nonzero])) <= 1e-8
+        idx_nonzero = np.nonzero(y_nr[var_name])
+        assert max(abs((y_nr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) /
+                   np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, )) <= 1e-8
 
 
 def test_cnr_method():
     for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
         # find nonzero elements
-        idx_nonzero = np.nonzero(y_cnr[var_name].array)
-        assert max(abs((y_cnr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero]) /
-                       np.asarray(sys_df[var_name])[idx_nonzero])) <= 1e-8
+        idx_nonzero = np.nonzero(y_cnr[var_name])
+        assert max(abs((y_cnr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, )) /
+                       np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) <= 1e-8
