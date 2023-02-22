@@ -13,3 +13,4 @@ tests/jax_test.ipynb
 tests/console.ipynb
 tests/console.ipynb
 tests/test_julia.jl
+tests/test_sp.ipynb

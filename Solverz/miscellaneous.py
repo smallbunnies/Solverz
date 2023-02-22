@@ -1,11 +1,10 @@
+from functools import partial
+
 import numpy as np
 import pandas as pd
 
-from functools import partial
-
-from .solverz_array import SolverzArray
-from .var import Var
 from .param import Param
+from .var import Var
 
 
 def derive_incidence_matrix(f_node: np.ndarray,
@@ -17,7 +16,7 @@ def derive_incidence_matrix(f_node: np.ndarray,
         temp[f_node[pipe - 1] - 1, pipe - 1] = -1
         temp[t_node[pipe - 1] - 1, pipe - 1] = 1
 
-    return SolverzArray(temp)
+    return temp
 
 
 def derive_partial_v(v: np.ndarray,
@@ -39,11 +38,11 @@ def derive_a(f_node: np.ndarray,
     return temp[idx, :].copy()
 
 
-def derive_v_plus(v: SolverzArray) -> SolverzArray:
+def derive_v_plus(v: np.ndarray) -> np.ndarray:
     return (v + np.abs(v)) / 2
 
 
-def derive_v_minus(v: SolverzArray) -> SolverzArray:
+def derive_v_minus(v: np.ndarray) -> np.ndarray:
     return (v - np.abs(v)) / 2
 
 
@@ -76,13 +75,13 @@ def derive_dhs_param_var(file: str):
                info='Positive part of incidence matrix',
                triggerable=True,
                trigger_var='m',
-               trigger_fun=partial(v_p_reverse_pipe, V.v, SolverzArray(np.array(sys_df['StaticHeatPipe'].m))))
+               trigger_fun=partial(v_p_reverse_pipe, V.v, np.array(sys_df['StaticHeatPipe'].m)))
     Vp.v = derive_v_plus(V.v)
     Vm = Param(name='Vm',
                info='Negative part of incidence matrix',
                triggerable=True,
                trigger_var='m',
-               trigger_fun=partial(v_m_reverse_pipe, V.v, SolverzArray(np.array(sys_df['StaticHeatPipe'].m))))
+               trigger_fun=partial(v_m_reverse_pipe, V.v, np.array(sys_df['StaticHeatPipe'].m)))
     Vm.v = derive_v_minus(V.v)
 
     Touts = Var(name='Touts')
@@ -105,10 +104,10 @@ def derive_dhs_param_var(file: str):
     phi.v = np.array(sys_df['Node'].phi)
 
     m_L = Param(name='m_L',
-                value=np.transpose(SolverzArray(sys_df['Loop'].loc[0].values.tolist()[2:])))
+                value=sys_df['Loop'].values[:, 2:].astype('int'))
 
     K = Param(name='K',
-              value=SolverzArray(sys_df['StaticHeatPipe'].K.values))
+              value=sys_df['StaticHeatPipe'].K.values)
 
     V_rs = Param(name='V_rs',
                  value=derive_partial_v(np.asarray(V.v), r_f_node, s_f_node))
@@ -125,7 +124,7 @@ def derive_dhs_param_var(file: str):
                    trigger_var='m',
                    trigger_fun=partial(v_p_li_reverse_pipe,
                                        derive_partial_v(np.asarray(V.v), l_f_node, i_f_node),
-                                       SolverzArray(np.array(sys_df['StaticHeatPipe'].m))))
+                                       np.array(sys_df['StaticHeatPipe'].m)))
 
     V_m_rsi = Param(name='V_m_rsi',
                     value=derive_partial_v(np.asarray(Vm.v), r_f_node, s_f_node, i_f_node),
@@ -133,7 +132,7 @@ def derive_dhs_param_var(file: str):
                     trigger_var='m',
                     trigger_fun=partial(v_m_rsi_reverse_pipe,
                                         derive_partial_v(np.asarray(V.v), r_f_node, s_f_node, i_f_node),
-                                        SolverzArray(np.array(sys_df['StaticHeatPipe'].m))))
+                                        np.array(sys_df['StaticHeatPipe'].m)))
 
     A_rsl = Param(name='A_rsl',
                   value=derive_a(f_node,
@@ -196,7 +195,7 @@ def derive_dhs_param_var(file: str):
     return var_dict, param_dict
 
 
-def v_p_reverse_pipe(V0: np.ndarray, m0: SolverzArray, m: SolverzArray) -> SolverzArray:
+def v_p_reverse_pipe(V0: np.ndarray, m0: np.ndarray, m: np.ndarray) -> np.ndarray:
     """
     Trigger function of v_p
     if some element of m changes its sign, then related column of V0 changes its sign
@@ -206,15 +205,15 @@ def v_p_reverse_pipe(V0: np.ndarray, m0: SolverzArray, m: SolverzArray) -> Solve
     :return: $V_0*(I-diag(sign(m0)-sign(m)))$
     """
     m_sign = np.abs(np.sign(m0) - np.sign(m))
-    return derive_v_plus(V0 * SolverzArray(np.eye(m.row_size) - np.diag(m_sign)))
+    return derive_v_plus(V0 @ (np.eye(m.shape[0]) - np.diag(m_sign)))
 
 
-def v_m_reverse_pipe(V0: np.ndarray, m0: SolverzArray, m: SolverzArray) -> SolverzArray:
+def v_m_reverse_pipe(V0: np.ndarray, m0: np.ndarray, m: np.ndarray) -> np.ndarray:
     m_sign = np.abs(np.sign(m0) - np.sign(m))
-    return derive_v_minus(V0 * SolverzArray(np.eye(m.row_size) - np.diag(np.abs(m_sign))))
+    return derive_v_minus(V0 @ (np.eye(m.shape[0]) - np.diag(np.abs(m_sign))))
 
 
-def v_p_li_reverse_pipe(V0: np.ndarray, m0: SolverzArray, m: SolverzArray) -> SolverzArray:
+def v_p_li_reverse_pipe(V0: np.ndarray, m0: np.ndarray, m: np.ndarray) -> np.ndarray:
     """
     Trigger function of v_p
     if some element of m changes its sign, then related column of V0 changes its sign
@@ -224,10 +223,10 @@ def v_p_li_reverse_pipe(V0: np.ndarray, m0: SolverzArray, m: SolverzArray) -> So
     :return: $V_0*(I-diag(sign(m0)-sign(m)))$
     """
     m_sign = np.abs(np.sign(m0) - np.sign(m))
-    return derive_v_plus(V0 * SolverzArray(np.eye(m.row_size) - np.diag(m_sign)))
+    return derive_v_plus(V0 @ (np.eye(m.shape[0]) - np.diag(m_sign)))
 
 
-def v_m_rsi_reverse_pipe(V0: np.ndarray, m0: SolverzArray, m: SolverzArray) -> SolverzArray:
+def v_m_rsi_reverse_pipe(V0: np.ndarray, m0: np.ndarray, m: np.ndarray) -> np.ndarray:
     """
     Trigger function of v_p
     if some element of m changes its sign, then related column of V0 changes its sign
@@ -237,4 +236,4 @@ def v_m_rsi_reverse_pipe(V0: np.ndarray, m0: SolverzArray, m: SolverzArray) -> S
     :return: $V_0*(I-diag(sign(m0)-sign(m)))$
     """
     m_sign = np.abs(np.sign(m0) - np.sign(m))
-    return derive_v_minus(V0 * SolverzArray(np.eye(m.row_size) - np.diag(m_sign)))
+    return derive_v_minus(V0 @ (np.eye(m.shape[0]) - np.diag(m_sign)))

@@ -20,7 +20,7 @@ def nr_method(eqn: AE,
               tol: float = 1e-8):
     df = eqn.g(y)
     while max(abs(df)) > tol:
-        y = y - inv(eqn.j(y)) * df
+        y = y - inv(eqn.j(y)) @ df
         df = eqn.g(y)
     return y
 
@@ -29,7 +29,7 @@ def continuous_nr(eqn: AE,
                   y: Vars,
                   tol: float = 1e-8):
     def f(y) -> SolverzArray:
-        return -inv(eqn.j(y)) * eqn.g(y)
+        return -inv(eqn.j(y)) @ eqn.g(y)
 
     dt = 1
     atol = 1e-3
@@ -56,7 +56,7 @@ def continuous_nr(eqn: AE,
                     0 + 16 / 3) * k5
             y_ = temp_y - err_
             sc = atol + max(np.concatenate([abs(temp_y.array), abs(y_.array)], axis=1), axis=1) * rtol
-            err = sqrt(sum((err_.array.reshape(-1, ) / sc) ** 2) / temp_y.total_size)
+            err = sqrt(sum((err_ / sc) ** 2) / temp_y.total_size)
             if err < 1:
                 y = temp_y
             dt = dt * min([fac_max, max([fac_min, fac * (1 / err) ** (1 / 4)])])
@@ -138,11 +138,11 @@ def sirk_ode(ode: DAE,
 
     for i in range(int(T / dt)):
         J0 = ode.j(x[i])
-        J_inv = SolverzArray(linalg.inv(np.eye(x.total_size) - dt * J0 * r)) * dt
-        k1 = J_inv * ode.f(x[i])
-        k2 = J_inv * (ode.f(x[i] + a21 * k1) + J0 * r21 * k1)
-        k3 = J_inv * (ode.f(x[i] + a31 * k1 + a32 * k2) + J0 * (r31 * k1 + r32 * k2))
-        k4 = J_inv * (ode.f(x[i] + a41 * k1 + a42 * k2 + a43 * k3) + J0 * (r41 * k1 + r42 * k2 + r43 * k3))
+        J_inv = linalg.inv(np.eye(x.total_size) - dt * J0 * r) * dt
+        k1 = J_inv @ ode.f(x[i])
+        k2 = J_inv @ (ode.f(x[i] + a21 * k1) + J0 @ (r21 * k1))
+        k3 = J_inv @ (ode.f(x[i] + a31 * k1 + a32 * k2) + J0 @ (r31 * k1 + r32 * k2))
+        k4 = J_inv @ (ode.f(x[i] + a41 * k1 + a42 * k2 + a43 * k3) + J0 @ (r41 * k1 + r42 * k2 + r43 * k3))
         x[i + 1] = x[i] + b1 * k1 + b2 * k2 + b3 * k3 + b4 * k4
         # x[i + 1] = x[i] + b1 * k1 + b2 * k2 + b3 * k3
 
@@ -197,24 +197,24 @@ def sirk_dae(dae: DAE,
         if event:
             dae.update_param(event, t)
         J0 = dae.j(x[i], y[i])
-        J_inv = SolverzArray(linalg.inv(block_I - dt * J0 * r)) * dt
-        k1 = J_inv * (np.concatenate((dae.f(x[i], y[i]), dae.g(x[i], y[i])), axis=0))
-        k2 = J_inv * (np.concatenate(
+        J_inv = linalg.inv(block_I - dt * J0 * r) * dt
+        k1 = J_inv @ (np.concatenate((dae.f(x[i], y[i]), dae.g(x[i], y[i])), axis=0))
+        k2 = J_inv @ (np.concatenate(
             (dae.f(x[i] + a21 * k1[0:dae.state_num], y[i] + a21 * k1[dae.state_num:dae.var_size]),
              dae.g(x[i] + a21 * k1[0:dae.state_num], y[i] + a21 * k1[dae.state_num:dae.var_size])), axis=0)
-                      + J0 * r21 * k1)
-        k3 = J_inv * (np.concatenate((dae.f(x[i] + a31 * k1[0:dae.state_num] + a32 * k2[0:dae.state_num],
+                      + J0 @ (r21 * k1))
+        k3 = J_inv @ (np.concatenate((dae.f(x[i] + a31 * k1[0:dae.state_num] + a32 * k2[0:dae.state_num],
                                             y[i] + a31 * k1[dae.state_num:dae.var_size] + a32 * k2[dae.state_num:dae.var_size]),
                                       dae.g(x[i] + a31 * k1[0:dae.state_num] + a32 * k2[0:dae.state_num],
                                             y[i] + a31 * k1[dae.state_num:dae.var_size] + a32 * k2[dae.state_num:dae.var_size])), axis=0) +
-                      J0 * (r31 * k1 + r32 * k2))
-        k4 = J_inv * (
+                      J0 @ (r31 * k1 + r32 * k2))
+        k4 = J_inv @ (
                 np.concatenate(
                     (dae.f(x[i] + a41 * k1[0:dae.state_num] + a42 * k2[0:dae.state_num] + a43 * k3[0:dae.state_num],
                            y[i] + a41 * k1[dae.state_num:dae.var_size] + a42 * k2[dae.state_num:dae.var_size] + a43 * k3[dae.state_num:dae.var_size]),
                      dae.g(x[i] + a41 * k1[0:dae.state_num] + a42 * k2[0:dae.state_num] + a43 * k3[0:dae.state_num],
                            y[i] + a41 * k1[dae.state_num:dae.var_size] + a42 * k2[dae.state_num:dae.var_size] + a43 * k3[dae.state_num:dae.var_size])), axis=0) +
-                J0 * (r41 * k1 + r42 * k2 + r43 * k3))
+                J0 @ (r41 * k1 + r42 * k2 + r43 * k3))
         x[i + 1] = x[i] + b1 * k1[0:dae.state_num] + b2 * k2[0:dae.state_num] + b3 * k3[0:dae.state_num] + b4 * k4[0:dae.state_num]
         y[i + 1] = y[i] + b1 * k1[dae.state_num:dae.var_size] + b2 * k2[dae.state_num:dae.var_size] + b3 * k3[dae.state_num:dae.var_size] + b4 * k4[dae.state_num:dae.var_size]
 

@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from numbers import Number
-from typing import Optional, Union, List, Dict
+from typing import Optional, Union
 
 import numpy as np
-
-from .solverz_array import SolverzArray, zeros
 
 
 class Var:
@@ -14,7 +10,7 @@ class Var:
     def __init__(self,
                  name: str,
                  unit: Optional[str] = None,
-                 value: Union[SolverzArray, np.ndarray, list] = None
+                 value: Union[np.ndarray, list] = None
                  ):
         self.name = name
         self.unit = unit
@@ -23,19 +19,18 @@ class Var:
         self.v = value
 
     @property
-    def v(self) -> SolverzArray:
+    def v(self) -> np.ndarray:
         return self.__v
 
     @v.setter
-    def v(self, value: Union[SolverzArray, np.ndarray, list]):
+    def v(self, value: Union[np.ndarray, list]):
 
-        if not self.initialized:
-            self.initialized = True
-
-        if isinstance(value, np.ndarray) or isinstance(value, list):
-            self.__v = SolverzArray(value)
+        if isinstance(value, list):
+            self.__v = np.array(value)
         else:
             self.__v = value
+        if not self.initialized:
+            self.initialized = True
 
     def __repr__(self):
         return f"Var: {self.name}\nvalue: {self.v}"
@@ -46,7 +41,7 @@ class TimeVar(Var):
     def __init__(self,
                  name: str,
                  unit: Optional[str] = None,
-                 value: Union[SolverzArray, np.ndarray, list] = None,
+                 value: Union[np.ndarray, list] = None,
                  length: int = 100
                  ):
         """
@@ -60,30 +55,29 @@ class TimeVar(Var):
         self.len = length
 
     @property
-    def v(self) -> SolverzArray:
+    def v(self) -> np.ndarray:
         return self.__v
 
     @v.setter
-    def v(self, value: Union[SolverzArray, np.ndarray, list], initial=True):
-
-        if not self.initialized:
-            self.initialized = True
-
-        if value is not None:
-            # TODO: input with column_size > 1
-            if isinstance(value, np.ndarray) or isinstance(value, list) or isinstance(value, Number):
-                temp = SolverzArray(value)
-                if temp.column_size == 1:
-                    self.__v = zeros((temp.row_size, self.len))
-                    self.__v[:, 0] = temp.array.reshape((-1,))
+    def v(self, value: Union[np.ndarray, list, int, float], initial_condition=True):
+        if initial_condition:
+            # the case of setting initial conditions
+            if value is not None:
+                if isinstance(value, list) or isinstance(value, int) or isinstance(value, float):
+                    temp = np.array(value).reshape(-1,)
                 else:
-                    raise ValueError(f'column size of input value > 1')
-            else:
-                if value.column_size > 1:
-                    self.__v = zeros((value.row_size, self.len))
-                    self.__v[:, 0] = value.array.reshape((-1,))
-                else:
-                    raise ValueError(f'column size of input value > 1')
+                    temp = value.reshape(-1,)
+                # initialize self.__v array with the shape of initial conditions
+                self.__v = np.zeros((temp.shape[0], self.len))
+                self.__v[:, 0] = temp
+                if not self.initialized:
+                    self.initialized = True
+            # else:
+            #     raise TypeError(f'Input value should not be of None type!')
+        else:
+            # TODO: the case of setting non-initial conditions
+            pass
+
 
     def __getitem__(self, item):
         if isinstance(item, int):

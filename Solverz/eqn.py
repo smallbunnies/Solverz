@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-import warnings
 from copy import deepcopy
-from typing import Union, List, Dict, Callable, Tuple
+from typing import Union, List, Dict, Callable
 
 import numpy as np
-from sympy import sympify, lambdify, symbols, Symbol, Expr, preorder_traversal, Basic
+from sympy import sympify, lambdify, Symbol, preorder_traversal, Basic
 
-from .algebra import Sympify_Mapping, F, G, X, Y, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols
+from .algebra import Sympify_Mapping, F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, traverse_for_mul
 from .param import Param
 from .solverz_array import SolverzArray, Lambdify_Mapping
-from .var import Var
-from .variables import Vars
 
 
 class Eqn:
@@ -35,17 +32,19 @@ class Eqn:
             temp_sympify_mapping = dict()
             for symbol in self.EQN.free_symbols:
                 temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
+                self.EQN = sympify(self.e_str, temp_sympify_mapping)
         else:
             temp_sympify_mapping = deepcopy(Sympify_Mapping)
             for symbol in self.EQN.free_symbols:
                 temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
+            # traverse the Expr tree and replace '*' by Mat_Mul
+            self.EQN = traverse_for_mul(sympify(self.e_str, temp_sympify_mapping))
 
-        self.EQN = sympify(self.e_str, temp_sympify_mapping)
         self.SYMBOLS: List[Symbol] = list(self.EQN.free_symbols)
         self.NUM_EQN: Callable = lambdify(self.SYMBOLS, self.EQN, [Lambdify_Mapping, 'numpy'])
 
-    def eval(self, *args: Union[SolverzArray, np.ndarray]) -> np.ndarray:
-        return np.asarray(self.NUM_EQN(*args))
+    def eval(self, *args: Union[np.ndarray]) -> np.ndarray:
+        return self.NUM_EQN(*args)
 
     def diff(self, var: str):
         """"""

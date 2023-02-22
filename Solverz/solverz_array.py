@@ -121,19 +121,6 @@ def implements(np_function):
     return decorator
 
 
-@implements(np.diag)
-def diag(x):
-    """
-    Generate diagonal matrix of given vector X
-    :PARAM X: vector
-    :return: diagonal matrix
-    """
-    if x.column_size == 1 or x.row_size == 1:
-        return np.diag(np.reshape(np.asarray(x), (-1,)))
-    else:
-        raise ValueError(f"Vector input required but {x.column_size} columns detected!")
-
-
 @implements(np.transpose)
 def transpose(x):
     """
@@ -157,18 +144,27 @@ def concatenate(arrays, axis=None):
     return np.concatenate(tuple(arrays_), axis=axis)
 
 
-def mat_multiply(*args: Union[SolverzArray, np.ndarray, list]):
+def matmul(*args: np.ndarray) -> np.ndarray:
     """
     np.multiply supports only two arguments
-    So a new function is designed to generate multiplication of args
-    :PARAM args:
+    So a new function is presented to generate multiplication of np.ndarray
+    :PARAM args: np.ndarray
     :return:
     """
 
-    return reduce(lambda x, y: x * y, [SolverzArray(arg) if isinstance(arg, list) else arg for arg in args])
+    return reduce(np.dot, args)
 
 
-Lambdify_Mapping = {'Mat_Mul': mat_multiply, 'Diagonal': np.diag}
+def diag(x: np.ndarray) -> np.ndarray:
+    """
+    Generate diagonal matrix of given vector X
+    :PARAM X: vector
+    :return: diagonal matrix
+    """
+    return np.diag(x.reshape(-1, ))
+
+
+Lambdify_Mapping = {'Mat_Mul': matmul, 'Diagonal': diag}
 
 
 def zeros(shape: Tuple[int, int]) -> SolverzArray:
