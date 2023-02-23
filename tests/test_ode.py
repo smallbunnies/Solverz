@@ -11,7 +11,7 @@ import pandas as pd
 
 
 x = TimeVar('x')
-x.v = [0]
+x.v0 = [0]
 f1 = Ode(name='f', e_str='-2*(x-cos(t))', diff_var='x')
 
 x = TimeVars(x, length=201)

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import numpy as np
-from numpy import abs, max, min, linalg, sum, sqrt
 import tqdm
+from numpy import abs, max, min, linalg, sum, sqrt
 
-from Solverz.algebra import AliasVar, ComputeParam, F, X, Y
+from .algebra import AliasVar, ComputeParam, F, X, Y
 from .equations import AE, DAE
-from .solverz_array import SolverzArray
-from .variables import Vars, TimeVars
 from .event import Event
+from .var import TimeVar
+from .variables import Vars, TimeVars
 
 
 def inv(mat: np.ndarray):
@@ -28,7 +28,7 @@ def nr_method(eqn: AE,
 def continuous_nr(eqn: AE,
                   y: Vars,
                   tol: float = 1e-8):
-    def f(y) -> SolverzArray:
+    def f(y) -> np.ndarray:
         return -inv(eqn.j(y)) @ eqn.g(y)
 
     dt = 1
@@ -41,7 +41,6 @@ def continuous_nr(eqn: AE,
     ite = 0
     while max(abs(eqn.g(y))) > tol:
         ite = ite + 1
-        # TODO: output iteration numbers
         err = 2
         while err > 1:
             k1 = f(y)
@@ -137,13 +136,14 @@ def sirk_ode(ode: DAE,
     # b3 = 1 / 6
 
     for i in range(int(T / dt)):
-        J0 = ode.j(x[i])
+        x0 = x[i]
+        J0 = ode.j(x0)
         J_inv = linalg.inv(np.eye(x.total_size) - dt * J0 * r) * dt
-        k1 = J_inv @ ode.f(x[i])
-        k2 = J_inv @ (ode.f(x[i] + a21 * k1) + J0 @ (r21 * k1))
-        k3 = J_inv @ (ode.f(x[i] + a31 * k1 + a32 * k2) + J0 @ (r31 * k1 + r32 * k2))
-        k4 = J_inv @ (ode.f(x[i] + a41 * k1 + a42 * k2 + a43 * k3) + J0 @ (r41 * k1 + r42 * k2 + r43 * k3))
-        x[i + 1] = x[i] + b1 * k1 + b2 * k2 + b3 * k3 + b4 * k4
+        k1 = J_inv @ ode.f(x0)
+        k2 = J_inv @ (ode.f(x0 + a21 * k1) + J0 @ (r21 * k1))
+        k3 = J_inv @ (ode.f(x0 + a31 * k1 + a32 * k2) + J0 @ (r31 * k1 + r32 * k2))
+        k4 = J_inv @ (ode.f(x0 + a41 * k1 + a42 * k2 + a43 * k3) + J0 @ (r41 * k1 + r42 * k2 + r43 * k3))
+        x[i + 1] = x0 + b1 * k1 + b2 * k2 + b3 * k3 + b4 * k4
         # x[i + 1] = x[i] + b1 * k1 + b2 * k2 + b3 * k3
 
     return x
@@ -184,10 +184,10 @@ def sirk_dae(dae: DAE,
     # b3 = 1 / 6
 
     dae.assign_eqn_var_address(x[0], y[0])
-    block_I = np.zeros((dae.var_size, dae.var_size))
-    block_I[np.ix_(range(dae.state_num), range(dae.state_num))] = block_I[np.ix_(range(dae.state_num),
-                                                                                 range(dae.state_num))] + np.eye(
-        dae.state_num)
+    n_v = dae.var_size
+    n_s = dae.state_num
+    block_I = np.zeros((n_v, n_v))
+    block_I[np.ix_(range(n_s), range(n_s))] = block_I[np.ix_(range(n_s), range(n_s))] + np.eye(n_s)
 
     i = 0
     t = 0
@@ -196,27 +196,29 @@ def sirk_dae(dae: DAE,
     while abs(t - T) > dt / 10:
         if event:
             dae.update_param(event, t)
-        J0 = dae.j(x[i], y[i])
+        x0 = x[i]
+        y0 = y[i]
+        J0 = dae.j(x0, y0)
         J_inv = linalg.inv(block_I - dt * J0 * r) * dt
-        k1 = J_inv @ (np.concatenate((dae.f(x[i], y[i]), dae.g(x[i], y[i])), axis=0))
+        k1 = J_inv @ (np.concatenate((dae.f(x0, y0), dae.g(x0, y0)), axis=0))
         k2 = J_inv @ (np.concatenate(
-            (dae.f(x[i] + a21 * k1[0:dae.state_num], y[i] + a21 * k1[dae.state_num:dae.var_size]),
-             dae.g(x[i] + a21 * k1[0:dae.state_num], y[i] + a21 * k1[dae.state_num:dae.var_size])), axis=0)
+            (dae.f(x0 + a21 * k1[0:n_s], y0 + a21 * k1[n_s:n_v]),
+             dae.g(x0 + a21 * k1[0:n_s], y0 + a21 * k1[n_s:n_v])), axis=0)
                       + J0 @ (r21 * k1))
-        k3 = J_inv @ (np.concatenate((dae.f(x[i] + a31 * k1[0:dae.state_num] + a32 * k2[0:dae.state_num],
-                                            y[i] + a31 * k1[dae.state_num:dae.var_size] + a32 * k2[dae.state_num:dae.var_size]),
-                                      dae.g(x[i] + a31 * k1[0:dae.state_num] + a32 * k2[0:dae.state_num],
-                                            y[i] + a31 * k1[dae.state_num:dae.var_size] + a32 * k2[dae.state_num:dae.var_size])), axis=0) +
+        k3 = J_inv @ (np.concatenate((dae.f(x0 + a31 * k1[0:n_s] + a32 * k2[0:n_s],
+                                            y0 + a31 * k1[n_s:n_v] + a32 * k2[n_s:n_v]),
+                                      dae.g(x0 + a31 * k1[0:n_s] + a32 * k2[0:n_s],
+                                            y0 + a31 * k1[n_s:n_v] + a32 * k2[n_s:n_v])), axis=0) +
                       J0 @ (r31 * k1 + r32 * k2))
         k4 = J_inv @ (
                 np.concatenate(
-                    (dae.f(x[i] + a41 * k1[0:dae.state_num] + a42 * k2[0:dae.state_num] + a43 * k3[0:dae.state_num],
-                           y[i] + a41 * k1[dae.state_num:dae.var_size] + a42 * k2[dae.state_num:dae.var_size] + a43 * k3[dae.state_num:dae.var_size]),
-                     dae.g(x[i] + a41 * k1[0:dae.state_num] + a42 * k2[0:dae.state_num] + a43 * k3[0:dae.state_num],
-                           y[i] + a41 * k1[dae.state_num:dae.var_size] + a42 * k2[dae.state_num:dae.var_size] + a43 * k3[dae.state_num:dae.var_size])), axis=0) +
+                    (dae.f(x0 + a41 * k1[0:n_s] + a42 * k2[0:n_s] + a43 * k3[0:n_s],
+                           y0 + a41 * k1[n_s:n_v] + a42 * k2[n_s:n_v] + a43 * k3[n_s:n_v]),
+                     dae.g(x0 + a41 * k1[0:n_s] + a42 * k2[0:n_s] + a43 * k3[0:n_s],
+                           y0 + a41 * k1[n_s:n_v] + a42 * k2[n_s:n_v] + a43 * k3[n_s:n_v])), axis=0) +
                 J0 @ (r41 * k1 + r42 * k2 + r43 * k3))
-        x[i + 1] = x[i] + b1 * k1[0:dae.state_num] + b2 * k2[0:dae.state_num] + b3 * k3[0:dae.state_num] + b4 * k4[0:dae.state_num]
-        y[i + 1] = y[i] + b1 * k1[dae.state_num:dae.var_size] + b2 * k2[dae.state_num:dae.var_size] + b3 * k3[dae.state_num:dae.var_size] + b4 * k4[dae.state_num:dae.var_size]
+        x[i + 1] = x0 + b1 * k1[0:n_s] + b2 * k2[0:n_s] + b3 * k3[0:n_s] + b4 * k4[0:n_s]
+        y[i + 1] = y0 + b1 * k1[n_s:n_v] + b2 * k2[n_s:n_v] + b3 * k3[n_s:n_v] + b4 * k4[n_s:n_v]
 
         pbar.update(dt)
         t = t + dt
@@ -245,9 +247,108 @@ def improved_euler(ode: DAE,
     return x
 
 
-def ode45():
+def ode45(ode: DAE,
+          y: TimeVars,
+          dt,
+          T,
+          atol=1e-6,
+          rtol=1e-3,
+          event: Event = None):
     """
-    Ode 45 with dense output
+    Ode45 with dense output
     :return:
     """
+
+    Pow = 1 / 5
+    # c2, c3, c4, c5 = 1 / 5, 3 / 10, 4 / 5, 8 / 9 for non-autonomous equations
+    a11, a21, a31, a41, a51, a61 = 1 / 5, 3 / 40, 44 / 45, 19372 / 6561, 9017 / 3168, 35 / 384
+    a22, a32, a42, a52 = 9 / 40, -56 / 15, -25360 / 2187, -355 / 33
+    a33, a43, a53, a63 = 32 / 9, 64448 / 6561, 46732 / 5247, 500 / 1113
+    a44, a54, a64 = -212 / 729, 49 / 176, 125 / 192
+    a55, a65 = -5103 / 18656, -2187 / 6784
+    a66 = 11 / 84
+    e1, e3, e4, e5, e6, e7 = 71 / 57600, -71 / 16695, 71 / 1920, -17253 / 339200, 22 / 525, -1 / 40
+    hmax = np.abs(T)
+    i = 0
+    t = 0
+    tout = TimeVar()
+    threshold = atol / rtol
+    y0 = y[0]
+    done = False
+    while not done:
+        hmin = 16 * np.spacing(dt)
+        dt = np.min([hmax, np.max([hmin, dt])])
+
+        # Stretch the step if within 10% of T-t.
+        if 1.1 * dt >= np.abs(T - t):
+            dt = T - t
+            done = True
+
+        # TODO: 2. Compute an initial step size
+        nofailed = True
+        while True:
+            k1 = ode.f(y0)
+            k2 = ode.f(y0 + dt * a11 * k1)
+            k3 = ode.f(y0 + dt * (a21 * k1 + a22 * k2))
+            k4 = ode.f(y0 + dt * (a31 * k1 + a32 * k2 + a33 * k3))
+            k5 = ode.f(y0 + dt * (a41 * k1 + a42 * k2 + a43 * k3 + a44 * k4))
+            k6 = ode.f(y0 + dt * (a51 * k1 + a52 * k2 + a53 * k3 + a54 * k4 + a55 * k5))
+            ynew = y0 + dt * (a61 * k1 + a63 * k3 + a64 * k4 + a65 * k5 + a66 * k6)  # y6 has nothing to do with k7
+            k7 = ode.f(ynew)
+            kE = k1 * e1 + k3 * e3 + k4 * e4 + k5 * e5 + k6 * e6 + k7 * e7
+            tnew = t + dt
+            if done:
+                tnew = T
+            dt = tnew - t  # purify dt
+            # error control
+            # error estimation
+            err = dt * linalg.norm((kE / np.maximum(np.maximum(abs(y0), abs(ynew)), threshold)), np.Inf)
+
+            if err > rtol:  # failed step
+                if dt <= hmin:
+                    raise ValueError(f'IntegrationTolNotMet step size: {dt} hmin: {hmin}')
+                if nofailed:  # There haven't been failed attempts
+                    nofailed = False
+                    dt = np.max([hmin, dt * np.max([0.1, 0.8 * (rtol / err) ** Pow])])
+                else:
+                    dt = np.max([hmin, 0.5 * dt])
+                done = False
+            else:  # Successful step
+                break
+        i = i + 1
+
+        # TODO: 3. Event
+
+        # Output
+        y[i + 1] = ynew
+        # TODO: 1. store step size
+
+        if done:
+            break
+        if nofailed:  # Enlarge step size if no failure is met
+            temp = 1.25 * (rtol / err) ** Pow
+            if temp > 0.2:
+                dt = dt / temp
+            else:
+                dt = 5 * dt
+
+        t = tnew
+        y0 = ynew
+    return y
+
+
+def nrtp45():
+    """
+    Dense output of ODE45
+    :return:
+    """
+    # TODO: interpolation
+    pass
+
+
+def ode15s(ode: DAE,
+           y: TimeVars,
+           dt,
+           T,
+           event: Event = None):
     pass

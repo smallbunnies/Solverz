@@ -35,6 +35,9 @@ class VarsBasic:
             self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0] = self.v[var_name]
             self.v[var_name] = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0]
 
+    def __array__(self):
+        return self.array
+
     @property
     def v(self):
         return self.__v
@@ -67,9 +70,6 @@ class Vars(VarsBasic):
             self.v[key] = value
         else:
             raise ValueError(f'There is no variable {key}!')
-
-    def __array__(self):
-        return self.array
 
     def __repr__(self):
         return f'variables {list(self.v.keys())}'
@@ -202,7 +202,7 @@ class TimeVars(VarsBasic):
         var = []
 
         for time_var_ in time_var:
-            var = [*var, time_var_[0]]
+            var = [*var, Var(name=time_var_.name, value=time_var_.v0)]
 
         super().__init__(var)
         self.len = length
