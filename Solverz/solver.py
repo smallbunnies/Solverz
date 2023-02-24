@@ -249,8 +249,8 @@ def improved_euler(ode: DAE,
 
 def ode45(ode: DAE,
           y: TimeVars,
-          dt,
           T,
+          dt=None,
           atol=1e-6,
           rtol=1e-3,
           event: Event = None):
@@ -272,8 +272,18 @@ def ode45(ode: DAE,
     i = 0
     t = 0
     tout = TimeVar('tout', length=100)
+    hmin = 16 * np.spacing(t)
     threshold = atol / rtol
     y0 = y[0]
+
+    # Compute an initial step size using f(y)
+    if dt is None:
+        dt = hmax
+    dt_ = linalg.norm(ode.f(y0) / np.maximum(np.abs(y0), threshold), np.Inf) / (0.8 * rtol ** Pow)
+    if dt * dt_ > 1:
+        dt = 1 / dt_
+    dt = np.maximum(dt, hmin)
+
     done = False
     while not done:
         hmin = 16 * np.spacing(dt)
@@ -284,7 +294,6 @@ def ode45(ode: DAE,
             dt = T - t
             done = True
 
-        # TODO: 2. Compute an initial step size
         nofailed = True
         while True:
             k1 = ode.f(y0)
@@ -335,8 +344,8 @@ def ode45(ode: DAE,
         t = tnew
         y0 = ynew
 
-    tout = tout[0:i+1]
-    y = y[0:i+1]
+    tout = tout[0:i + 1]
+    y = y[0:i + 1]
     return tout, y
 
 
