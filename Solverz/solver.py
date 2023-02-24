@@ -271,7 +271,7 @@ def ode45(ode: DAE,
     hmax = np.abs(T)
     i = 0
     t = 0
-    tout = TimeVar()
+    tout = TimeVar('tout', length=100)
     threshold = atol / rtol
     y0 = y[0]
     done = False
@@ -320,13 +320,13 @@ def ode45(ode: DAE,
         # TODO: 3. Event
 
         # Output
-        y[i + 1] = ynew
-        # TODO: 1. store step size
+        y[i] = ynew
+        tout[i] = tnew
 
         if done:
             break
         if nofailed:  # Enlarge step size if no failure is met
-            temp = 1.25 * (rtol / err) ** Pow
+            temp = 1.25 * (err / rtol) ** Pow
             if temp > 0.2:
                 dt = dt / temp
             else:
@@ -334,7 +334,10 @@ def ode45(ode: DAE,
 
         t = tnew
         y0 = ynew
-    return y
+
+    tout = tout[0:i+1]
+    y = y[0:i+1]
+    return tout, y
 
 
 def nrtp45():

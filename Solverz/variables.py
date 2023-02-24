@@ -206,12 +206,21 @@ class TimeVars(VarsBasic):
 
         super().__init__(var)
         self.len = length
+
+        for time_var_ in time_var:
+            if time_var_.array.ndim == 1:
+                self.v[time_var_.name] = np.zeros((1, self.len))
+                self.v[time_var_.name][0, 0:time_var_.array.shape[0]] = time_var_.array
+            else:
+                self.v[time_var_.name] = np.zeros((self.var_size[time_var_.name], self.len))
+                self.v[time_var_.name][0:self.var_size[time_var_.name], 0:time_var_.array.shape[1]] = time_var_.array
+
         self.link_var_and_array()
 
     def link_var_and_array(self):
         self.array = np.zeros((self.total_size, self.len))
         for var_name in self.var_size.keys():
-            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0] = self.v[var_name]
+            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, :] = self.v[var_name]
             self.v[var_name] = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, :]
 
     def __getitem__(self, item):
@@ -232,6 +241,11 @@ class TimeVars(VarsBasic):
                 return Vars(temp_vars)
         elif isinstance(item, str):
             return self.v[item]
+        elif isinstance(item, slice):
+            time_var = []
+            for name in self.var_size.keys():
+                time_var = [*time_var, TimeVar(name=name, value=self.v[name][:, 0:item.stop].reshape((-1, item.stop - item.start)), length=item.stop - item.start)]
+            return TimeVars(time_var, length=item.stop - item.start)
         else:
             # not implemented
             raise NotImplementedError(f'Unsupported indices')
@@ -252,13 +266,13 @@ class TimeVars(VarsBasic):
         else:
             raise NotImplementedError(f'Unsupported indices')
 
-    @classmethod
-    def time_vars(cls):
+    @property
+    def T(self):
         """
-        constructor of TimeVars
+        Transpose of TimeVars
         :return:
         """
-        pass
+        return self.array.T
 
     def __repr__(self):
         return f'Time-series (size {self.len}) {list(self.v.keys())}'

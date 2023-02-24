@@ -25,12 +25,12 @@ class Var:
     @v.setter
     def v(self, value: Union[np.ndarray, list]):
 
+        if value is not None:  # not None
+            self.initialized = True
         if isinstance(value, list):
             self.array = np.array(value)
         else:
             self.array = value
-        if not self.initialized:
-            self.initialized = True
 
     def __array__(self):
         return self.array
@@ -39,7 +39,7 @@ class Var:
         return f"Var: {self.name}\nvalue: {self.v}"
 
 
-class TimeVar(Var):
+class TimeVar:
 
     def __init__(self,
                  name: str,
@@ -54,8 +54,28 @@ class TimeVar(Var):
         :param value:
         :param length: length of time-series variables
         """
-        super().__init__(name, unit, value)
+        self.name = name
+        self.unit = unit
+        self.initialized = False
         self.len = length
+        self.array = np.zeros((self.len,))  # set default array
+
+        if isinstance(value, list):
+            self.v0 = value
+        elif isinstance(value, np.ndarray):  # initialize with given value
+            if value.ndim == 1:
+                self.len = value.shape[0]
+                self.v0 = value[0]
+            else:
+                if self.len == value.shape[0]:
+                    value = value.T
+                    self.array = value
+                    self.initialized = True
+                elif self.len == value.shape[1]:
+                    self.array = value
+                    self.initialized = True
+                else:
+                    raise ValueError(f"Incompatible Input shape: {value.shape} and TimeVar length: {self.len}")
 
     @property
     def v0(self) -> np.ndarray:
@@ -63,24 +83,22 @@ class TimeVar(Var):
             if self.array.ndim > 1:
                 return self.array[:, 0]
             else:
-                return self.array[:1]  # while self.array[0] returns float instead of np.ndarray
+                return self.array[:1]  # because self.array[0] returns float instead of np.ndarray
         else:
             raise ValueError('Uninitialized')
 
     @v0.setter  # initializer
     def v0(self, value: Union[np.ndarray, list, int, float]):
 
-        # the case of setting initial conditions
         if value is not None:
             if isinstance(value, list) or isinstance(value, int) or isinstance(value, float):
                 temp = np.array(value).reshape(-1, )
             else:
                 temp = value.reshape(-1, )
-            # initialize self.__v array with the shape of initial conditions
-            if temp.shape[0] > 1:
+            if temp.shape[0] > 1:  # TimeVar "self.name" contains more than one variable
                 self.array = np.zeros((temp.shape[0], self.len))
                 self.array[:, 0] = temp
-            else:
+            else:  # TimeVar "self.name" contains only one variable
                 self.array = np.zeros((self.len,))
                 self.array[0] = temp
             if not self.initialized:
@@ -93,6 +111,9 @@ class TimeVar(Var):
 
     def __setitem__(self, item, value):
         self.array.__setitem__(item, value)
+
+    def __array__(self):
+        return self.array
 
     def extend(self, length=50):
         self.array = np.concatenate((self.array, np.zeros((self.array.shape[0], length))), axis=1)
