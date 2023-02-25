@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import tqdm
 from numpy import abs, max, min, linalg, sum, sqrt
+from typing import Union, List
 
 from .algebra import AliasVar, ComputeParam, F, X, Y
 from .equations import AE, DAE
@@ -249,11 +250,12 @@ def improved_euler(ode: DAE,
 
 def ode45(ode: DAE,
           y: TimeVars,
-          T,
+          tspan: Union[List, np.ndarray],
           dt=None,
           atol=1e-6,
           rtol=1e-3,
-          event: Event = None):
+          event: Event = None,
+          output_k=False):
     """
     Ode45 with dense output
     :return:
@@ -268,6 +270,9 @@ def ode45(ode: DAE,
     a55, a65 = -5103 / 18656, -2187 / 6784
     a66 = 11 / 84
     e1, e3, e4, e5, e6, e7 = 71 / 57600, -71 / 16695, 71 / 1920, -17253 / 339200, 22 / 525, -1 / 40
+
+    tspan = np.array(tspan)
+    T = tspan[-1]
     hmax = np.abs(T)
     i = 0
     t = 0
@@ -275,6 +280,8 @@ def ode45(ode: DAE,
     hmin = 16 * np.spacing(t)
     threshold = atol / rtol
     y0 = y[0]
+    if output_k:
+        kout = np.zeros((100, ode.f(y0).shape[0], 7))
 
     # Compute an initial step size using f(y)
     if dt is None:
@@ -331,6 +338,8 @@ def ode45(ode: DAE,
         # Output
         y[i] = ynew
         tout[i] = tnew
+        if output_k:
+            kout[i - 1, :, :] = np.array([k1, k2, k3, k4, k5, k6, k7]).T
 
         if done:
             break
@@ -346,16 +355,31 @@ def ode45(ode: DAE,
 
     tout = tout[0:i + 1]
     y = y[0:i + 1]
-    return tout, y
+    if output_k:
+        kout = kout[0:i]
+        return tout, y, kout
+    else:
+        return tout, y
 
 
-def nrtp45():
+def nrtp45(tinterp: np.ndarray, t: float, y: np.ndarray, dt: float, k: np.ndarray) -> np.ndarray:
     """
-    Dense output of ODE45
+    Dense output of ODE45 with continuous Runge-Kutta method
     :return:
     """
-    # TODO: interpolation
-    pass
+    # Define the BI matrix
+    BI = np.array([
+        [1, - 183 / 64, 37 / 12, - 145 / 128],
+        [0, 0, 0, 0],
+        [0, 1500 / 371, - 1000 / 159, 1000 / 371],
+        [0, - 125 / 32, 125 / 12, - 375 / 64],
+        [0, 9477 / 3392, - 729 / 106, 25515 / 6784],
+        [0, - 11 / 7, 11 / 3, - 55 / 28],
+        [0, 3 / 2, - 4, 5 / 2]
+    ])
+    s = (tinterp - t) / dt
+    yinterp = np.repeat(y.reshape(-1, 1), tinterp.shape[0], axis=1) + k @ (dt * BI) @ np.cumprod([s, s, s, s], axis=0)
+    return yinterp
 
 
 def ode15s(ode: DAE,
