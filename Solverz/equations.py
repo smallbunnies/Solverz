@@ -327,7 +327,7 @@ class DAE(Equations):
                     raise ValueError(f"DAE {self.name} has no variable {var_name}")
             temp = temp + xy.total_size
 
-        self.var_size = temp
+        self.var_size: int = temp
 
     def f(self, *xys) -> np.ndarray:
         """

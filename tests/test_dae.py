@@ -22,9 +22,9 @@ f = Ode(name='f', e_str='-x**3+0.5*y**2', diff_var='x')
 g = Eqn(name='g', e_str='x**2+y**2-2')
 dae = DAE([f, g])
 x = TimeVar('x')
-x.v = [1]
+x.v0 = [1]
 y = TimeVar('y')
-y.v = [1]
+y.v0 = [1]
 
 xy = implicit_trapezoid(dae, TimeVars([x, y], length=201), 0.1, 20)
 plt.plot(np.arange(0, 20.1, 0.1), xy.array[0, :].reshape((-1,)))

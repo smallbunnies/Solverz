@@ -14,29 +14,32 @@ class Var:
                  ):
         self.name = name
         self.unit = unit
-        self.__v = None
+        self.array = None
         self.initialized = False
         self.v = value
 
     @property
     def v(self) -> np.ndarray:
-        return self.__v
+        return self.array
 
     @v.setter
     def v(self, value: Union[np.ndarray, list]):
 
-        if isinstance(value, list):
-            self.__v = np.array(value)
-        else:
-            self.__v = value
-        if not self.initialized:
+        if value is not None:  # not None
             self.initialized = True
+        if isinstance(value, list):
+            self.array = np.array(value)
+        else:
+            self.array = value
+
+    def __array__(self):
+        return self.array
 
     def __repr__(self):
         return f"Var: {self.name}\nvalue: {self.v}"
 
 
-class TimeVar(Var):
+class TimeVar:
 
     def __init__(self,
                  name: str,
@@ -51,41 +54,69 @@ class TimeVar(Var):
         :param value:
         :param length: length of time-series variables
         """
-        super().__init__(name, unit, value)
+        self.name = name
+        self.unit = unit
+        self.initialized = False
         self.len = length
+        self.array = np.zeros((self.len,))  # set default array
+
+        if isinstance(value, list):
+            self.v0 = value
+        elif isinstance(value, np.ndarray):  # initialize with given value
+            if value.ndim == 1:
+                self.len = value.shape[0]
+                self.v0 = value[0]
+            else:
+                if self.len == value.shape[0]:
+                    value = value.T
+                    self.array = value
+                    self.initialized = True
+                elif self.len == value.shape[1]:
+                    self.array = value
+                    self.initialized = True
+                else:
+                    raise ValueError(f"Incompatible Input shape: {value.shape} and TimeVar length: {self.len}")
 
     @property
-    def v(self) -> np.ndarray:
-        return self.__v
-
-    @v.setter
-    def v(self, value: Union[np.ndarray, list, int, float], initial_condition=True):
-        if initial_condition:
-            # the case of setting initial conditions
-            if value is not None:
-                if isinstance(value, list) or isinstance(value, int) or isinstance(value, float):
-                    temp = np.array(value).reshape(-1,)
-                else:
-                    temp = value.reshape(-1,)
-                # initialize self.__v array with the shape of initial conditions
-                self.__v = np.zeros((temp.shape[0], self.len))
-                self.__v[:, 0] = temp
-                if not self.initialized:
-                    self.initialized = True
-            # else:
-            #     raise TypeError(f'Input value should not be of None type!')
+    def v0(self) -> np.ndarray:
+        if self.initialized:
+            if self.array.ndim > 1:
+                return self.array[:, 0]
+            else:
+                return self.array[:1]  # because self.array[0] returns float instead of np.ndarray
         else:
-            # TODO: the case of setting non-initial conditions
-            pass
+            raise ValueError('Uninitialized')
 
+    @v0.setter  # initializer
+    def v0(self, value: Union[np.ndarray, list, int, float]):
+
+        if value is not None:
+            if isinstance(value, list) or isinstance(value, int) or isinstance(value, float):
+                temp = np.array(value).reshape(-1, )
+            else:
+                temp = value.reshape(-1, )
+            if temp.shape[0] > 1:  # TimeVar "self.name" contains more than one variable
+                self.array = np.zeros((temp.shape[0], self.len))
+                self.array[:, 0] = temp
+            else:  # TimeVar "self.name" contains only one variable
+                self.array = np.zeros((self.len,))
+                self.array[0] = temp
+            if not self.initialized:
+                self.initialized = True
+        else:
+            raise TypeError(f'Input value should not be of None type!')
 
     def __getitem__(self, item):
-        if isinstance(item, int):
-            if item > self.len:
-                raise ValueError(f'Exceed the maximum index, which is {self.len}')
-            elif not self.initialized:
-                raise NotImplementedError(f'TimeVar {self.name} Uninitialised')
-            else:
-                return Var(self.name, self.unit, self.v[:, item])
-        else:
-            raise NotImplementedError(f'Unsupported indices')
+        return self.array[item]
+
+    def __setitem__(self, item, value):
+        self.array.__setitem__(item, value)
+
+    def __array__(self):
+        return self.array
+
+    def extend(self, length=50):
+        self.array = np.concatenate((self.array, np.zeros((self.array.shape[0], length))), axis=1)
+
+    def __repr__(self):
+        return f"TimeVar: {self.name}\n size: {self.array.shape} value: {self.array}"
