@@ -273,7 +273,7 @@ def ode45(ode: DAE,
 
     tspan = np.array(tspan)
     T = tspan[-1]
-    hmax = np.abs(T)
+    hmax = np.abs(T)/10
     i = 0
     t = 0
     tout = TimeVar('tout', length=100)
@@ -318,7 +318,7 @@ def ode45(ode: DAE,
             dt = tnew - t  # purify dt
             # error control
             # error estimation
-            err = dt * linalg.norm((kE / np.maximum(np.maximum(abs(y0), abs(ynew)), threshold)), np.Inf)
+            err = dt * linalg.norm(kE / np.maximum(np.maximum(abs(y0), abs(ynew)).reshape(-1,), threshold), np.Inf)
 
             if err > rtol:  # failed step
                 if dt <= hmin:
