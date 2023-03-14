@@ -83,12 +83,16 @@ xy = implicit_trapezoid(m3b9,
                                  length=int(T / dt) + 1),
                         dt=dt, T=T, event=e1)
 
-# plt.figure(1)
+# plt.figure(1, figsize=(10,6))
 # labels = []
 # for i in range(3):
 #     plt.plot(np.arange(0, T + dt, dt), xy.array[i + 3, :].reshape((-1,)))
 #     labels.append(r'$\omega_%i$' % i)
-# plt.legend(labels)
+# plt.xlabel('Time/s', fontsize=15)
+# plt.ylabel(r'$\omega$/p.u.', fontsize=15)
+# plt.tick_params(labelsize=15)
+# plt.legend(labels, fontsize=15)
+# plt.show()
 #
 # plt.figure(2)
 # labels = []
