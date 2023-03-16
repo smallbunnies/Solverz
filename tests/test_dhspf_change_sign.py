@@ -1,16 +1,10 @@
-import numpy as np
 import pandas as pd
 
-from copy import deepcopy
-
 from Solverz.eqn import Eqn
-from Solverz.miscellaneous import derive_dhs_param_var
-from Solverz.param import Param
-from Solverz.routine import Routine
-from Solverz.solver import *
-from Solverz.var import Var
-from Solverz.variables import Vars
 from Solverz.equations import AE
+from Solverz.miscellaneous import derive_dhs_param_var
+from Solverz.solver import *
+from Solverz.variables import Vars
 
 var_dict, param_dict = derive_dhs_param_var('../instances/4node3pipe_change_sign.xlsx')
 

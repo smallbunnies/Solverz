@@ -1,4 +1,4 @@
-from Solverz.algebra import AliasVar, ComputeParam, F, X, Y
+from Solverz.algebra.num_alg import AliasVar, ComputeParam, F, X, Y
 from Solverz.eqn import Ode, Eqn
 from Solverz.equations import DAE
 from Solverz.param import Param
