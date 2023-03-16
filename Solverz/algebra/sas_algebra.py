@@ -95,7 +95,7 @@ def dMul(k: [Index, Type[Expr], int], *args):
             m = Index('k', sequence=sequence_new)
             if sequence_new == 0:
                 # Extract X(k)Y(0) and X(0)Y(k) from sigma(X(m)Y(k-m)) if k.sequence == -1,
-                # since X(k) and Y(k) are unknown in this case.
+                # since X(k) and Y(k) are unknowns DT orders in this case.
                 return Sum(Mul(traverse_for_DT(args[0], m), traverse_for_DT(Mul(*args[1:]), k - m)), (m, 1, k - 1)) + \
                     traverse_for_DT(args[0], 0) * traverse_for_DT(Mul(*args[1:]), k) + \
                     traverse_for_DT(args[0], k) * traverse_for_DT(Mul(*args[1:]), 0)
@@ -112,33 +112,69 @@ def dMul(k: [Index, Type[Expr], int], *args):
 
 
 @implements_dt_algebra(sin)
-def dSin(k: [Index, Type[Expr]], arg):
+def dSin(k: [Index, Type[Expr]], *args):
     """
 
     :param k:
-    :param arg:
+    :param args:
     :return:
     """
-    pass
+    if len(args) > 1:
+        raise ValueError(f'Sin supports one operand while {len(args)} input!')
+    if isinstance(k, (Expr, Index)):
+        if all([isinstance(symbol, Index) for symbol in k.free_symbols]):
+            sequence_new = np.max([symbol.sequence for symbol in k.free_symbols]) + 1
+        else:
+            raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
+        m = Index('k', sequence=sequence_new)
+        return Sum(DT('Psi', m)*(k-m)/k*traverse_for_DT(args[0], k-m), (m, 0, k-1))
+    else:  # integer
+        if k > 1:
+            m = Index('k', sequence=0)
+            return Sum(DT('Psi', m)*(k-m)/k*traverse_for_DT(args[0], k-m), (m, 0, k-1))
+        elif k == 1:
+            return DT('Psi', 0) * traverse_for_DT(args[0], 1)
+        elif k == 0:
+            return DT('Phi', 0)
+        else:
+            raise ValueError(f'DT index must be great than zero!')
 
 
 @implements_dt_algebra(cos)
-def dCos(k: [Index, Type[Expr], int], arg):
+def dCos(k: [Index, Type[Expr], int], *args):
     """
 
     :param k:
-    :param arg:
+    :param args
     :return:
     """
-    pass
+    if len(args) > 1:
+        raise ValueError(f'Sin supports one operand while {len(args)} input!')
+    if isinstance(k, (Expr, Index)):
+        if all([isinstance(symbol, Index) for symbol in k.free_symbols]):
+            sequence_new = np.max([symbol.sequence for symbol in k.free_symbols]) + 1
+        else:
+            raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
+        m = Index('k', sequence=sequence_new)
+        return -Sum(DT('Phi', m)*(k-m)/k*traverse_for_DT(args[0], k-m), (m, 0, k-1))
+    else:  # integer
+        if k > 1:
+            m = Index('k', sequence=0)
+            return -Sum(DT('Phi', m)*(k-m)/k*traverse_for_DT(args[0], k-m), (m, 0, k-1))
+        elif k == 1:
+            return -DT('Phi', 0) * traverse_for_DT(args[0], 1)
+        elif k == 0:
+            return DT('Psi', 0)
+        else:
+            raise ValueError(f'DT index must be great than zero!')
 
 
 @implements_dt_algebra(Derivative)
-def dDerivative(k: [Index, Type[Expr], int], arg):
+def dDerivative(k: [Index, Type[Expr], int], *args):
     """
 
     :param k:
-    :param arg:
+    :param args:
     :return:
     """
-    pass
+    return (k + 1) * traverse_for_DT(args[0], k + 1)
