@@ -6,7 +6,7 @@ from typing import Union, List, Dict, Callable
 import numpy as np
 from sympy import sympify, lambdify, Symbol, preorder_traversal, Basic
 
-from .algebra import Sympify_Mapping, F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, traverse_for_mul
+from Solverz.algebra.num_alg import Sympify_Mapping, F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, traverse_for_mul
 from .param import Param
 from .solverz_array import Lambdify_Mapping
 

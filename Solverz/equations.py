@@ -7,10 +7,10 @@ from typing import Union, List, Dict, Tuple
 import numpy as np
 from sympy import symbols, Symbol
 
-from .eqn import Eqn, Ode
-from .event import Event
-from .param import Param
-from .variables import Vars
+from Solverz.eqn import Eqn, Ode
+from Solverz.event import Event
+from Solverz.param import Param
+from Solverz.variables import Vars
 
 
 class Equations:

@@ -5,7 +5,7 @@ from typing import Union, List, Dict
 
 import numpy as np
 
-from .var import Var, TimeVar
+from Solverz.var import Var, TimeVar
 
 
 class VarsBasic:
