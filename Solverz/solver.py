@@ -67,7 +67,8 @@ def implicit_trapezoid(dae: DAE,
                        x: TimeVars,
                        dt,
                        T,
-                       event: Event = None):
+                       event: Event = None,
+                       pbar=False):
     X0 = AliasVar(X, '0')
     Y0 = AliasVar(Y, '0')
     t = ComputeParam('t')
@@ -82,7 +83,9 @@ def implicit_trapezoid(dae: DAE,
     xi1 = x[0]  # x_{i+1}
     xi0 = xi1.derive_alias('0')  # x_{i}
 
-    pbar = tqdm.tqdm(total=T)
+    if pbar:
+        bar = tqdm.tqdm(total=T)
+
     while abs(t - T) > dt / 10:
         ae.update_param('Dt', dt)
 
@@ -97,7 +100,8 @@ def implicit_trapezoid(dae: DAE,
         xi0.array[:] = xi1.array
 
         x[i + 1] = xi1
-        pbar.update(dt)
+        if pbar:
+            bar.update(dt)
         t = t + dt
         i = i + 1
 
@@ -273,7 +277,7 @@ def ode45(ode: DAE,
 
     tspan = np.array(tspan)
     T = tspan[-1]
-    hmax = np.abs(T)/10
+    hmax = np.abs(T) / 10
     i = 0
     t = 0
     tout = TimeVar('tout', length=100)
@@ -318,7 +322,7 @@ def ode45(ode: DAE,
             dt = tnew - t  # purify dt
             # error control
             # error estimation
-            err = dt * linalg.norm(kE / np.maximum(np.maximum(abs(y0), abs(ynew)).reshape(-1,), threshold), np.Inf)
+            err = dt * linalg.norm(kE / np.maximum(np.maximum(abs(y0), abs(ynew)).reshape(-1, ), threshold), np.Inf)
 
             if err > rtol:  # failed step
                 if dt <= hmin:

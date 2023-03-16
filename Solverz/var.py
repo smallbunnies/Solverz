@@ -40,6 +40,7 @@ class Var:
 
 
 class TimeVar:
+    __slots__ = ('name', 'unit', 'initialized', 'len', 'array')
 
     def __init__(self,
                  name: str,
