@@ -27,6 +27,10 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-dependencies-${{ hashFiles('**/requirements.txt') }}
 
+    - name: Install Pytest
+      run: |
+        pip install -U pytest
+
     - name: Install dependencies
       if: steps.cache-dependencies.outputs.cache-hit != 'true'
       run: |
