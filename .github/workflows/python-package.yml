@@ -38,6 +38,7 @@ jobs:
     - name: Test with pytest
       run: |
         dir
+        pip list
         cd tests
         dir
         pytest
