@@ -22,7 +22,7 @@ jobs:
         key: ${{ runner.os }}-dependencies-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-dependencies-${{ hashFiles('**/requirements.txt') }}
-    - run: pip list
+    - run: pip freeze
     - name: Install dependencies
       if: steps.cache-dependencies.outputs.cache-hit != 'true'
       run: |
