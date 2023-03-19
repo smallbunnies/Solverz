@@ -1,4 +1,4 @@
-# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# This workflow will install Python dependencies (if not cached), run tests and lint with a variety of Python versions
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
 
 name: Python package
@@ -12,30 +12,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - uses: actions/setup-python@v4
       with:
         python-version: '3.8'
-
-    - name: Cache dependencies
-      uses: actions/cache@v3
-      id: cache-dependencies
-      with:
-        path: ~\AppData\Local\pip\Cache
-        key: ${{ runner.os }}-dependencies-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-dependencies-
-
-    - name: Install dependencies
-      if: steps.cache-dependencies.outputs.cache-hit != 'true'
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install flake8 pytest
-        pip install -r requirements.txt
-
-    - name: Test with pytest
-      run: |
+        cache: 'pip' # caching pip dependencies
+    - run: pip install -r requirements.txt
+    - run: |
         cd tests
         pytest
-        
