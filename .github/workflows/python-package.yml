@@ -25,15 +25,19 @@ jobs:
         path: ~\AppData\Local\pip\Cache
         key: ${{ runner.os }}-dependencies-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
+          ${{ runner.os }}-dependencies-${{ hashFiles('**/requirements.txt') }}
           ${{ runner.os }}-dependencies-
+          ${{ runner.os }}
 
     - name: Install dependencies
       if: steps.cache-dependencies.outputs.cache-hit != 'true'
       run: |
+        python -m pip install --upgrade pip
         pip install -r requirements.txt
 
     - name: Test with pytest
       run: |
+        dir
         cd tests
         pytest
         
