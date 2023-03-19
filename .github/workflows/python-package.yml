@@ -1,4 +1,4 @@
-# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# This workflow will install Python dependencies (if not cached), run tests and lint with a variety of Python versions
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
 
 name: Python package
@@ -26,8 +26,6 @@ jobs:
         key: ${{ runner.os }}-dependencies-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-dependencies-${{ hashFiles('**/requirements.txt') }}
-          ${{ runner.os }}-dependencies-
-          ${{ runner.os }}
 
     - name: Install dependencies
       if: steps.cache-dependencies.outputs.cache-hit != 'true'
