@@ -1,7 +1,7 @@
 from typing import Union, Type, Dict, Callable
 
 import numpy as np
-from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Sum, cos
+from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Sum, cos, Function, Integer
 
 dfunc_mapping: Dict[Type[Expr], Callable] = {}
 
@@ -16,6 +16,7 @@ class Index(Symbol):
         else:
             obj = Symbol.__new__(cls, f'{name}{sequence}')
         obj.sequence = sequence
+        obj.is_Integer = True
         if sequence < 0:
             obj.name = f'{name}'
         else:
@@ -46,9 +47,23 @@ def traverse_for_DT(Node: Expr, k: [Index, Type[Expr], int]):
     if isinstance(Node, tuple(dfunc_mapping.keys())):
         return dfunc_mapping[Node.func](k, *Node.args)
     elif isinstance(Node, Symbol):
-        return DT(Node.name.upper(), k)
+        if Node.name != 't':
+            return DT(Node.name.upper(), k)
+        else:  # dt of t
+            if isinstance(k, (Expr, Index)):
+                if all([isinstance(symbol, Index) for symbol in k.free_symbols]) is False:
+                    raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
+                else:
+                    return DT('T', k)
+            else:  # integer
+                if k < 0:
+                    raise ValueError("DT index must be great than zero!")
+                elif k == 1:
+                    return 1
+                else:
+                    return 0
     elif isinstance(Node, Number):
-        return Node
+        return Node * dDelta(k)
     else:
         raise TypeError(f"Unsupported Expr {Node.func}!")
 
@@ -127,11 +142,11 @@ def dSin(k: [Index, Type[Expr]], *args):
         else:
             raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
         m = Index('k', sequence=sequence_new)
-        return Sum(DT('Psi', m)*(k-m)/k*traverse_for_DT(args[0], k-m), (m, 0, k-1))
+        return Sum(DT('Psi', m) * (k - m) / k * traverse_for_DT(args[0], k - m), (m, 0, k - 1))
     else:  # integer
         if k > 1:
             m = Index('k', sequence=0)
-            return Sum(DT('Psi', m)*(k-m)/k*traverse_for_DT(args[0], k-m), (m, 0, k-1))
+            return Sum(DT('Psi', m) * (k - m) / k * traverse_for_DT(args[0], k - m), (m, 0, k - 1))
         elif k == 1:
             return DT('Psi', 0) * traverse_for_DT(args[0], 1)
         elif k == 0:
@@ -156,11 +171,11 @@ def dCos(k: [Index, Type[Expr], int], *args):
         else:
             raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
         m = Index('k', sequence=sequence_new)
-        return -Sum(DT('Phi', m)*(k-m)/k*traverse_for_DT(args[0], k-m), (m, 0, k-1))
+        return -Sum(DT('Phi', m) * (k - m) / k * traverse_for_DT(args[0], k - m), (m, 0, k - 1))
     else:  # integer
         if k > 1:
             m = Index('k', sequence=0)
-            return -Sum(DT('Phi', m)*(k-m)/k*traverse_for_DT(args[0], k-m), (m, 0, k-1))
+            return -Sum(DT('Phi', m) * (k - m) / k * traverse_for_DT(args[0], k - m), (m, 0, k - 1))
         elif k == 1:
             return -DT('Phi', 0) * traverse_for_DT(args[0], 1)
         elif k == 0:
@@ -178,3 +193,21 @@ def dDerivative(k: [Index, Type[Expr], int], *args):
     :return:
     """
     return (k + 1) * traverse_for_DT(args[0], k + 1)
+
+
+class dDelta(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) > 1:
+            raise ValueError("Support one argument only!")
+        if isinstance(args[0], Integer):
+            # Function class automatically convert int into sp.Integer.
+            if args[0] == 0:
+                return 1
+            else:
+                return 0
+        if args[0].is_integer is False:
+            # allow None type Integer assumption, i.e. is_integer == None, which is the default integer assumption of
+            # symbols created by sp.symbols()
+            raise TypeError("Inputs should be an integer.")
