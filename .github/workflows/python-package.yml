@@ -39,5 +39,6 @@ jobs:
       run: |
         dir
         cd tests
+        dir
         pytest
         
