@@ -5,11 +5,11 @@ import tqdm
 from numpy import abs, max, min, linalg, sum, sqrt
 from typing import Union, List
 
-from .algebra import AliasVar, ComputeParam, F, X, Y
-from .equations import AE, DAE
-from .event import Event
-from .var import TimeVar
-from .variables import Vars, TimeVars
+from Solverz.algebra.num_alg import AliasVar, ComputeParam, F, X, Y
+from Solverz.equations import AE, DAE
+from Solverz.event import Event
+from Solverz.var import TimeVar
+from Solverz.variables import Vars, TimeVars
 
 
 def inv(mat: np.ndarray):

@@ -1,14 +1,12 @@
-import sympy as sp
-import numpy as np
 from Solverz.var import *
-from Solverz.variables import TimeVars
-from Solverz.equations import AE, DAE
-from Solverz.eqn import Eqn, Ode, Pde
-from Solverz.param import Param
-from Solverz.solver import implicit_trapezoid
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from Solverz.eqn import Ode
+from Solverz.equations import DAE
+from Solverz.solver import implicit_trapezoid
+from Solverz.var import *
+from Solverz.variables import TimeVars
 
 x = TimeVar('x')
 x.v0 = [0]
@@ -19,7 +17,7 @@ x = implicit_trapezoid(DAE(f1), x, 0.1, 20)
 
 plt.plot(np.arange(0, 20.1, 0.1), x.array.reshape((-1,)))
 
-df = pd.read_excel('../instances/ode_test.xlsx',
+df = pd.read_excel('instances/ode_test.xlsx',
                    sheet_name=None,
                    engine='openpyxl',
                    header=None

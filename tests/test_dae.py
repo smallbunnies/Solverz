@@ -1,4 +1,4 @@
-from Solverz.algebra import AliasVar, ComputeParam, F, X, Y
+from Solverz.algebra.num_alg import AliasVar, ComputeParam, F, X, Y
 from Solverz.eqn import Ode, Eqn
 from Solverz.equations import DAE
 from Solverz.param import Param
@@ -30,7 +30,7 @@ xy = implicit_trapezoid(dae, TimeVars([x, y], length=201), 0.1, 20)
 plt.plot(np.arange(0, 20.1, 0.1), xy.array[0, :].reshape((-1,)))
 plt.plot(np.arange(0, 20.1, 0.1), xy.array[1, :].reshape((-1,)))
 
-df = pd.read_excel('../instances/dae_test.xlsx',
+df = pd.read_excel('instances/dae_test.xlsx',
                    sheet_name=None,
                    engine='openpyxl',
                    header=None

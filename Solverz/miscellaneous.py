@@ -3,8 +3,8 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
-from .param import Param
-from .var import Var
+from Solverz.param import Param
+from Solverz.var import Var
 
 
 def derive_incidence_matrix(f_node: np.ndarray,

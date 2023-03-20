@@ -6,7 +6,7 @@ from typing import Callable
 
 from numbers import Number
 
-from .solverz_array import SolverzArray
+from Solverz.solverz_array import SolverzArray
 
 
 class Param:

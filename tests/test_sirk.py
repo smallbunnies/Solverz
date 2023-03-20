@@ -4,7 +4,7 @@ import pandas as pd
 import tqdm
 import matplotlib.pyplot as plt
 
-from Solverz.algebra import AliasVar, ComputeParam, F, X, Y
+from Solverz.algebra.num_alg import AliasVar, ComputeParam, F, X, Y
 from Solverz.eqn import Ode, Eqn
 from Solverz.equations import DAE
 from Solverz.param import Param
@@ -14,12 +14,12 @@ from Solverz.variables import Vars, TimeVars
 from Solverz.solverz_array import SolverzArray
 from Solverz.event import Event
 
-df = pd.read_excel('../instances/test_m3b9.xlsx',
+df = pd.read_excel('instances/test_m3b9.xlsx',
                    sheet_name=None,
                    engine='openpyxl',
                    header=None
                    )
-df_bench = pd.read_excel('../instances/test_sirk.xlsx',
+df_bench = pd.read_excel('instances/test_sirk.xlsx',
                          sheet_name=None,
                          engine='openpyxl',
                          header=None
