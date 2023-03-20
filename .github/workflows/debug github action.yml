@@ -1,3 +1,6 @@
+
+name: debug github action manually
+
 on:
   workflow_dispatch:
     inputs:
