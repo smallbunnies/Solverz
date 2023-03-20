@@ -6,7 +6,7 @@ from Solverz.miscellaneous import derive_dhs_param_var
 from Solverz.solver import *
 from Solverz.variables import Vars
 
-var_dict, param_dict = derive_dhs_param_var('../instances/4node3pipe.xlsx')
+var_dict, param_dict = derive_dhs_param_var('instances/4node3pipe.xlsx')
 
 E1 = Eqn(name='E1',
          e_str='(Tins-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Touts',
@@ -81,7 +81,7 @@ y0 = Vars(list(var_dict.values()))
 y_nr = nr_method(E, y0)
 y_cnr = continuous_nr(E, y0)
 
-sys_df = pd.read_excel('../instances/4node3pipe_bench.xlsx',
+sys_df = pd.read_excel('instances/4node3pipe_bench.xlsx',
                        sheet_name=None,
                        engine='openpyxl',
                        header=None

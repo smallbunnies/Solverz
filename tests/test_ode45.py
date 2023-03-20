@@ -26,7 +26,7 @@ for i in range(t.shape[0] - 1):
         [yinterp, nrtp45(tspan[np.where(((t[i] <= tspan) & (tspan <= t[i + 1])))], t[i], y.array[:, i],
                          t[i + 1] - t[i], kout[i])], axis=1)
 
-df = pd.read_excel('../instances/test_ode45.xlsx',
+df = pd.read_excel('instances/test_ode45.xlsx',
                    sheet_name=None,
                    engine='openpyxl',
                    header=None

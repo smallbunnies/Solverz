@@ -17,7 +17,7 @@ x = implicit_trapezoid(DAE(f1), x, 0.1, 20)
 
 plt.plot(np.arange(0, 20.1, 0.1), x.array.reshape((-1,)))
 
-df = pd.read_excel('../instances/ode_test.xlsx',
+df = pd.read_excel('instances/ode_test.xlsx',
                    sheet_name=None,
                    engine='openpyxl',
                    header=None

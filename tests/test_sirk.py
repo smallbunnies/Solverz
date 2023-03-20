@@ -14,12 +14,12 @@ from Solverz.variables import Vars, TimeVars
 from Solverz.solverz_array import SolverzArray
 from Solverz.event import Event
 
-df = pd.read_excel('../instances/test_m3b9.xlsx',
+df = pd.read_excel('instances/test_m3b9.xlsx',
                    sheet_name=None,
                    engine='openpyxl',
                    header=None
                    )
-df_bench = pd.read_excel('../instances/test_sirk.xlsx',
+df_bench = pd.read_excel('instances/test_sirk.xlsx',
                          sheet_name=None,
                          engine='openpyxl',
                          header=None

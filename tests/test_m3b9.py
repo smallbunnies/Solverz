@@ -46,7 +46,7 @@ m3b9.update_param('Edp', [0.0000, 0.0000, 0.0000])
 m3b9.update_param('Eqp', [1.05636632091501, 0.788156757672709, 0.767859471854610])
 m3b9.update_param('Xdp', [0.0608, 0.1198, 0.1813])
 m3b9.update_param('Xqp', [0.0969, 0.8645, 1.2578])
-df = pd.read_excel('../instances/test_m3b9.xlsx',
+df = pd.read_excel('instances/test_m3b9.xlsx',
                    sheet_name=None,
                    engine='openpyxl',
                    header=None
