@@ -1,9 +1,8 @@
 import sympy as sp
-from sympy import Derivative, Sum
+from sympy import Derivative
 from sympy.abc import x, y, z, t
 
-from Solverz.algebra.sas_algebra import *
-from Solverz.algebra.sas_algebra import dDelta, dConv
+from Solverz.sas.sas_alg import Index, Slice, DT, dDelta, dConv, dLinspace, dtify
 
 k = Index('k')
 k0 = Index('k', sequence=0)
@@ -93,7 +92,8 @@ def test_dt_algebra():
            dConv(X0k, dConv((k - Lin0k) * Psi0k / k, Y0k * (1 - dDelta(Slice(0, k)))) + dDelta(Slice(0, k)) * Phi0)
     expr4 = x * sp.sin(x * y)
     assert dtify(expr4, k) == \
-           dConv(X0k, dConv((k - Lin0k) * Psi0k / k, dConv(X0k, Y0k * (1 - dDelta(Slice(0, k))))) + dDelta(Slice(0, k)) * Phi0)
+           dConv(X0k, dConv((k - Lin0k) * Psi0k / k, dConv(X0k, Y0k * (1 - dDelta(Slice(0, k))))) + dDelta(
+               Slice(0, k)) * Phi0)
     assert dtify(expr4, k).expand(func=True, mul=False) == \
            dConv(X0k, (k - Lin0k) * Psi0k / k, X0k, Y0k * (1 - dDelta(Slice(0, k)))) + \
            dConv(X0k, dDelta(Slice(0, k)) * Phi0)

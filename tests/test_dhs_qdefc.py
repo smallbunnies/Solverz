@@ -3,7 +3,7 @@ import numpy as np
 from Solverz.var import *
 from Solverz.equations import Equations
 from Solverz.eqn import Eqn
-from Solverz.algebra.num_alg import StateVar, AlgebraVar, AliasVar, ComputeParam, F, G
+from Solverz.numeqn.num_alg import StateVar, AlgebraVar, AliasVar, ComputeParam, F, G
 
 # T = sp.Function('T')
 # dx, dt, X, t, Tn1k1, Tn0k1, Tn1k0 = sp.symbols('dx, dt, X, t, Tn1k1, Tn0k1, Tn1k0')

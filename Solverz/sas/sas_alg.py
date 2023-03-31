@@ -2,9 +2,9 @@ from typing import Union, Type, Dict, Callable
 
 from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Pow, cos, Function, Integer
 
-dfunc_mapping: Dict[Type[Expr], Callable] = {}
+__all__ = ['dAdd', 'dMul', 'dSin', 'dCos', 'dPow', 'dDerivative', 'dConv', 'dLinspace', 'nConv', 'dtify', 'dDelta']
 
-__all__ = ['Index', 'Slice', 'DT', 'dtify', 'dLinspace', 'dConv', 'dDelta']
+dfunc_mapping: Dict[Type[Expr], Callable] = {}
 
 
 class Index(Symbol):
@@ -24,6 +24,15 @@ class Index(Symbol):
 
 
 class Slice(Symbol):
+    """A Slice object.
+
+    Parameters
+    ==========
+
+    start : start of DT slice
+    end   : start of DT slice
+
+    """
 
     def __new__(cls, start: Union[int, Index, Expr], end: Union[int, Index, Expr], commutative=False):
         if isinstance(start, (Index, Expr)):
@@ -61,6 +70,7 @@ class DT(Symbol):
 def dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
     """
     replace sympy operator by DT operators/symbols
+
     :param Node:
     :param k:
     :return:
@@ -114,11 +124,28 @@ def dAdd(k: [Index, Slice, Type[Expr], int], *args):
 
 @implements_dt_algebra(Mul)
 def dMul(k: [Index, Slice, Type[Expr], int], *args):
-    """
-    distinguish between scalar production and Expr/Symbol production, supports only two operands
+    r"""
+    This function returns DT of multiplications.
+
+    For expression $z=xy$,
+
+    if the order of DT is an `Index` object, it returns
+
+    $$z[k]=\sum_{m=0}^k x[m]y[k-m]=x[0:k]\otimes y[0:k]$$
+
+    Else if the order of DT is a `Slice` object $k_0:k_1$, it returns
+
+    .. math::
+
+        z[k_0:k_1]=
+        \begin{cases}
+          x[k_0:k_1]\otimes y[k_0:k_1] & k_0=0 \\
+          x[0:k_1-k_0]\otimes y[k_0:k_1]+\sum_{i=0}^{k_0-1}x[k_0-i:k_1-i]*y[i] & k_0\geq 1
+        \end{cases}
+
     :param k: DT index
     :param args: tuple of arguments
-    :return:
+    :return: DT Expr of multiplication
     """
     if isinstance(args[0], Number):
         # assumes that scalar Number is always in front of Symbol
@@ -250,6 +277,12 @@ class dDelta(Function):
 
     @classmethod
     def eval(cls, *args):
+        """
+        Evaluation of Kronecker delta
+
+        :param args:
+        :return:
+        """
         if len(args) > 1:
             raise ValueError("Support one argument only!")
         if isinstance(args[0], Integer):
@@ -268,10 +301,6 @@ class dConv(Function):
     is_commutative = False
     is_dConv = True
 
-    @classmethod
-    def eval(cls, *args):
-        pass
-
     def __mul__(self, other):
         args = list(self.args)
         args[-1] = Mul(args[-1] * other)
@@ -283,13 +312,19 @@ class dConv(Function):
         return self.func(*args)
 
     def _eval_expand_func(self, **hints):
-        # traverse to flatten dConv tree
+        """
+        traverse to flatten dConv tree
+
+        :param hints:
+        :return:
+        """
+
         args = self.args
         i = -1
         for arg in args:
             i = i + 1
             if arg.has(dConv):
-                if arg.is_Add:
+                if arg.is_Add and isinstance(arg, Expr):
                     x, y = arg.as_two_terms()
                     temp_args1 = list(args)
                     temp_args1[i] = x
@@ -307,7 +342,7 @@ class dConv(Function):
                         return self.func(*(list(args[0:i - 1]) + list(arg.args) + list(args[0:i + 1]))).expand(
                             func=True, mul=False)
                 # elif arg.is_Mul:
-                    # deprecated by overriding multiplication
+                # deprecated by overriding multiplication
 
         return self
 
@@ -316,18 +351,6 @@ class dLinspace(Function):
     is_commutative = False
     is_dLinspace = True
 
-    @classmethod
-    def eval(cls, *args):
-        pass
-
 
 # TODO : Extract k-th order terms from conv.
-def nConv(a, b, *args):
-    """
-    numerical convolution of vectors using loop or FFT
-    :param a:
-    :param b:
-    :param args:
-    :return:
-    """
-    pass
+
