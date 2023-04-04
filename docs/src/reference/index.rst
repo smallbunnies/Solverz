@@ -10,14 +10,14 @@ subpackage are documented below.
 
 ..  rst-class:: column
 
-:ref:`Basics <sas_modules>`
+:ref:`Semi-analytical solutions <sas_modules>`
 -------------------------------------------------------
 
    Contains a description of operations for the basic modules. Subcategories include: *absolute basics*,
    *manipulation*, *assumptions*, *functions*, *simplification*, *calculus*, *solvers*, and some
    other subcategories.
 
-:ref:`Basics <num_modules>`
+:ref:`Numerical solutions <num_modules>`
 -------------------------------------------------------
 
    Contains a description of operations for the basic modules. Subcategories include: *absolute basics*,
