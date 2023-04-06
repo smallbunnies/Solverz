@@ -11,7 +11,7 @@ class Index(Symbol):
     r"""
     The Index of DT.
 
-    For example, the $k$-th order DT of $x(t)$ is $X(k)$.
+    For example, the $k$-th order DT of $x(t)$ is $x[k]$.
 
     """
     is_Integer = True
@@ -37,12 +37,12 @@ class Slice(Symbol):
     Examples
     ========
 
-    Suppose the start is $k_0$ and the end is $k_1$, then $X[k_0:k_1]$ denotes the vector
+    Suppose the start is $k_0$ and the end is $k_1$, then $x[k_0:k_1]$ denotes the vector
 
     .. math::
 
         \begin{bmatrix}
-        X[k_0]&\cdots &X[k_1]
+        x[k_0]&\cdots &x[k_1]
         \end{bmatrix}
 
     Parameters
@@ -102,15 +102,15 @@ def dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
         return dfunc_mapping[Node.func](k, *Node.args)
     elif isinstance(Node, Symbol):
         if Node.name != 't':
-            return DT(Node.name.upper(), k)
+            return DT(Node.name, k)
         else:  # dt of t
             if isinstance(k, (Expr, Index)) and not isinstance(k, Slice):
                 if all([isinstance(symbol, Index) for symbol in k.free_symbols]) is False:
                     raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
                 else:
-                    return DT('T', k)
+                    return DT('t', k)
             elif isinstance(k, Slice):
-                return DT('T', k)
+                return DT('t', k)
             else:  # integer
                 if k < 0:
                     raise ValueError("DT index must be great than zero!")
@@ -229,7 +229,7 @@ class dMul(Function):
 @implements_dt_algebra(sin)
 class dSin(Function):
     r"""
-    This function returns DT of $\phi(t)=\sin(x(t))$, which is denoted by $\Phi[k]$.
+    This function returns DT of $\phi(t)=\sin(x(t))$, which is denoted by $\phi[k]$.
 
     For expression $\phi(t)=\sin(x(t))$,
 
@@ -237,9 +237,9 @@ class dSin(Function):
 
     .. math::
         \begin{cases}
-            \sum_{m=0}^{k-1} \frac{k-m}{k}\Psi[m]x[k-m]=\left(\frac{k-(0:k-1)}{k}*\Psi[0:k-1]\right)\otimes x[1:k]& k\geq 2\\
-            \Psi[0]* x[1]& k= 1\\
-            \Phi[0]& k=0
+            \sum_{m=0}^{k-1} \frac{k-m}{k}\psi[m]x[k-m]=\left(\frac{k-(0:k-1)}{k}*\psi[0:k-1]\right)\otimes x[1:k]& k\geq 2\\
+            \psi[0]* x[1]& k= 1\\
+            \phi[0]& k=0
         \end{cases}
 
     Else if the order of DT is a `Slice` object $k_0:k_1$, it returns
@@ -247,21 +247,19 @@ class dSin(Function):
     .. math::
 
         \begin{cases}
-          \left(\frac{k_1-(0:k_1-k_0)}{k_1}*\Psi[0:k_1-k_0]\right)\overline{\otimes}
-          x[k_0:k_1]+\sum_{i=0}^{k_0-1}\left(\frac{k_1-(k_0-i:k_1-i)}{k_1}*\Psi[k_0-i:k_1-i]\right)* x[i] & k_0\geq 1 \\
-          \left(\left(\frac{k_1-(0:k_1)}{k_1}*\Psi[0:k_1]\right)\overline{\otimes} x[0:k_1]\right)*(1-\delta[0:k_1])+\Phi[0]*\delta[0:k_1] & k_0=0
+          \left(\frac{k_1-(0:k_1-k_0)}{k_1}*\psi[0:k_1-k_0]\right)\overline{\otimes}
+          x[k_0:k_1]+\sum_{i=0}^{k_0-1}\left(\frac{k_1-(k_0-i:k_1-i)}{k_1}*\psi[k_0-i:k_1-i]\right)* x[i] & k_0\geq 1 \\
+          \left(\left(\frac{k_1-(0:k_1)}{k_1}*\psi[0:k_1]\right)\overline{\otimes} x[0:k_1]\right)*(1-\delta[0:k_1])+\phi[0]*\delta[0:k_1] & k_0=0
         \end{cases}
 
     Explanation
     ===========
 
-    $\Phi[0]$ can not be rewritten as
-
     .. math::
 
         \begin{aligned}
-        \Phi[k]=&\left(\frac{k-(0:k-1)}{k}*\Psi[0:k-1]\right)\otimes x[1:k]\\
-               =&\left(\frac{k-(0:k)}{k}*\Psi[0:k]\right)\otimes x[0:k]\quad (k\geq 1).
+        \phi[k]=&\left(\frac{k-(0:k-1)}{k}*\psi[0:k-1]\right)\otimes x[1:k]\\
+               =&\left(\frac{k-(0:k)}{k}*\psi[0:k]\right)\otimes x[0:k]\quad (k\geq 1).
         \end{aligned}
 
     See Also
@@ -278,29 +276,29 @@ class dSin(Function):
         if isinstance(k, (Expr, Index)) and not isinstance(k, (Integer, Slice)):
             if any([not isinstance(symbol, Index) for symbol in k.free_symbols]):
                 raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
-            return dConv_s((k - dLinspace(0, k - 1)) / k * DT('Psi', Slice(0, k - 1)),
+            return dConv_s((k - dLinspace(0, k - 1)) / k * DT('psi', Slice(0, k - 1)),
                            dtify(args[0], Slice(1, k)))
         elif isinstance(k, Slice):
             if k.start >= 1:
-                Psi1 = DT('Psi', Slice(0, k.end - k.start))
+                Psi1 = DT('psi', Slice(0, k.end - k.start))
                 temp = dConv_v((k.end - dLinspace(0, k.end - k.start)) / k.end * Psi1, dtify(args[0], k))
                 for i in range(k.start):
                     temp = temp + (k.end - dLinspace(k.start - i, k.end - i)) / k.end * \
-                           DT('Psi', Slice(k.start - i, k.end - i)) * dtify(args[0], i)
+                           DT('psi', Slice(k.start - i, k.end - i)) * dtify(args[0], i)
                 return temp
             else:
-                Phi = DT('Phi', 0)
-                Psi = DT('Psi', Slice(0, k.end))
-                return dDelta(Slice(0, k.end)) * Phi + \
-                    dConv_v((k.end - dLinspace(0, k.end)) / k.end * Psi,
+                phi = DT('phi', 0)
+                psi = DT('psi', Slice(0, k.end))
+                return dDelta(Slice(0, k.end)) * phi + \
+                    dConv_v((k.end - dLinspace(0, k.end)) / k.end * psi,
                             dtify(args[0], Slice(0, k.end))) * (1 - dDelta(Slice(0, k.end)))
         else:  # integer
             if k > 1:
-                return dConv_s((k - dLinspace(0, k - 1)) / k * DT('Psi', Slice(0, k - 1)), dtify(args[0], Slice(1, k)))
+                return dConv_s((k - dLinspace(0, k - 1)) / k * DT('psi', Slice(0, k - 1)), dtify(args[0], Slice(1, k)))
             elif k == 1:
-                return DT('Psi', 0) * dtify(args[0], 1)
+                return DT('psi', 0) * dtify(args[0], 1)
             elif k == 0:
-                return DT('Phi', 0)
+                return DT('phi', 0)
             else:
                 raise ValueError(f'DT index must be great than zero!')
 
@@ -308,7 +306,7 @@ class dSin(Function):
 @implements_dt_algebra(cos)
 class dCos(Function):
     r"""
-    This function returns DT of $\phi(t)=\cos(x(t))$, which is denoted by $\Phi[k]$.
+    This function returns DT of $\phi(t)=\cos(x(t))$, which is denoted by $\phi[k]$.
 
     For expression $\phi(t)=\cos(x(t))$,
 
@@ -316,9 +314,9 @@ class dCos(Function):
 
     .. math::
         \begin{cases}
-            -\sum_{m=0}^{k-1} \frac{k-m}{k}\Phi[m]x[k-m]=-\left(\frac{k-(0:k-1)}{k}*\Phi[0:k-1]\right)\otimes x[1:k]& k\geq 2\\
-            -\Phi[0]* x[1]& k= 1\\
-            \Phi(0)& k=0
+            -\sum_{m=0}^{k-1} \frac{k-m}{k}\phi[m]x[k-m]=-\left(\frac{k-(0:k-1)}{k}*\phi[0:k-1]\right)\otimes x[1:k]& k\geq 2\\
+            -\phi[0]* x[1]& k= 1\\
+            \phi(0)& k=0
         \end{cases}
 
     Else if the order of DT is a `Slice` object $k_0:k_1$, it returns
@@ -326,9 +324,9 @@ class dCos(Function):
     .. math::
 
         \begin{cases}
-          -\left(\frac{k_1-(0:k_1-k_0)}{k_1}*\Phi[0:k_1-k_0]\right)\overline{\otimes}
-          x[k_0:k_1]-\sum_{i=0}^{k_0-1}\left(\frac{k_1-(k_0-i:k_1-i)}{k_1}*\Phi[k_0-i:k_1-i]\right)* x[i] & k_0\geq 1 \\
-          -\left(\left(\frac{k_1-(0:k_1)}{k_1}*\Phi[0:k_1]\right)\overline{\otimes} x[0:k_1]\right)*(1-\delta[0:k_1])-\Psi[0]*\delta[0:k_1] & k_0=0
+          -\left(\frac{k_1-(0:k_1-k_0)}{k_1}*\phi[0:k_1-k_0]\right)\overline{\otimes}
+          x[k_0:k_1]-\sum_{i=0}^{k_0-1}\left(\frac{k_1-(k_0-i:k_1-i)}{k_1}*\phi[k_0-i:k_1-i]\right)* x[i] & k_0\geq 1 \\
+          -\left(\left(\frac{k_1-(0:k_1)}{k_1}*\phi[0:k_1]\right)\overline{\otimes} x[0:k_1]\right)*(1-\delta[0:k_1])-\psi[0]*\delta[0:k_1] & k_0=0
         \end{cases}
 
     See Also
@@ -345,29 +343,29 @@ class dCos(Function):
         if isinstance(k, (Expr, Index)) and not isinstance(k, (Integer, Slice)):
             if any([not isinstance(symbol, Index) for symbol in k.free_symbols]):
                 raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
-            return -dConv_s(((k - dLinspace(0, k - 1)) / k) * DT('Phi', Slice(0, k - 1)),
+            return -dConv_s(((k - dLinspace(0, k - 1)) / k) * DT('phi', Slice(0, k - 1)),
                             dtify(args[0], Slice(1, k)))
         elif isinstance(k, Slice):
             if k.start >= 1:
-                Phi1 = DT('Phi', Slice(0, k.end - k.start))
+                Phi1 = DT('phi', Slice(0, k.end - k.start))
                 temp = -dConv_v((k.end - dLinspace(0, k.end - k.start)) / k.end * Phi1, dtify(args[0], k))
                 for i in range(k.start):
                     temp = temp - (k.end - dLinspace(k.start - i, k.end - i)) / k.end * \
-                           DT('Phi', Slice(k.start - i, k.end - i)) * dtify(args[0], i)
+                           DT('phi', Slice(k.start - i, k.end - i)) * dtify(args[0], i)
                 return temp
             else:
-                Phi = DT('Phi', Slice(0, k.end))
-                Psi = DT('Psi', 0)
-                return -dDelta(Slice(0, k.end)) * Psi - \
-                    dConv_v((k.end - dLinspace(0, k.end)) / k.end * Phi,
+                phi = DT('phi', Slice(0, k.end))
+                psi = DT('psi', 0)
+                return -dDelta(Slice(0, k.end)) * psi - \
+                    dConv_v((k.end - dLinspace(0, k.end)) / k.end * phi,
                             dtify(args[0], Slice(0, k.end))) * (1 - dDelta(Slice(0, k.end)))
         else:  # integer
             if k > 1:
-                return -dConv_s((k - dLinspace(0, k - 1)) / k * DT('Phi', Slice(0, k - 1)), dtify(args[0], Slice(1, k)))
+                return -dConv_s((k - dLinspace(0, k - 1)) / k * DT('phi', Slice(0, k - 1)), dtify(args[0], Slice(1, k)))
             elif k == 1:
-                return -DT('Phi', 0) * dtify(args[0], 1)
+                return -DT('phi', 0) * dtify(args[0], 1)
             elif k == 0:
-                return DT('Psi', 0)
+                return DT('psi', 0)
             else:
                 raise ValueError(f'DT index must be great than zero!')
 
@@ -392,7 +390,7 @@ class dDerivative(Function):
 
     @classmethod
     def eval(cls, k, *args):
-        if args[1][0].name is not 't':
+        if args[1][0].name != 't':
             raise ValueError("Support time derivative only!")
         if isinstance(k, (Index, Expr, Slice, Integer)):
             return (k + 1) * dtify(args[0], k + 1)
