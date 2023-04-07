@@ -265,7 +265,7 @@ class dSin(Function):
     See Also
     ========
 
-    dSin
+    dCos
 
     """
 
@@ -432,6 +432,11 @@ class dDelta(Function):
             # args[0] is not Index or Slice.
             raise TypeError(f"Invalid inputs type {args[0].__class__.__name__}.")
 
+    def _latex(self, printer):
+        k = self.args[0]
+        k = printer._print(k)
+        return r'\Delta \left [ %s \right ]' % k
+
 
 class dConv_s(Function):
     r"""
@@ -484,7 +489,7 @@ class dConv_s(Function):
                     temp_args1[i] = x
                     temp_args2 = list(args)
                     temp_args2[i] = y
-                    return self.func(*temp_args1).expand(func=True, mul=False) +\
+                    return self.func(*temp_args1).expand(func=True, mul=False) + \
                         self.func(*temp_args2).expand(func=True, mul=False)
                 elif arg.func == dConv_v:
                     # extract the arguments of sub-dConv_s nodes
@@ -499,6 +504,19 @@ class dConv_s(Function):
                 # deprecated by overriding multiplication
 
         return self
+
+    def _latex(self, printer):
+
+        arg_latex_str = []
+        for arg in self.args:
+            if isinstance(arg, Symbol):
+                arg_latex_str = [*arg_latex_str, printer._print(arg)]
+            else:
+                arg_latex_str = [*arg_latex_str, r'\left (' + printer._print(arg) + r'\right )']
+        _latex_str = arg_latex_str[0]
+        for arg_latex_str_ in arg_latex_str[1:]:
+            _latex_str = _latex_str + r'\otimes ' + arg_latex_str_
+        return _latex_str
 
 
 class dConv_v(Function):
@@ -553,7 +571,7 @@ class dConv_v(Function):
                     temp_args1[i] = x
                     temp_args2 = list(args)
                     temp_args2[i] = y
-                    return self.func(*temp_args1).expand(func=True, mul=False) +\
+                    return self.func(*temp_args1).expand(func=True, mul=False) + \
                         self.func(*temp_args2).expand(func=True, mul=False)
                 elif arg.func == dConv_v:
                     # extract the arguments of sub-dConv_s nodes
@@ -569,6 +587,19 @@ class dConv_v(Function):
 
         return self
 
+    def _latex(self, printer):
+
+        arg_latex_str = []
+        for arg in self.args:
+            if isinstance(arg, Symbol):
+                arg_latex_str = [*arg_latex_str, printer._print(arg)]
+            else:
+                arg_latex_str = [*arg_latex_str, r'\left (' + printer._print(arg) + r'\right )']
+        _latex_str = arg_latex_str[0]
+        for arg_latex_str_ in arg_latex_str[1:]:
+            _latex_str = _latex_str + r'\overline{\otimes} ' + arg_latex_str_
+        return _latex_str
+
 
 class dLinspace(Function):
     r"""
@@ -581,5 +612,10 @@ class dLinspace(Function):
     def eval(cls, m, n):
         if isinstance(m, Slice) or isinstance(n, Slice):
             raise TypeError('Supports only integer input!')
+
+    def _latex(self, printer):
+        m, n = self.args
+        _m, _n = printer._print(m), printer._print(n)
+        return r'\left ( %s : %s \right )' % (_m, _n)
 
 # TODO : Extract k-th order terms from conv.
