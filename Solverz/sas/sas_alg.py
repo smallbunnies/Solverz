@@ -1,8 +1,7 @@
+from __future__ import annotations
+
 from typing import Union, Type, Dict, Callable
-
-from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Pow, cos, Function, Integer
-
-# __all__ = ['dAdd', 'dMul', 'dSin', 'dCos', 'dPow', 'dDerivative', 'dConv_s', 'dLinspace', 'dtify', 'dDelta']
+from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Pow, cos, Function, Integer, preorder_traversal
 
 dfunc_mapping: Dict[Type[Expr], Callable] = {}
 
@@ -77,40 +76,132 @@ class DT(Symbol):
     """
     The DT object
     """
-    __slots__ = ('index', 'name', 'symbol_name')
+    __slots__ = ('index', 'name', 'symbol', 'symbol_name')
 
-    def __new__(cls, symbol_name, index: Union[int, Index, Slice], commutative=False):
+    def __new__(cls, symbol, index: Union[int, Index, Slice], commutative=False):
         if isinstance(index, int) and index < 0:
             raise IndexError("Invalid DT order")
-        obj = Symbol.__new__(cls, f'{symbol_name}[{index}]', commutative=commutative)
+        obj = Symbol.__new__(cls, f'{symbol.name}[{index}]', commutative=commutative)
+        obj.symbol = symbol
         obj.index = index
-        obj.symbol_name = symbol_name
-        obj.name = f'{symbol_name}[{index}]'
+        obj.symbol_name = symbol.name
+        obj.name = f'{symbol.name}[{index}]'
         return obj
 
+    def _latex(self, printer):
+        return printer._print(self.symbol) + r'\left [' + f'{self.index}' + r'\right ]'
 
-def dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
+
+class phi(Symbol):
+    """
+    The symbol used to denote `sin` function in expressions.
+    """
+
+    def __new__(cls, node, commutative=False):
+        obj = Symbol.__new__(cls, 'phi', commutative=commutative)
+        obj.eqn = node
+        obj.name = 'phi' + r'_{' + obj.eqn.__repr__() + r'}'
+        return obj
+
+    def _hashable_content(self):
+        return self.name, self.eqn
+
+    def _latex(self, printer):
+        return r'\phi_\text{%s}' % self.eqn.__repr__()
+
+
+class psi(Symbol):
+    """
+    The symbol used to denote `cos` function in expressions.
+    """
+
+    def __new__(cls, node, commutative=False):
+        obj = Symbol.__new__(cls, 'psi', commutative=commutative)
+        obj.eqn = node
+        obj.name = 'psi' + r'_{' + obj.eqn.__repr__() + r'}'
+        return obj
+
+    def _hashable_content(self):
+        return self.name, self.eqn
+
+    def _latex(self, printer):
+        return r'\psi_\text{%s}' % self.eqn.__repr__()
+
+
+def dtify(expr: Expr, k=None):
+    r"""
+    Derive DTs of expressions.
+
+    Examples
+    ========
+
+    >>> from Solverz.eqn import Eqn
+    >>> Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
+    >>> dtify(Eq_prime.EQN)
+    [Eqp[k] - dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi[0:k]) - dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi[0:k]),
+    psi[k] + dConv_s((k - dLinspace(0, k - 1))*phi[0:k - 1]/k, delta[1:k]),
+    phi[k] - dConv_s((k - dLinspace(0, k - 1))*psi[0:k - 1]/k, delta[1:k])]
+
+    Parameters
+    ==========
+
+    expr : Expr
+        An expression to be evaluated.
+    k : Index, Slice, Type[Expr], int
+        An expression to be evaluated.
+
+    Returns
+    =======
+
+    expr : Expr
+        DT expression or list of DT expressions.
+
+    """
+
+    if any([isinstance(symbol, DT) for symbol in list(expr.free_symbols)]):
+        raise TypeError("DT expression cannot be dtified!")
+
+    if expr.has(sin, cos):
+        exprs = []
+        # subs $\phi$ and $\psi$ for $\sin$ and $\cos$.
+        pt = preorder_traversal(expr)
+        for node in pt:
+            if isinstance(node, sin):
+                phi_ = phi(node.args[0])
+                expr = expr.subs(node, phi_)
+                exprs = [*exprs, phi_ - node]
+            elif isinstance(node, cos):
+                psi_ = psi(node.args[0])
+                expr = expr.subs(node, psi_)
+                exprs = [*exprs, psi_ - node]
+        exprs = [expr] + exprs
+        if k is None:
+            k = Index('k')
+        return [_dtify(expr_, k) for expr_ in exprs]
+    else:
+        if k is None:
+            return _dtify(expr, Index('k'))
+        else:
+            return _dtify(expr, k)
+
+
+def _dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
     """
     Replace sympy operator by DT operators/symbols
-
-    :param Node:
-    :param k:
-    :return:
-
     """
     if isinstance(Node, tuple(dfunc_mapping.keys())):
         return dfunc_mapping[Node.func](k, *Node.args)
     elif isinstance(Node, Symbol):
         if Node.name != 't':
-            return DT(Node.name, k)
+            return DT(Node, k)
         else:  # dt of t
             if isinstance(k, (Expr, Index)) and not isinstance(k, Slice):
                 if all([isinstance(symbol, Index) for symbol in k.free_symbols]) is False:
                     raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
                 else:
-                    return DT('t', k)
+                    return DT(Node, k)
             elif isinstance(k, Slice):
-                return DT('t', k)
+                return DT(Node, k)
             else:  # integer
                 if k < 0:
                     raise ValueError("DT index must be great than zero!")
@@ -159,7 +250,7 @@ class dAdd(Function):
                 # in sympy, Integer objects are instances of Expr
                 if any([not isinstance(symbol, Index) for symbol in k.free_symbols]):
                     raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
-            return Add(*[dtify(arg, k) for arg in tuple(args)])
+            return Add(*[_dtify(arg, k) for arg in tuple(args)])
         else:
             raise ValueError('Non DT index input!')
 
@@ -204,26 +295,26 @@ class dMul(Function):
         if isinstance(args[0], Number):
             # The scalar Number is always in front of Symbol
             # for example a=x*3 and a=3*x all derive a=3*x
-            return Mul(args[0], dtify(Mul(*args[1:]), k))
+            return Mul(args[0], _dtify(Mul(*args[1:]), k))
         else:
             if isinstance(k, (Expr, Index)) and not isinstance(k, (Integer, Slice)):
                 if any([not isinstance(symbol, Index) for symbol in k.free_symbols]):
                     raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
-                return dConv_s(*[dtify(arg, Slice(0, k)) for arg in tuple(args)])
+                return dConv_s(*[_dtify(arg, Slice(0, k)) for arg in tuple(args)])
             elif isinstance(k, Slice):
                 # Note that k = k.start:k.end here
                 if k.start >= 1:
-                    temp = dConv_v(dtify(args[0], Slice(0, k.end - k.start)), dtify(Mul(*args[1:]), k))
+                    temp = dConv_v(_dtify(args[0], Slice(0, k.end - k.start)), _dtify(Mul(*args[1:]), k))
                     for i in range(k.start):
-                        temp = temp + dtify(args[0], Slice(k.start - i, k.end - i)) * dtify(Mul(*args[1:]), i)
+                        temp = temp + _dtify(args[0], Slice(k.start - i, k.end - i)) * _dtify(Mul(*args[1:]), i)
                     return temp
                 else:
-                    return dConv_v(dtify(args[0], k), dtify(Mul(*args[1:]), k))
+                    return dConv_v(_dtify(args[0], k), _dtify(Mul(*args[1:]), k))
             else:  # integer
                 if k >= 1:
-                    return dConv_s(*[dtify(arg, Slice(0, k)) for arg in tuple(args)])
+                    return dConv_s(*[_dtify(arg, Slice(0, k)) for arg in tuple(args)])
                 else:  # k==0
-                    return Mul(*[dtify(arg, 0) for arg in tuple(args)])
+                    return Mul(*[_dtify(arg, 0) for arg in tuple(args)])
 
 
 @implements_dt_algebra(sin)
@@ -276,29 +367,34 @@ class dSin(Function):
         if isinstance(k, (Expr, Index)) and not isinstance(k, (Integer, Slice)):
             if any([not isinstance(symbol, Index) for symbol in k.free_symbols]):
                 raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
-            return dConv_s((k - dLinspace(0, k - 1)) / k * DT('psi', Slice(0, k - 1)),
-                           dtify(args[0], Slice(1, k)))
+            return dConv_s((k - dLinspace(0, k - 1)) / k * DT(psi(args[0]), Slice(0, k - 1)),
+                           _dtify(args[0], Slice(1, k)))
         elif isinstance(k, Slice):
             if k.start >= 1:
-                Psi1 = DT('psi', Slice(0, k.end - k.start))
-                temp = dConv_v((k.end - dLinspace(0, k.end - k.start)) / k.end * Psi1, dtify(args[0], k))
+                Psi1 = DT(psi(args[0]), Slice(0, k.end - k.start))
+                temp = dConv_v((k.end - dLinspace(0, k.end - k.start)) / k.end * Psi1, _dtify(args[0], k))
                 for i in range(k.start):
                     temp = temp + (k.end - dLinspace(k.start - i, k.end - i)) / k.end * \
-                           DT('psi', Slice(k.start - i, k.end - i)) * dtify(args[0], i)
+                           DT(psi(args[0]), Slice(k.start - i, k.end - i)) * _dtify(args[0], i)
                 return temp
             else:
-                phi = DT('phi', 0)
-                psi = DT('psi', Slice(0, k.end))
-                return dDelta(Slice(0, k.end)) * phi + \
-                    dConv_v((k.end - dLinspace(0, k.end)) / k.end * psi,
-                            dtify(args[0], Slice(0, k.end))) * (1 - dDelta(Slice(0, k.end)))
+                phi_ = DT(phi(args[0]), 0)
+                psi_ = DT(psi(args[0]), Slice(0, k.end))
+                return dDelta(Slice(0, k.end)) * phi_ + \
+                    dConv_v((k.end - dLinspace(0, k.end)) / k.end * psi_,
+                            _dtify(args[0], Slice(0, k.end))) * (1 - dDelta(Slice(0, k.end)))
         else:  # integer
             if k > 1:
-                return dConv_s((k - dLinspace(0, k - 1)) / k * DT('psi', Slice(0, k - 1)), dtify(args[0], Slice(1, k)))
+                return dConv_s((k - dLinspace(0, k - 1)) / k * DT(psi(args[0]), Slice(0, k - 1)),
+                               _dtify(args[0], Slice(1, k)))
             elif k == 1:
-                return DT('psi', 0) * dtify(args[0], 1)
+                return DT(psi(args[0]), 0) * _dtify(args[0], 1)
             elif k == 0:
-                return DT('phi', 0)
+                if args[0].__repr__() == 't':
+                    # sin(t)[0] = 0
+                    return 0
+                else:
+                    return DT(phi(args[0]), 0)
             else:
                 raise ValueError(f'DT index must be great than zero!')
 
@@ -306,9 +402,9 @@ class dSin(Function):
 @implements_dt_algebra(cos)
 class dCos(Function):
     r"""
-    This function returns DT of $\phi(t)=\cos(x(t))$, which is denoted by $\phi[k]$.
+    This function returns DT of $\psi(t)=\cos(x(t))$, which is denoted by $\phi[k]$.
 
-    For expression $\phi(t)=\cos(x(t))$,
+    For expression $\psi(t)=\cos(x(t))$,
 
     if the order of DT is an `Index` object $k$, it returns
 
@@ -316,7 +412,7 @@ class dCos(Function):
         \begin{cases}
             -\sum_{m=0}^{k-1} \frac{k-m}{k}\phi[m]x[k-m]=-\left(\frac{k-(0:k-1)}{k}*\phi[0:k-1]\right)\otimes x[1:k]& k\geq 2\\
             -\phi[0]* x[1]& k= 1\\
-            \phi(0)& k=0
+            \psi(0)& k=0
         \end{cases}
 
     Else if the order of DT is a `Slice` object $k_0:k_1$, it returns
@@ -343,29 +439,34 @@ class dCos(Function):
         if isinstance(k, (Expr, Index)) and not isinstance(k, (Integer, Slice)):
             if any([not isinstance(symbol, Index) for symbol in k.free_symbols]):
                 raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
-            return -dConv_s(((k - dLinspace(0, k - 1)) / k) * DT('phi', Slice(0, k - 1)),
-                            dtify(args[0], Slice(1, k)))
+            return -dConv_s(((k - dLinspace(0, k - 1)) / k) * DT(phi(args[0]), Slice(0, k - 1)),
+                            _dtify(args[0], Slice(1, k)))
         elif isinstance(k, Slice):
             if k.start >= 1:
-                Phi1 = DT('phi', Slice(0, k.end - k.start))
-                temp = -dConv_v((k.end - dLinspace(0, k.end - k.start)) / k.end * Phi1, dtify(args[0], k))
+                Phi1 = DT(phi(args[0]), Slice(0, k.end - k.start))
+                temp = -dConv_v((k.end - dLinspace(0, k.end - k.start)) / k.end * Phi1, _dtify(args[0], k))
                 for i in range(k.start):
                     temp = temp - (k.end - dLinspace(k.start - i, k.end - i)) / k.end * \
-                           DT('phi', Slice(k.start - i, k.end - i)) * dtify(args[0], i)
+                           DT(phi(args[0]), Slice(k.start - i, k.end - i)) * _dtify(args[0], i)
                 return temp
             else:
-                phi = DT('phi', Slice(0, k.end))
-                psi = DT('psi', 0)
-                return -dDelta(Slice(0, k.end)) * psi - \
-                    dConv_v((k.end - dLinspace(0, k.end)) / k.end * phi,
-                            dtify(args[0], Slice(0, k.end))) * (1 - dDelta(Slice(0, k.end)))
+                phi_ = DT(phi(args[0]), Slice(0, k.end))
+                psi_ = DT(psi(args[0]), 0)
+                return -dDelta(Slice(0, k.end)) * psi_ - \
+                    dConv_v((k.end - dLinspace(0, k.end)) / k.end * phi_,
+                            _dtify(args[0], Slice(0, k.end))) * (1 - dDelta(Slice(0, k.end)))
         else:  # integer
             if k > 1:
-                return -dConv_s((k - dLinspace(0, k - 1)) / k * DT('phi', Slice(0, k - 1)), dtify(args[0], Slice(1, k)))
+                return -dConv_s((k - dLinspace(0, k - 1)) / k * DT(phi(args[0]), Slice(0, k - 1)),
+                                _dtify(args[0], Slice(1, k)))
             elif k == 1:
-                return -DT('phi', 0) * dtify(args[0], 1)
+                return -DT(phi(args[0]), 0) * _dtify(args[0], 1)
             elif k == 0:
-                return DT('psi', 0)
+                if args[0].__repr__() == 't':
+                    # cos(t)[0] = 1
+                    return 1
+                else:
+                    return DT(psi(args[0]), 0)
             else:
                 raise ValueError(f'DT index must be great than zero!')
 
@@ -393,7 +494,7 @@ class dDerivative(Function):
         if args[1][0].name != 't':
             raise ValueError("Support time derivative only!")
         if isinstance(k, (Index, Expr, Slice, Integer)):
-            return (k + 1) * dtify(args[0], k + 1)
+            return (k + 1) * _dtify(args[0], k + 1)
         else:
             # args[0] is not Index or Slice.
             raise TypeError(f"Invalid inputs type {args[0].__class__.__name__}.")

@@ -25,7 +25,7 @@ extensions = ['sphinx.ext.autodoc',
               'sphinx_reredirects', 'sphinx_copybutton',
               'sphinx.ext.graphviz', 'sphinxcontrib.jquery',
               'matplotlib.sphinxext.plot_directive', 'myst_parser',
-              'convert-svg-to-pdf', 'sphinx.ext.intersphinx',]  # 'sphinx.ext.linkcode'
+              'convert-svg-to-pdf', 'sphinx.ext.intersphinx', ]  # 'sphinx.ext.linkcode'
 
 # To stop docstrings inheritance.
 autodoc_inherit_docstrings = False
@@ -94,7 +94,7 @@ common_theme_variables = {
 
     "code-font-size": "var(--font-size--small)",
     "font-stack--monospace": 'DejaVu Sans Mono,"SFMono-Regular",Menlo,Consolas,Monaco,Liberation Mono,Lucida Console,monospace;'
-    }
+}
 
 html_theme_options = {
     "light_css_variables": common_theme_variables,
@@ -140,6 +140,7 @@ html_domain_indices = ['py-modindex']
 html_logo = '_static/sympylogo.png'
 latex_logo = '_static/sympylogo_big.png'
 html_favicon = '../_build/logo/sympy-notailtext-favicon.ico'
+
 
 def linkcode_resolve(domain, info):
     """Determine the URL corresponding to Python object."""
