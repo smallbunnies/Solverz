@@ -1,8 +1,8 @@
 import sympy as sp
 from sympy import Derivative, sin, cos
-from sympy.abc import x, y, z, t
+from sympy.abc import x, y, z, t, a, b, c
 
-from Solverz.sas.sas_alg import Index, Slice, DT, dDelta, dConv_s, dConv_v, dLinspace, dtify, _dtify, psi, phi
+from Solverz.sas.sas_alg import Index, Slice, DT, dDelta, dConv_s, dConv_v, dLinspace, dtify, _dtify, psi, phi, Constant
 
 k = Index('k')
 k0 = Index('k', sequence=0)
@@ -119,3 +119,5 @@ def test_dt_algebra():
     assert dtify(t, Index('k')) == DT(t, Index('k'))
     assert dtify(t, 0) == 0
     assert dtify(t, 1) == 1
+    assert dtify((x + a * z) * sp.cos(y), constants=['a']) == dConv_s(Constant(a) * Z0k + X0k, DT(psi(y), Slice(0, k)))
+    assert dtify((x + a * z) * sp.cos(y)) == dConv_s(X0k + dConv_v(DT(a, Slice(0, k)), DT(z, Slice(0, k))), DT(psi(y), Slice(0, k)))

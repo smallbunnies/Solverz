@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from typing import Union, Type, Dict, Callable
-from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Pow, cos, Function, Integer, preorder_traversal
+from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Pow, cos, Function, Integer, preorder_traversal, \
+    Basic, sympify
 
 dfunc_mapping: Dict[Type[Expr], Callable] = {}
 
@@ -116,6 +117,15 @@ class psi(Symbol):
     """
 
     def __new__(cls, node, commutative=False):
+        """
+        Parameters
+        ==========
+
+        node : Expr or Symbol
+
+            arg of ``cos`` function.
+
+        """
         obj = Symbol.__new__(cls, 'psi', commutative=commutative)
         obj.eqn = node
         obj.name = 'psi' + r'_{' + obj.eqn.__repr__() + r'}'
@@ -128,7 +138,19 @@ class psi(Symbol):
         return r'\psi_\text{%s}' % self.eqn.__repr__()
 
 
-def dtify(expr: Expr, k=None, etf=False):
+class Constant(Symbol):
+    """
+    The symbol used to denote constants in expressions.
+    """
+
+    def __new__(cls, symbol, commutative=False):
+        obj = Symbol.__new__(cls, symbol.name, commutative=symbol.is_commutative)
+        obj.symbol = symbol
+        obj.name = symbol.name
+        return obj
+
+
+def dtify(expr, k=None, etf=False, constants=None):
     r"""
     Derive DTs of expressions.
 
@@ -143,10 +165,14 @@ def dtify(expr: Expr, k=None, etf=False):
     Parameters
     ==========
 
-    expr : Expr
+    expr : Expr or number
+
         An expression to be evaluated.
+
     k : Index, Slice, Type[Expr], int
+
         DT Index of expr.
+
     etf : bool
 
         If set to ``True``, trigonometric components are extracted from expr and forms new equations.
@@ -163,6 +189,16 @@ def dtify(expr: Expr, k=None, etf=False):
         >>> dtify(x * sp.sin(y))
         dConv_s(x[0:k], phi_{y}[0:k])
 
+    constants : list of str (variable names)
+
+        For example, if ``x`` is a constant, the DT of x should be ``x*dDelta(k)`` instead of DT object ``x[k]``.
+
+        >>> Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg)')
+        >>> dtify(Eq_prime.EQN, constants=['ra'])
+        Eqp[k] - dConv_s(ra*Ixg[0:k] + Uxg[0:k], psi_{delta}[0:k])
+
+        In this case, ``ra`` is treated as a constant and no convolution is performed for ``Mul(ra, Ixg)``.
+
     Returns
     =======
 
@@ -170,6 +206,24 @@ def dtify(expr: Expr, k=None, etf=False):
         DT expression or list of DT expressions.
 
     """
+
+    # if node is not instance of sympy.basic, convert node to sympy expressions first.
+    # for example, dtify(3) now returns 3*dDelta[k]
+    if not isinstance(expr, Basic):
+        expr = sympify(expr)
+
+    if constants is not None:
+        if not isinstance(constants, list):
+            constants = [constants]
+        symbol_dict = {}
+        for symbol in list(expr.free_symbols):
+            symbol_dict[symbol.name] = symbol
+        for var_name in constants:
+            try:
+                expr = expr.subs(symbol_dict[var_name],
+                                 Constant(symbol_dict[var_name], commutative=symbol_dict[var_name].is_commutative))
+            except KeyError:
+                pass
 
     if any([isinstance(symbol, DT) for symbol in list(expr.free_symbols)]):
         raise TypeError("DT expression cannot be dtified!")
@@ -189,10 +243,10 @@ def dtify(expr: Expr, k=None, etf=False):
                     expr = expr.subs(node, psi_)
             for symbol in list(expr.free_symbols):
                 if isinstance(symbol, psi):
-                    exprs[symbol] = symbol-cos(symbol.eqn)
+                    exprs[symbol] = symbol - cos(symbol.eqn)
                     exprs[phi(symbol.eqn)] = phi(symbol.eqn) - sin(symbol.eqn)
                 if isinstance(symbol, phi):
-                    exprs[symbol] = symbol-sin(symbol.eqn)
+                    exprs[symbol] = symbol - sin(symbol.eqn)
                     exprs[psi(symbol.eqn)] = psi(symbol.eqn) - cos(symbol.eqn)
             exprs = [expr] + list(exprs.values())
             return [_dtify(expr_, k) for expr_ in exprs]
@@ -216,7 +270,7 @@ def _dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
     """
     if isinstance(Node, tuple(dfunc_mapping.keys())):
         return dfunc_mapping[Node.func](k, *Node.args)
-    elif isinstance(Node, Symbol):
+    elif isinstance(Node, Symbol) and not isinstance(Node, Constant):
         if Node.name != 't':
             return DT(Node, k)
         else:  # dt of t
@@ -234,7 +288,7 @@ def _dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
                     return 1
                 else:
                     return 0
-    elif isinstance(Node, Number):
+    elif isinstance(Node, (Number, Constant)):
         return Node * dDelta(k)
     else:
         raise TypeError(f"Unsupported Expr {Node.func}!")
@@ -317,29 +371,35 @@ class dMul(Function):
 
     @classmethod
     def eval(cls, k, *args):
-        if isinstance(args[0], Number):
-            # The scalar Number is always in front of Symbol
-            # for example a=x*3 and a=3*x all derive a=3*x
-            return Mul(args[0], _dtify(Mul(*args[1:]), k))
-        else:
-            if isinstance(k, (Expr, Index)) and not isinstance(k, (Integer, Slice)):
-                if any([not isinstance(symbol, Index) for symbol in k.free_symbols]):
-                    raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
-                return dConv_s(*[_dtify(arg, Slice(0, k)) for arg in tuple(args)])
-            elif isinstance(k, Slice):
-                # Note that k = k.start:k.end here
-                if k.start >= 1:
-                    temp = dConv_v(_dtify(args[0], Slice(0, k.end - k.start)), _dtify(Mul(*args[1:]), k))
-                    for i in range(k.start):
-                        temp = temp + _dtify(args[0], Slice(k.start - i, k.end - i)) * _dtify(Mul(*args[1:]), i)
-                    return temp
+        i = -1
+        for arg in args:
+            i = i + 1
+            if isinstance(arg, (Number, Constant)):
+                if i == 0:
+                    return Mul(args[0], _dtify(Mul(*args[1:]), k))
+                elif i == len(args)-1:
+                    return Mul(_dtify(Mul(*args[:-1]), k), args[-1])
                 else:
-                    return dConv_v(_dtify(args[0], k), _dtify(Mul(*args[1:]), k))
-            else:  # integer
-                if k >= 1:
-                    return dConv_s(*[_dtify(arg, Slice(0, k)) for arg in tuple(args)])
-                else:  # k==0
-                    return Mul(*[_dtify(arg, 0) for arg in tuple(args)])
+                    return Mul(_dtify(Mul(*args[:i]), k), args[i], _dtify(Mul(*args[i+1:]), k))
+
+        if isinstance(k, (Expr, Index)) and not isinstance(k, (Integer, Slice)):
+            if any([not isinstance(symbol, Index) for symbol in k.free_symbols]):
+                raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
+            return dConv_s(*[_dtify(arg, Slice(0, k)) for arg in tuple(args)])
+        elif isinstance(k, Slice):
+            # Note that k = k.start:k.end here
+            if k.start >= 1:
+                temp = dConv_v(_dtify(args[0], Slice(0, k.end - k.start)), _dtify(Mul(*args[1:]), k))
+                for i in range(k.start):
+                    temp = temp + _dtify(args[0], Slice(k.start - i, k.end - i)) * _dtify(Mul(*args[1:]), i)
+                return temp
+            else:
+                return dConv_v(_dtify(args[0], k), _dtify(Mul(*args[1:]), k))
+        else:  # integer
+            if k >= 1:
+                return dConv_s(*[_dtify(arg, Slice(0, k)) for arg in tuple(args)])
+            else:  # k==0
+                return Mul(*[_dtify(arg, 0) for arg in tuple(args)])
 
 
 @implements_dt_algebra(sin)
