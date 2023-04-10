@@ -128,7 +128,7 @@ class psi(Symbol):
         return r'\psi_\text{%s}' % self.eqn.__repr__()
 
 
-def dtify(expr: Expr, k=None):
+def dtify(expr: Expr, k=None, etf=False):
     r"""
     Derive DTs of expressions.
 
@@ -138,9 +138,7 @@ def dtify(expr: Expr, k=None):
     >>> from Solverz.eqn import Eqn
     >>> Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
     >>> dtify(Eq_prime.EQN)
-    [Eqp[k] - dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi[0:k]) - dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi[0:k]),
-    psi[k] + dConv_s((k - dLinspace(0, k - 1))*phi[0:k - 1]/k, delta[1:k]),
-    phi[k] - dConv_s((k - dLinspace(0, k - 1))*psi[0:k - 1]/k, delta[1:k])]
+    Eqp[k] - dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi_{delta}[0:k]) - dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi_{delta}[0:k])
 
     Parameters
     ==========
@@ -148,7 +146,22 @@ def dtify(expr: Expr, k=None):
     expr : Expr
         An expression to be evaluated.
     k : Index, Slice, Type[Expr], int
-        An expression to be evaluated.
+        DT Index of expr.
+    etf : bool
+
+        If set to ``True``, trigonometric components are extracted from expr and forms new equations.
+        Otherwise, trigonometric components will not be extracted from expr but will be simply replaced by $\psi$ and
+        $\phi$ symbols.
+
+        >>> import sympy as sp
+        >>> from Solverz.sas.sas_alg import dtify
+        >>> x, y = sp.symbols('x, y')
+        >>> dtify(x * sp.sin(y), etf=True)
+        [dConv_s(x[0:k], phi_{y}[0:k]),
+        phi_{y}[k] - dConv_s((k - dLinspace(0, k - 1))*psi_{y}[0:k - 1]/k, y[1:k]),
+        psi_{y}[k] + dConv_s((k - dLinspace(0, k - 1))*phi_{y}[0:k - 1]/k, y[1:k])]
+        >>> dtify(x * sp.sin(y))
+        dConv_s(x[0:k], phi_{y}[0:k])
 
     Returns
     =======
@@ -160,29 +173,41 @@ def dtify(expr: Expr, k=None):
 
     if any([isinstance(symbol, DT) for symbol in list(expr.free_symbols)]):
         raise TypeError("DT expression cannot be dtified!")
-
+    if k is None:
+        k = Index('k')
     if expr.has(sin, cos):
-        exprs = []
         # subs $\phi$ and $\psi$ for $\sin$ and $\cos$.
-        pt = preorder_traversal(expr)
-        for node in pt:
-            if isinstance(node, sin):
-                phi_ = phi(node.args[0])
-                expr = expr.subs(node, phi_)
-                exprs = [*exprs, phi_ - node]
-            elif isinstance(node, cos):
-                psi_ = psi(node.args[0])
-                expr = expr.subs(node, psi_)
-                exprs = [*exprs, psi_ - node]
-        exprs = [expr] + exprs
-        if k is None:
-            k = Index('k')
-        return [_dtify(expr_, k) for expr_ in exprs]
-    else:
-        if k is None:
-            return _dtify(expr, Index('k'))
+        if etf:
+            exprs = dict()
+            pt = preorder_traversal(expr)
+            for node in pt:
+                if isinstance(node, sin):
+                    phi_ = phi(node.args[0])
+                    expr = expr.subs(node, phi_)
+                elif isinstance(node, cos):
+                    psi_ = psi(node.args[0])
+                    expr = expr.subs(node, psi_)
+            for symbol in list(expr.free_symbols):
+                if isinstance(symbol, psi):
+                    exprs[symbol] = symbol-cos(symbol.eqn)
+                    exprs[phi(symbol.eqn)] = phi(symbol.eqn) - sin(symbol.eqn)
+                if isinstance(symbol, phi):
+                    exprs[symbol] = symbol-sin(symbol.eqn)
+                    exprs[psi(symbol.eqn)] = psi(symbol.eqn) - cos(symbol.eqn)
+            exprs = [expr] + list(exprs.values())
+            return [_dtify(expr_, k) for expr_ in exprs]
         else:
+            pt = preorder_traversal(expr)
+            for node in pt:
+                if isinstance(node, sin):
+                    phi_ = phi(node.args[0])
+                    expr = expr.subs(node, phi_)
+                elif isinstance(node, cos):
+                    psi_ = psi(node.args[0])
+                    expr = expr.subs(node, psi_)
             return _dtify(expr, k)
+    else:
+        return _dtify(expr, k)
 
 
 def _dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):

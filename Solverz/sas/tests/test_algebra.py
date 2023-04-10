@@ -92,8 +92,10 @@ def test_dt_algebra():
            dConv_s(X0k,
                    dConv_v((k - Lin0k) * DT(psi(y), Slice(0, k)) / k, Y0k * (1 - dDelta(Slice(0, k)))) +
                    dDelta(Slice(0, k)) * DT(phi(y), 0))
-    assert dtify(expr3) == [dConv_s(X0k, DT(phi(y), Slice(0, k))),
-                            DT(phi(y), k) - dConv_s((k - dLinspace(0, k - 1)) * DT(psi(y), Slice(0, k - 1)) / k, Y1k)]
+    assert dtify(expr3, etf=True) == \
+           [dConv_s(X0k, DT(phi(y), Slice(0, k))),
+            DT(phi(y), k) - dConv_s((k - dLinspace(0, k - 1)) * DT(psi(y), Slice(0, k - 1)) / k, Y1k),
+            DT(psi(y), k) + dConv_s((k - dLinspace(0, k - 1)) * DT(phi(y), Slice(0, k - 1)) / k, Y1k)]
     expr4 = x * sin(x * y)
     assert _dtify(expr4, k) == \
            dConv_s(X0k,
