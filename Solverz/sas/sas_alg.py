@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from functools import reduce
 from typing import Union, Type, Dict, Callable
+
 from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Pow, cos, Function, Integer, preorder_traversal, \
-    Basic, sympify
+    Basic, sympify, S, Float
 
 dfunc_mapping: Dict[Type[Expr], Callable] = {}
 
@@ -376,10 +378,10 @@ class dMul(Function):
             if isinstance(arg, (Number, Constant)):
                 if i == 0:
                     return Mul(args[0], _dtify(Mul(*args[1:]), k))
-                elif i == len(args)-1:
+                elif i == len(args) - 1:
                     return Mul(_dtify(Mul(*args[:-1]), k), args[-1])
                 else:
-                    return Mul(_dtify(Mul(*args[:i]), k), args[i], _dtify(Mul(*args[i+1:]), k))
+                    return Mul(_dtify(Mul(*args[:i]), k), args[i], _dtify(Mul(*args[i + 1:]), k))
 
         if isinstance(k, (Expr, Index)) and not isinstance(k, (Integer, Slice)):
             if any([not isinstance(symbol, Index) for symbol in k.free_symbols]):
@@ -674,19 +676,31 @@ class dConv_s(Function):
                     temp_args1[i] = x
                     temp_args2 = list(args)
                     temp_args2[i] = y
-                    return self.func(*temp_args1).expand(func=True, mul=False) + \
-                        self.func(*temp_args2).expand(func=True, mul=False)
+                    return self.func(*temp_args1).expand(**hints) + \
+                        self.func(*temp_args2).expand(**hints)
                 elif arg.func == dConv_v:
                     # extract the arguments of sub-dConv_s nodes
                     if i == 0:
-                        return self.func(*(list(arg.args) + list(args[1:]))).expand(func=True, mul=False)
+                        return self.func(*(list(arg.args) + list(args[1:]))).expand(**hints)
                     elif i == len(args) - 1:
-                        return self.func(*(list(args[:-1]) + list(arg.args))).expand(func=True, mul=False)
+                        return self.func(*(list(args[:-1]) + list(arg.args))).expand(**hints)
                     else:
-                        return self.func(*(list(args[0:i - 1]) + list(arg.args) + list(args[0:i + 1]))).expand(
-                            func=True, mul=False)
-                # elif arg.is_Mul:
-                # deprecated by overriding multiplication
+                        return self.func(*(list(args[0:i - 1]) + list(arg.args) + list(args[0:i + 1]))).expand(**hints)
+                elif arg.is_Mul:
+                    # Replace ``Mul(-1, dConv_s())`` by ``(-1) * dConv_s()`` so that ``__mul__()`` and ``__rmul__()``
+                    # are triggered. -1 should be converted to python number.
+                    args = []
+                    for arg_ in arg.args:
+                        if isinstance(arg_, Integer):
+                            args = [*args, int(arg_)]
+                        elif isinstance(arg_, Float):
+                            args = [*args, float(arg_)]
+                        else:
+                            args = [*args, arg_]
+                    arg = reduce(lambda a, b: a * b, args)
+                    temp_args = list(self.args)
+                    temp_args[i] = arg
+                    return self.func(*temp_args).expand(**hints)
 
         return self
 
@@ -756,19 +770,31 @@ class dConv_v(Function):
                     temp_args1[i] = x
                     temp_args2 = list(args)
                     temp_args2[i] = y
-                    return self.func(*temp_args1).expand(func=True, mul=False) + \
-                        self.func(*temp_args2).expand(func=True, mul=False)
+                    return self.func(*temp_args1).expand(**hints) + \
+                        self.func(*temp_args2).expand(**hints)
                 elif arg.func == dConv_v:
                     # extract the arguments of sub-dConv_s nodes
                     if i == 0:
-                        return self.func(*(list(arg.args) + list(args[1:]))).expand(func=True, mul=False)
+                        return self.func(*(list(arg.args) + list(args[1:]))).expand(**hints)
                     elif i == len(args) - 1:
-                        return self.func(*(list(args[:-1]) + list(arg.args))).expand(func=True, mul=False)
+                        return self.func(*(list(args[:-1]) + list(arg.args))).expand(**hints)
                     else:
-                        return self.func(*(list(args[0:i - 1]) + list(arg.args) + list(args[0:i + 1]))).expand(
-                            func=True, mul=False)
-                # elif arg.is_Mul:
-                # deprecated by overriding multiplication
+                        return self.func(*(list(args[0:i - 1]) + list(arg.args) + list(args[0:i + 1]))).expand(**hints)
+                elif arg.is_Mul:
+                    # Replace ``Mul(-1, dConv_v())`` by ``(-1) * dConv_v()`` so that ``__mul__()`` and ``__rmul__()``
+                    # are triggered. -1 should be converted to python number.
+                    args = []
+                    for arg_ in arg.args:
+                        if isinstance(arg_, Integer):
+                            args = [*args, int(arg_)]
+                        elif isinstance(arg_, Float):
+                            args = [*args, float(arg_)]
+                        else:
+                            args = [*args, arg_]
+                    arg = reduce(lambda a, b: a * b, args)
+                    temp_args = list(self.args)
+                    temp_args[i] = arg
+                    return self.func(*temp_args).expand(**hints)
 
         return self
 

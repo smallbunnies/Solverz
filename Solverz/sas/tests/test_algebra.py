@@ -25,7 +25,7 @@ Lin0k = dLinspace(0, k)
 X03 = DT(x, Slice(0, 3))
 Y03 = DT(y, Slice(0, 3))
 Z03 = DT(z, Slice(0, 3))
-
+A0k = DT(a, Slice(0, k))
 
 def test_dt_algebra():
     assert dtify(x + y) == Xk + Yk
@@ -120,4 +120,11 @@ def test_dt_algebra():
     assert dtify(t, 0) == 0
     assert dtify(t, 1) == 1
     assert dtify((x + a * z) * sp.cos(y), constants=['a']) == dConv_s(Constant(a) * Z0k + X0k, DT(psi(y), Slice(0, k)))
-    assert dtify((x + a * z) * sp.cos(y)) == dConv_s(X0k + dConv_v(DT(a, Slice(0, k)), DT(z, Slice(0, k))), DT(psi(y), Slice(0, k)))
+    assert dtify((x + a * z) * sp.cos(y)) == dConv_s(X0k + dConv_v(A0k, DT(z, Slice(0, k))), DT(psi(y), Slice(0, k)))
+    assert dtify((a - x * y) * z).expand(func=True, mul=False) == \
+           dConv_s(Z0k, DT(a, Slice(0, k))) + dConv_s(Z0k, -X0k, Y0k)
+    assert dtify((a - x * y) * cos(z)) == dConv_s(A0k - dConv_v(X0k, Y0k), DT(psi(z), Slice(0, k)))
+    assert dtify((a - x * y) * cos(z)).expand(func=True, mul=False) == \
+           dConv_s(A0k, DT(psi(z), Slice(0, k))) + dConv_s(-X0k, Y0k, DT(psi(z), Slice(0, k)))
+    assert dtify((a-2*x*y)*cos(z)).expand(func=True, mul=False) == \
+           dConv_s(A0k, DT(psi(z), Slice(0, k))) + dConv_s(-2 * X0k, Y0k, DT(psi(z), Slice(0, k)))
