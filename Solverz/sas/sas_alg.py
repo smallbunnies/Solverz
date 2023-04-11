@@ -358,14 +358,13 @@ class dMul(Function):
 
     .. note::
 
-        The convolution of numbers and vectors equals the dot product, so we always extract numbers from
-        $\prod_{i=1}^nx_i(t)$ first. That is, if $x_1(t)$ is a `Number` object, the `dMul` function will return
-        x1*dMul(k, x2*x3*...*xn).
+        The convolution of numbers/constants and variables equals the dot product. For example, if ``a`` is a
+        constant and ``x`` is a variable, we want ``dtify(a*x)`` to produce $a*x[0:k]$ instead of
+        $a[0:k]\otimes x[0:k]$ because $a[k]=0\ (k\geq 1)$.
 
-    Explanation
-    ===========
-
-    # TODO: the explanation to dMul
+        This is accomplished by declare :py:class:`~.Constant` symbol ``a``. When performing :py:class:`~.dMul`,
+        we always extract Number and Constant from the Expr $\prod_{i=1}^nx_i(t)$ first. For example, if $x_3$ is a constant
+        then ``dMul`` returns ``dMul(x1*x2,k)*x3*dMul(x4*x5*...*xn,k)``
 
     """
 
