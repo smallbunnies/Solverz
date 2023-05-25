@@ -4,7 +4,7 @@ import pandas as pd
 import tqdm
 import matplotlib.pyplot as plt
 
-from Solverz.algebra.num_alg import AliasVar, ComputeParam, F, X, Y
+from Solverz.numeqn.num_alg import AliasVar, ComputeParam, F, X, Y
 from Solverz.eqn import Ode, Eqn
 from Solverz.equations import DAE
 from Solverz.param import Param

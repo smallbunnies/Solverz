@@ -1,8 +1,8 @@
-numpy>=1.22.4
-sympy>=1.10.1
+numpy>=1.24.2
+sympy>=1.11.1
 pandas>=1.4.2
 openpyxl>=3.0.10
 matplotlib>=3.5.2
 tqdm>=4.64.1
-scipy~=1.9.3
-pytest>=7.2.1
+scipy>=1.10.1
+pytest>=7.2.2
