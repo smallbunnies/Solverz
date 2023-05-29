@@ -27,8 +27,7 @@ y = TimeVar('y')
 y.v0 = [1]
 
 xy = implicit_trapezoid(dae, TimeVars([x, y], length=201), 0.1, 20)
-plt.plot(np.arange(0, 20.1, 0.1), xy.array[0, :].reshape((-1,)))
-plt.plot(np.arange(0, 20.1, 0.1), xy.array[1, :].reshape((-1,)))
+plt.plot(np.arange(0, 20.1, 0.1), xy.T)
 
 df = pd.read_excel('instances/dae_test.xlsx',
                    sheet_name=None,
