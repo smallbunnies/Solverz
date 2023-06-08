@@ -16,12 +16,11 @@ jobs:
       with:
         python-version: '3.8'
         cache: 'pip' # caching pip dependencies
-    - run: pip install -r requirements.txt
-    - run: dir
-    - run: cd docs
-    - run: dir
-    - run: pip install -r requirements.txt
-    - run: cd ..
+    - run: |
+        pip install -r requirements.txt
+        cd docs/
+        pip install -r requirements.txt
+        cd ..
     - run: | # run both independent pytest and doctest
         pytest --doctest-modules
     - name: Setup tmate session # debug Github actions if any ancestor job failed
