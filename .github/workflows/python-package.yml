@@ -22,6 +22,6 @@ jobs:
     - run: cd ..
     - run: | # run both independent pytest and doctest
         pytest --doctest-modules
-#    - name: Setup tmate session # debug Github actions if any ancestor job failed
-#      if: ${{ failure() }}
-#      uses: mxschmitt/action-tmate@v3
+    - name: Setup tmate session # debug Github actions if any ancestor job failed
+      if: ${{ failure() }}
+      uses: mxschmitt/action-tmate@v3
