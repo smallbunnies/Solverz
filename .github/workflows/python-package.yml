@@ -17,6 +17,7 @@ jobs:
         python-version: '3.8'
         cache: 'pip' # caching pip dependencies
     - run: pip install -r requirements.txt
+    - run: dir
     - run: cd docs
     - run: pip install -r requirements.txt
     - run: cd ..
