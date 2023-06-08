@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from functools import reduce
-from typing import Union, Type, Dict, Callable
+from typing import Union, Type, Dict, Callable, List
 
 from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Pow, cos, Function, Integer, preorder_traversal, \
-    Basic, sympify, S, Float
+    Basic, sympify, S, Float, Matrix, ImmutableDenseMatrix
 
 dfunc_mapping: Dict[Type[Expr], Callable] = {}
 
@@ -81,7 +81,7 @@ class DT(Symbol):
     """
     __slots__ = ('index', 'name', 'symbol', 'symbol_name')
 
-    def __new__(cls, symbol, index: Union[int, Index, Slice], commutative=False):
+    def __new__(cls, symbol, index: Union[int, Index, Slice], commutative=True):
         if isinstance(index, int) and index < 0:
             raise IndexError("Invalid DT order")
         obj = Symbol.__new__(cls, f'{symbol.name}[{index}]', commutative=commutative)
@@ -100,7 +100,7 @@ class phi(Symbol):
     The symbol used to denote `sin` function in expressions.
     """
 
-    def __new__(cls, node, commutative=False):
+    def __new__(cls, node, commutative=True):
         obj = Symbol.__new__(cls, 'phi', commutative=commutative)
         obj.eqn = node
         obj.name = 'phi' + r'_{' + obj.eqn.__repr__() + r'}'
@@ -118,7 +118,7 @@ class psi(Symbol):
     The symbol used to denote `cos` function in expressions.
     """
 
-    def __new__(cls, node, commutative=False):
+    def __new__(cls, node, commutative=True):
         """
         Parameters
         ==========
@@ -152,7 +152,7 @@ class Constant(Symbol):
         return obj
 
 
-def dtify(expr, k=None, etf=False, constants=None):
+def dtify(expr, k=None, etf=False, eut=False, constants=None):
     r"""
     Derive DTs of expressions.
 
@@ -160,6 +160,7 @@ def dtify(expr, k=None, etf=False, constants=None):
     ========
 
     >>> from Solverz.eqn import Eqn
+    >>> from Solverz.sas.sas_alg import dtify
     >>> Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
     >>> dtify(Eq_prime.EQN)
     Eqp[k] - dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi_{delta}[0:k]) - dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi_{delta}[0:k])
@@ -182,19 +183,36 @@ def dtify(expr, k=None, etf=False, constants=None):
         $\phi$ symbols.
 
         >>> import sympy as sp
-        >>> from Solverz.sas.sas_alg import dtify
         >>> x, y = sp.symbols('x, y')
         >>> dtify(x * sp.sin(y), etf=True)
-        [dConv_s(x[0:k], phi_{y}[0:k]),
-        phi_{y}[k] - dConv_s((k - dLinspace(0, k - 1))*psi_{y}[0:k - 1]/k, y[1:k]),
-        psi_{y}[k] + dConv_s((k - dLinspace(0, k - 1))*phi_{y}[0:k - 1]/k, y[1:k])]
+        [dConv_s(x[0:k], phi_{y}[0:k]), phi_{y}[k] - dConv_s(psi_{y}[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k]), psi_{y}[k] + dConv_s(phi_{y}[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])]
         >>> dtify(x * sp.sin(y))
         dConv_s(x[0:k], phi_{y}[0:k])
+
+    eut : bool
+
+        If set to ``True``, extract unknown $k$-th terms from the derived DT expressions.
+
+        >>> Eq_test = Eqn(name='Eq_test', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)')
+        >>> dt_qen = dtify(Eq_test.EQN,etf=True,eut=True, constants=['ra', 'Xdp'])
+        >>> dt_qen[0][0]
+        -dConv_s(-Xdp*Iyg[1:k - 1] + ra*Ixg[1:k - 1] + Uxg[1:k - 1], psi_{delta}[1:k - 1])
+        >>> dt_qen[0][1]
+        Xdp*Iyg[0]*psi_{delta}[k] + Xdp*Iyg[k]*psi_{delta}[0] - ra*Ixg[0]*psi_{delta}[k] - ra*Ixg[k]*psi_{delta}[0] + Eqp[k] - Uxg[0]*psi_{delta}[k] - Uxg[k]*psi_{delta}[0]
+        >>> dt_qen[1][0]
+        dConv_s(phi_{delta}[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
+        >>> dt_qen[1][1]
+        delta[k]*phi_{delta}[0] + psi_{delta}[k]
+        >>> dt_qen[2][0]
+        -dConv_s(psi_{delta}[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
+        >>> dt_qen[2][1]
+        -delta[k]*psi_{delta}[0] + phi_{delta}[k]
 
     constants : list of str (variable names)
 
         For example, if ``x`` is a constant, the DT of x should be ``x*dDelta(k)`` instead of DT object ``x[k]``.
 
+        >>> from Solverz.eqn import Eqn
         >>> Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg)')
         >>> dtify(Eq_prime.EQN, constants=['ra'])
         Eqp[k] - dConv_s(ra*Ixg[0:k] + Uxg[0:k], psi_{delta}[0:k])
@@ -251,7 +269,10 @@ def dtify(expr, k=None, etf=False, constants=None):
                     exprs[symbol] = symbol - sin(symbol.eqn)
                     exprs[psi(symbol.eqn)] = psi(symbol.eqn) - cos(symbol.eqn)
             exprs = [expr] + list(exprs.values())
-            return [_dtify(expr_, k) for expr_ in exprs]
+            if not eut:
+                return [_dtify(expr_, k) for expr_ in exprs]
+            else:
+                return [extract_unknown_term(_dtify(expr_, k), k) for expr_ in exprs]
         else:
             pt = preorder_traversal(expr)
             for node in pt:
@@ -261,9 +282,10 @@ def dtify(expr, k=None, etf=False, constants=None):
                 elif isinstance(node, cos):
                     psi_ = psi(node.args[0])
                     expr = expr.subs(node, psi_)
-            return _dtify(expr, k)
-    else:
+    if not eut:
         return _dtify(expr, k)
+    else:
+        return extract_unknown_term(_dtify(expr, k), k)
 
 
 def _dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
@@ -597,7 +619,7 @@ class dDelta(Function):
 
     .. math::
 
-        \delta[k]=
+        \Delta[k]=
         \begin{cases}
           1 & k=0 \\
           0 & k\in \mathbb{N}^+
@@ -659,6 +681,18 @@ class dConv_s(Function):
         args = list(self.args)
         args[0] = Mul(other * args[0])
         return self.func(*args)
+
+    @classmethod
+    def eval(cls, *args):
+        # if the operands are matrices, then
+        if all([isinstance(arg, ImmutableDenseMatrix) for arg in args]):
+            x_ = Symbol('x_')  # declare temporary symbol x_ to perform polynomial multiplications
+            temp = reduce(lambda a, b: a * b,
+                          [arg[0] if arg.shape[0] == 1 else arg[0] + arg[1] * x_ for arg in args]).expand()
+            if args[0].shape[0] == 1:
+                return temp
+            else:
+                return temp.coeff(x_)
 
     def _eval_expand_func(self, **hints):
         """
@@ -827,6 +861,184 @@ class dLinspace(Function):
     def _latex(self, printer):
         m, n = self.args
         _m, _n = printer._print(m), printer._print(n)
-        return r'\left ( %s : %s \right )' % (_m, _n)
+        return r'\left [ %s : %s \right ]' % (_m, _n)
 
-# TODO : Extract k-th order terms from conv.
+
+def extract_unknown_term(expr, k: [Index, int]):
+    r"""
+    To extract unknown terms from expressions with :py:class:`dConv_s` ($\bigotimes$) and
+    :py:class:`dConv_v` ($\overline{\bigotimes}$) expanded.
+
+    For example, if we have
+
+    .. math::
+
+        z[k]=x[0:k]\otimes y[0:k]
+
+    which we want to incorporate in computation for unknown $x[k]$ and $y[k]$, we have to expand $z[k]$ as
+
+    .. math::
+
+        z[k]=x[1:k-1]\otimes y[1:k-1] + x[0]y[k] + x[k]y[0]
+
+    Examples
+    ========
+
+    See :py:func:`dtify`
+
+     Parameters
+    ==========
+
+    expr : Expr or number
+
+        An expression to be evaluated.
+
+    k : Index, Slice, Type[Expr], int
+
+        DT Index of expr.
+
+    Returns
+    =======
+
+    expr1 : Expr
+
+        The known parts of input expr.
+
+    expr2: Expr
+
+        The unknown parts of input expr.
+
+    Explanation
+    ===========
+
+    Let's introduce the basis methodology by taking DT expression $z[k]=x[0:k]\otimes y[0:k]$ as an example.
+
+    For $k$-th order DT expression, it is obvious that the coefficients of unknown $k$-th order terms are always $0$-th
+    order, and vice versa. Hence, we first extract $0$th and $k$th terms from the DT slices, which form a matrix. Here,
+    we substitute ``sympy.Matrix`` $[x[0], x[k]]$ and $[y[0], y[k]]$ for $x[0:k]$ and $y[0:k]$
+    respectively in the original expression, which derives
+
+    .. math::
+
+        \begin{bmatrix}
+            x[0]\\
+            x[k]
+        \end{bmatrix}
+        \otimes
+        \begin{bmatrix}
+            y[0]\\
+            y[k]
+        \end{bmatrix}
+
+    The convolution of these two matrices with shape (2,1) are performed by overriding the :py:meth:`dConv_s.eval` method,
+    which computes the multiplication of polynomial $x[0]+x[k]*x\_$ and $y[0]+y[k]*x\_$. Then the convolution result is the
+    coefficient of $x\_$ term, that is
+
+    .. math::
+
+        x[0]y[k] + x[k]y[0].
+
+    Next, the known terms can be obtained by substituting $x[1:k-1]$ and $y[1:k-1]$ for $x[0:k]$ and $y[0:k]$ in $z[k]$
+    respectively, which derives
+
+    .. math::
+
+        x[1:k-1]\otimes y[1:k-1].
+
+    """
+    # to ensure that there is no dConv_v in expr
+    expr = expr.expand(func=True, mul=False)
+    if expr.has(dConv_v):
+        raise ValueError(f"Expression contain dCon_v function!")
+    expr1 = expr
+    expr2 = expr
+    # derive $x[1:k-1]\otimes y[1:k-1]$, the known terms, using sp.subs
+    for DT_ in list(expr1.free_symbols):
+        if isinstance(DT_, DT):
+            if isinstance(DT_.index, Slice):
+                start = DT_.index.start
+                end = DT_.index.end
+                if start == 0:
+                    start = 1
+                if end == k:
+                    end = k - 1
+                expr1 = expr1.subs(DT_, DT(DT_.symbol, Slice(start, end), commutative=DT_.is_commutative))
+            elif isinstance(DT_.index, Index):
+                # if there is independent $x[k]$ in expr
+                if DT_.index == k:
+                    expr1 = expr1.subs(DT_, 0)
+
+    # search for dLinspace function and substitute
+    dlinspaces = search_for_func(expr1, dLinspace)
+    if len(dlinspaces) > 0:
+        for dlinspace in dlinspaces:
+            start = dlinspace.args[0]
+            end = dlinspace.args[1]
+            linspace_array = []
+            if start == 0:
+                start = 1
+                linspace_array += [0]
+            if end == k:
+                end = k - 1
+                linspace_array += [k]
+            expr1 = expr1.subs(dlinspace, dLinspace(start, end))
+            if len(linspace_array) > 1:
+                expr2 = expr2.subs(dlinspace, Matrix(linspace_array))
+            else:
+                expr2 = expr2.subs(dlinspace, *linspace_array)
+
+    # derive $x[0]y[k] + x[k]y[0]$, the unknown terms.
+    for DT_ in list(expr2.free_symbols):
+        if isinstance(DT_, DT):
+            if isinstance(DT_.index, Slice):
+                start = DT_.index.start
+                end = DT_.index.end
+                arg_list = []
+                if start == 0:
+                    arg_list += [DT(DT_.symbol, 0)]
+                if end == k:
+                    arg_list += [DT(DT_.symbol, k)]
+                expr2 = expr2.subs(DT_, Matrix(arg_list), commutative=DT_.is_commutative)
+
+    return expr1, expr2
+
+
+def search_for_func(expr, func: type[Function]) -> List[Expr]:
+    r"""
+    Return the instance of given function patterns in a sympy expression
+
+    Examples
+    ========
+
+    >>> from Solverz.eqn import Eqn
+    >>> from Solverz.sas.sas_alg import dtify, search_for_func
+    >>> from sympy import cos
+    >>> test = Eqn(name='test', e_str='cos(x)')
+    >>> search_for_func(test.EQN, cos)
+    [cos(x)]
+    >>> test_ = dtify(test.EQN,etf=True,eut=True)
+    >>> search_for_func(test_[2][0], dLinspace)
+    [dLinspace(1, k - 1)]
+
+    Parameters
+    ==========
+
+    expr : Expr or number
+
+        An expression to be evaluated.
+
+    func : function patter to find
+
+    Returns
+    =======
+
+    exprs : List[expr]
+        List of functions of pattern func.
+
+    """
+    results = []
+    pt = preorder_traversal(expr)
+    for node in pt:
+        if isinstance(node, func):
+            results += [node]
+    return results

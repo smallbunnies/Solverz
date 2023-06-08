@@ -27,6 +27,7 @@ Y03 = DT(y, Slice(0, 3))
 Z03 = DT(z, Slice(0, 3))
 A0k = DT(a, Slice(0, k))
 
+
 def test_dt_algebra():
     assert dtify(x + y) == Xk + Yk
     assert dtify(x * y) == dConv_s(X0k, Y0k)
@@ -126,5 +127,5 @@ def test_dt_algebra():
     assert dtify((a - x * y) * cos(z)) == dConv_s(A0k - dConv_v(X0k, Y0k), DT(psi(z), Slice(0, k)))
     assert dtify((a - x * y) * cos(z)).expand(func=True, mul=False) == \
            dConv_s(A0k, DT(psi(z), Slice(0, k))) + dConv_s(-X0k, Y0k, DT(psi(z), Slice(0, k)))
-    assert dtify((a-2*x*y)*cos(z)).expand(func=True, mul=False) == \
+    assert dtify((a - 2 * x * y) * cos(z)).expand(func=True, mul=False) == \
            dConv_s(A0k, DT(psi(z), Slice(0, k))) + dConv_s(-2 * X0k, Y0k, DT(psi(z), Slice(0, k)))
