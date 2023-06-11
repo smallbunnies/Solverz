@@ -4,7 +4,7 @@ from functools import reduce
 from typing import Union, Type, Dict, Callable, List
 
 from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Pow, cos, Function, Integer, preorder_traversal, \
-    Basic, sympify, S, Float, Matrix, ImmutableDenseMatrix
+    Basic, sympify, Float, Matrix, ImmutableDenseMatrix
 
 dfunc_mapping: Dict[Type[Expr], Callable] = {}
 
@@ -18,18 +18,51 @@ class Index(Symbol):
     """
     is_Integer = True
 
-    def __new__(cls, name: str, sequence: int = -1, commutative=False):
-        if sequence < 0:
-            obj = Symbol.__new__(cls, f'{name}')
-        else:
-            obj = Symbol.__new__(cls, f'{name}{sequence}')
-        obj.sequence = sequence
+    def __new__(cls, name: str, commutative=False):
+        obj = Symbol.__new__(cls, f'{name}')
         obj.is_Integer = True
-        if sequence < 0:
-            obj.name = f'{name}'
-        else:
-            obj.name = f'{name}{sequence}'
+        obj.name = f'{name}'
         return obj
+
+    def __add__(self, other):
+        if isinstance(other, Index):
+            expr = sympify(self.name) + sympify(other.name)
+            return Index(expr.__repr__())
+        elif isinstance(other, (Number, int, float)):
+            expr = sympify(self.name) + other
+            return Index(expr.__repr__())
+        else:
+            return Add(self, other)
+
+    def __radd__(self, other):
+        if isinstance(other, Index):
+            expr = sympify(other.name) + sympify(self.name)
+            return Index(expr.__repr__())
+        elif isinstance(other, (Number, int, float)):
+            expr = Number + sympify(self.name)
+            return Index(expr.__repr__())
+        else:
+            return Add(other, self)
+
+    def __sub__(self, other):
+        if isinstance(other, Index):
+            expr = sympify(self.name) - sympify(other.name)
+            return Index(expr.__repr__())
+        elif isinstance(other, (Number, int, float)):
+            expr = sympify(self.name) - other
+            return Index(expr.__repr__())
+        else:
+            return Add(self, -other)
+
+    def __rsub__(self, other):
+        if isinstance(other, Index):
+            expr = sympify(other.name) - sympify(self.name)
+            return Index(expr.__repr__())
+        elif isinstance(other, (Number, int, float)):
+            expr = other - sympify(self.name)
+            return Index(expr.__repr__())
+        else:
+            return Add(other, -self)
 
 
 class Slice(Symbol):
@@ -73,6 +106,30 @@ class Slice(Symbol):
         obj.end = end
         obj.name = f'{start}:{end}'
         return obj
+
+    def __add__(self, other):
+        if isinstance(other, (Number, int, float)):
+            return Slice(self.start, self.end + other)
+        else:
+            return Add(self, other)
+
+    def __radd__(self, other):
+        if isinstance(other, (Number, int, float)):
+            return Slice(self.start, other + self.end)
+        else:
+            return Add(other, self)
+
+    def __sub__(self, other):
+        if isinstance(other, (Number, int, float)):
+            return Slice(self.start, self.end - other)
+        else:
+            return Add(self, -other)
+
+    def __rsub__(self, other):
+        if isinstance(other, (Number, int, float)):
+            return Slice(self.start, other - self.end)
+        else:
+            return Add(other, -self)
 
 
 class DT(Symbol):

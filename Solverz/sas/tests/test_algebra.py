@@ -5,7 +5,6 @@ from sympy.abc import x, y, z, t, a, b, c
 from Solverz.sas.sas_alg import Index, Slice, DT, dDelta, dConv_s, dConv_v, dLinspace, dtify, _dtify, psi, phi, Constant
 
 k = Index('k')
-k0 = Index('k', sequence=0)
 Xk = DT(x, k)
 X0 = DT(x, 0)
 X1k = DT(x, Slice(1, k))
