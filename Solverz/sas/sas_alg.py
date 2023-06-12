@@ -24,46 +24,6 @@ class Index(Symbol):
         obj.name = f'{name}'
         return obj
 
-    def __add__(self, other):
-        if isinstance(other, Index):
-            expr = sympify(self.name) + sympify(other.name)
-            return Index(expr.__repr__())
-        elif isinstance(other, (Number, int, float)):
-            expr = sympify(self.name) + other
-            return Index(expr.__repr__())
-        else:
-            return Add(self, other)
-
-    def __radd__(self, other):
-        if isinstance(other, Index):
-            expr = sympify(other.name) + sympify(self.name)
-            return Index(expr.__repr__())
-        elif isinstance(other, (Number, int, float)):
-            expr = Number + sympify(self.name)
-            return Index(expr.__repr__())
-        else:
-            return Add(other, self)
-
-    def __sub__(self, other):
-        if isinstance(other, Index):
-            expr = sympify(self.name) - sympify(other.name)
-            return Index(expr.__repr__())
-        elif isinstance(other, (Number, int, float)):
-            expr = sympify(self.name) - other
-            return Index(expr.__repr__())
-        else:
-            return Add(self, -other)
-
-    def __rsub__(self, other):
-        if isinstance(other, Index):
-            expr = sympify(other.name) - sympify(self.name)
-            return Index(expr.__repr__())
-        elif isinstance(other, (Number, int, float)):
-            expr = other - sympify(self.name)
-            return Index(expr.__repr__())
-        else:
-            return Add(other, -self)
-
 
 class Slice(Symbol):
     r"""
@@ -107,30 +67,6 @@ class Slice(Symbol):
         obj.name = f'{start}:{end}'
         return obj
 
-    def __add__(self, other):
-        if isinstance(other, (Number, int, float)):
-            return Slice(self.start, self.end + other)
-        else:
-            return Add(self, other)
-
-    def __radd__(self, other):
-        if isinstance(other, (Number, int, float)):
-            return Slice(self.start, other + self.end)
-        else:
-            return Add(other, self)
-
-    def __sub__(self, other):
-        if isinstance(other, (Number, int, float)):
-            return Slice(self.start, self.end - other)
-        else:
-            return Add(self, -other)
-
-    def __rsub__(self, other):
-        if isinstance(other, (Number, int, float)):
-            return Slice(self.start, other - self.end)
-        else:
-            return Add(other, -self)
-
 
 class DT(Symbol):
     """
@@ -138,7 +74,7 @@ class DT(Symbol):
     """
     __slots__ = ('index', 'name', 'symbol', 'symbol_name')
 
-    def __new__(cls, symbol, index: Union[int, Index, Slice], commutative=True):
+    def __new__(cls, symbol, index: Union[int, Index, Slice, Type[Expr]], commutative=True):
         if isinstance(index, int) and index < 0:
             raise IndexError("Invalid DT order")
         obj = Symbol.__new__(cls, f'{symbol.name}[{index}]', commutative=commutative)
