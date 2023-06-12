@@ -160,7 +160,7 @@ class phi(Symbol):
     def __new__(cls, node, commutative=True):
         obj = Symbol.__new__(cls, 'phi', commutative=commutative)
         obj.eqn = node
-        obj.name = 'phi' + r'_{' + obj.eqn.__repr__() + r'}'
+        obj.name = 'phi' + r'_' + obj.eqn.__repr__()
         return obj
 
     def _hashable_content(self):
@@ -187,7 +187,7 @@ class psi(Symbol):
         """
         obj = Symbol.__new__(cls, 'psi', commutative=commutative)
         obj.eqn = node
-        obj.name = 'psi' + r'_{' + obj.eqn.__repr__() + r'}'
+        obj.name = 'psi' + r'_' + obj.eqn.__repr__()
         return obj
 
     def _hashable_content(self):
@@ -220,7 +220,7 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
     >>> from Solverz.sas.sas_alg import dtify
     >>> Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
     >>> dtify(Eq_prime.EQN)
-    Eqp[k] - dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi_{delta}[0:k]) - dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi_{delta}[0:k])
+    Eqp[k] - dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi_delta[0:k]) - dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi_delta[0:k])
 
     Parameters
     ==========
@@ -242,9 +242,9 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
         >>> import sympy as sp
         >>> x, y = sp.symbols('x, y')
         >>> dtify(x * sp.sin(y), etf=True)
-        [dConv_s(x[0:k], phi_{y}[0:k]), phi_{y}[k] - dConv_s(psi_{y}[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k]), psi_{y}[k] + dConv_s(phi_{y}[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])]
+        [dConv_s(x[0:k], phi_y[0:k]), phi_y[k] - dConv_s(psi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k]), psi_y[k] + dConv_s(phi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])]
         >>> dtify(x * sp.sin(y))
-        dConv_s(x[0:k], phi_{y}[0:k])
+        dConv_s(x[0:k], phi_y[0:k])
 
     eut : bool
 
@@ -253,17 +253,17 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
         >>> Eq_test = Eqn(name='Eq_test', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)')
         >>> dt_qen = dtify(Eq_test.EQN,etf=True,eut=True, constants=['ra', 'Xdp'])
         >>> dt_qen[0][0]
-        -dConv_s(-Xdp*Iyg[1:k - 1] + ra*Ixg[1:k - 1] + Uxg[1:k - 1], psi_{delta}[1:k - 1])
+        -dConv_s(-Xdp*Iyg[1:k - 1] + ra*Ixg[1:k - 1] + Uxg[1:k - 1], psi_delta[1:k - 1])
         >>> dt_qen[0][1]
-        Xdp*Iyg[0]*psi_{delta}[k] + Xdp*Iyg[k]*psi_{delta}[0] - ra*Ixg[0]*psi_{delta}[k] - ra*Ixg[k]*psi_{delta}[0] + Eqp[k] - Uxg[0]*psi_{delta}[k] - Uxg[k]*psi_{delta}[0]
+        Xdp*Iyg[0]*psi_delta[k] + Xdp*Iyg[k]*psi_delta[0] - ra*Ixg[0]*psi_delta[k] - ra*Ixg[k]*psi_delta[0] + Eqp[k] - Uxg[0]*psi_delta[k] - Uxg[k]*psi_delta[0]
         >>> dt_qen[1][0]
-        dConv_s(phi_{delta}[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
+        dConv_s(phi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
         >>> dt_qen[1][1]
-        delta[k]*phi_{delta}[0] + psi_{delta}[k]
+        delta[k]*phi_delta[0] + psi_delta[k]
         >>> dt_qen[2][0]
-        -dConv_s(psi_{delta}[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
+        -dConv_s(psi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
         >>> dt_qen[2][1]
-        -delta[k]*psi_{delta}[0] + phi_{delta}[k]
+        -delta[k]*psi_delta[0] + phi_delta[k]
 
     constants : list of str (variable names)
 
@@ -272,7 +272,7 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
         >>> from Solverz.eqn import Eqn
         >>> Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg)')
         >>> dtify(Eq_prime.EQN, constants=['ra'])
-        Eqp[k] - dConv_s(ra*Ixg[0:k] + Uxg[0:k], psi_{delta}[0:k])
+        Eqp[k] - dConv_s(ra*Ixg[0:k] + Uxg[0:k], psi_delta[0:k])
 
         In this case, ``ra`` is treated as a constant and no convolution is performed for ``Mul(ra, Ixg)``.
 
