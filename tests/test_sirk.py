@@ -1,18 +1,13 @@
 import numpy as np
-from numpy import linalg
 import pandas as pd
-import tqdm
-import matplotlib.pyplot as plt
 
-from Solverz.numeqn.num_alg import AliasVar, ComputeParam, F, X, Y
 from Solverz.eqn import Ode, Eqn
 from Solverz.equations import DAE
-from Solverz.param import Param
-from Solverz.solver import nr_method, sirk_dae, sirk_ode
-from Solverz.var import Var, TimeVar
-from Solverz.variables import Vars, TimeVars
-from Solverz.solverz_array import SolverzArray
 from Solverz.event import Event
+from Solverz.param import Param
+from Solverz.solver import sirk_dae, sirk_ode
+from Solverz.var import TimeVar
+from Solverz.variables import TimeVars
 
 df = pd.read_excel('instances/test_m3b9.xlsx',
                    sheet_name=None,

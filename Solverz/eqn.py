@@ -6,9 +6,10 @@ from typing import Union, List, Dict, Callable
 import numpy as np
 from sympy import sympify, lambdify, Symbol, preorder_traversal, Basic
 
-from Solverz.numeqn.num_alg import Sympify_Mapping, F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, traverse_for_mul
+from Solverz.num.num_alg import Sympify_Mapping, F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
+    traverse_for_mul
+from Solverz.num.num_interface import numerical_interface
 from Solverz.param import Param
-from Solverz.solverz_array import Lambdify_Mapping
 
 
 class Eqn:
@@ -41,7 +42,7 @@ class Eqn:
             self.EQN = traverse_for_mul(sympify(self.e_str, temp_sympify_mapping))
 
         self.SYMBOLS: List[Symbol] = list(self.EQN.free_symbols)
-        self.NUM_EQN: Callable = lambdify(self.SYMBOLS, self.EQN, [Lambdify_Mapping, 'numpy'])
+        self.NUM_EQN: Callable = lambdify(self.SYMBOLS, self.EQN, [numerical_interface, 'numpy'])
 
     def eval(self, *args: Union[np.ndarray]) -> np.ndarray:
         return self.NUM_EQN(*args)

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from Solverz.numeqn.num_alg import AliasVar, ComputeParam, F, X, Y
+from Solverz.num.num_alg import AliasVar, ComputeParam, F, X, Y
 from Solverz.eqn import Ode, Eqn
 from Solverz.equations import DAE
 from Solverz.param import Param

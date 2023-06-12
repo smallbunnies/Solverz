@@ -6,8 +6,6 @@ from typing import Callable
 
 from numbers import Number
 
-from Solverz.solverz_array import SolverzArray
-
 
 class Param:
 
@@ -15,7 +13,7 @@ class Param:
                  name: str,
                  unit: Optional[str] = None,
                  info: Optional[str] = None,
-                 value: Union[SolverzArray, np.ndarray, list] = None,
+                 value: Union[np.ndarray, list] = None,
                  triggerable: bool = False,
                  trigger_var: str = None,
                  trigger_fun: Callable = None,

@@ -333,7 +333,7 @@ class DAE(Equations):
         """
 
         `args` is either:
-          - two arguments, e.g. state vars x, and numeqn y
+          - two arguments, e.g. state vars x, and numerical equation y
           - one argument, e.g. state vars x.
         """
         eqn = None
@@ -357,7 +357,7 @@ class DAE(Equations):
         """
 
         `xys` is either:
-          - two arguments, e.g. state vars x, and numeqn y
+          - two arguments, e.g. state vars x, and numerical equation y
           - one argument, e.g. state vars y.
 
         """

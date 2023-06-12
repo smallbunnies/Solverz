@@ -5,7 +5,7 @@ import tqdm
 from numpy import abs, max, min, linalg, sum, sqrt
 from typing import Union, List
 
-from Solverz.numeqn.num_alg import AliasVar, ComputeParam, F, X, Y
+from Solverz.num.num_alg import AliasVar, ComputeParam, F, X, Y
 from Solverz.equations import AE, DAE
 from Solverz.event import Event
 from Solverz.var import TimeVar
