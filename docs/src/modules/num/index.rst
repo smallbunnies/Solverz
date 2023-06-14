@@ -3,3 +3,8 @@
 
 Contents
 ========
+
+.. toctree::
+    :maxdepth: 3
+
+    numerical.rst
