@@ -130,9 +130,20 @@ def test_dt_algebra():
            dConv_s(A0k, DT(psi(z), Slice(0, k))) + dConv_s(-2 * X0k, Y0k, DT(psi(z), Slice(0, k)))
     assert dtify(Derivative(y, t) - 2 * (y - cos(t)), etf=True, k=k - 1) == \
            [2 * DT(psi(t), k - 1) - 2 * DT(y, k - 1) + DT(y, k) * k,
-            DT(psi(t), k - 1) + dConv_s(DT(phi(t), Slice(0, k - 2)) * (k - 1 - dLinspace(0, k - 2)) / (k - 1), DT(t, Slice(1, k - 1))),
-            DT(phi(t), k - 1) - dConv_s(DT(psi(t), Slice(0, k - 2)) * (k - 1 - dLinspace(0, k - 2)) / (k - 1), DT(t, Slice(1, k - 1)))]
+            DT(psi(t), k - 1) + dConv_s(DT(phi(t), Slice(0, k - 2)) * (k - 1 - dLinspace(0, k - 2)) / (k - 1),
+                                        DT(t, Slice(1, k - 1))),
+            DT(phi(t), k - 1) - dConv_s(DT(psi(t), Slice(0, k - 2)) * (k - 1 - dLinspace(0, k - 2)) / (k - 1),
+                                        DT(t, Slice(1, k - 1)))]
     assert dtify(Derivative(y, t) - 2 * (y - cos(t)), etf=True, k=k) == \
-           [2 * DT(psi(t), k) - 2 * DT(y, k) + DT(y, k+1) * (k+1),
+           [2 * DT(psi(t), k) - 2 * DT(y, k) + DT(y, k + 1) * (k + 1),
             DT(psi(t), k) + dConv_s(DT(phi(t), Slice(0, k - 1)) * (k - dLinspace(0, k - 1)) / k, DT(t, Slice(1, k))),
             DT(phi(t), k) - dConv_s(DT(psi(t), Slice(0, k - 1)) * (k - dLinspace(0, k - 1)) / k, DT(t, Slice(1, k)))]
+    assert dtify(Derivative(y, t) - 2 * (y - cos(t)), eut=True) == \
+           ((2 * DT(psi(t), k) - 2 * DT(y, k))/(k + 1), DT(y, k + 1))
+    assert dtify(Derivative(y, t) - 2 * (y - cos(t)), etf=True, eut=True, k=k) == \
+           [((2 * DT(psi(t), k) - 2 * DT(y, k))/(k + 1),
+             DT(y, k + 1)),
+            (dConv_s(DT(phi(t), Slice(1, k - 1)) * (k - dLinspace(1, k - 1)) / k, DT(t, Slice(1, k-1))),
+               DT(phi(t), 0) * DT(t, Index('k')) + DT(psi(t), k)),
+            (- dConv_s(DT(psi(t), Slice(1, k - 1)) * (k - dLinspace(1, k - 1)) / k, DT(t, Slice(1, k-1))),
+             - DT(psi(t), 0) * DT(t, Index('k')) + DT(phi(t), k))]

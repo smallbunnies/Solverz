@@ -242,6 +242,7 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
         raise TypeError("DT expression cannot be dtified!")
     if k is None:
         k = Index('k')
+
     if expr.has(sin, cos):
         # subs $\phi$ and $\psi$ for $\sin$ and $\cos$.
         if etf:
@@ -262,10 +263,6 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
                     exprs[symbol] = symbol - sin(symbol.eqn)
                     exprs[psi(symbol.eqn)] = psi(symbol.eqn) - cos(symbol.eqn)
             exprs = [expr] + list(exprs.values())
-            if not eut:
-                return [_dtify(expr_, k) for expr_ in exprs]
-            else:
-                return [extract_unknown_term(_dtify(expr_, k), k) for expr_ in exprs]
         else:
             pt = preorder_traversal(expr)
             for node in pt:
@@ -275,10 +272,27 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
                 elif isinstance(node, cos):
                     psi_ = psi(node.args[0])
                     expr = expr.subs(node, psi_)
-    if not eut:
-        return _dtify(expr, k)
+            exprs = [expr]
     else:
-        return extract_unknown_term(_dtify(expr, k), k)
+        exprs = [expr]
+
+    if eut:
+        # extract unknown terms
+        # if some expr contains sympy.Derivative, its unknown terms should be increased by one.
+        k_list = [k for i in range(len(exprs))]
+        if expr.has(Derivative):
+            # dtify() supports the input of only one expression, the others items in lists are DT of sin and cos
+            # so only the first expression can contain Derivative.
+            k_list[0] = k_list[0] + 1
+        if len(exprs) > 1:
+            return [extract_unknown_term(_dtify(expr_, k), k_) for expr_, k_ in zip(exprs, k_list)]
+        else:
+            return extract_unknown_term(_dtify(exprs[0], k), k_list[0])
+    else:
+        if len(exprs) > 1:
+            return [_dtify(expr_, k) for expr_ in exprs]
+        else:
+            return _dtify(exprs[0], k)
 
 
 def _dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
@@ -857,7 +871,7 @@ class dLinspace(Function):
         return r'\left [ %s : %s \right ]' % (_m, _n)
 
 
-def extract_unknown_term(expr, k: [Index, int]):
+def extract_unknown_term(expr: Expr, k: [Index, int]):
     r"""
     To extract unknown terms from expressions with :py:class:`dConv_s` ($\bigotimes$) and
     :py:class:`dConv_v` ($\overline{\bigotimes}$) expanded.
@@ -882,11 +896,11 @@ def extract_unknown_term(expr, k: [Index, int]):
      Parameters
     ==========
 
-    expr : Expr or number
+    expr : Expr
 
         An expression to be evaluated.
 
-    k : Index, Slice, Type[Expr], int
+    k : Index, int
 
         DT Index of expr.
 
@@ -956,10 +970,9 @@ def extract_unknown_term(expr, k: [Index, int]):
                 if end == k:
                     end = k - 1
                 expr1 = expr1.subs(DT_, DT(DT_.symbol, Slice(start, end), commutative=DT_.is_commutative))
-            elif isinstance(DT_.index, Index):
+            elif DT_.index == k:
                 # if there is independent $x[k]$ in expr
-                if DT_.index == k:
-                    expr1 = expr1.subs(DT_, 0)
+                expr1 = expr1.subs(DT_, 0)
 
     # search for dLinspace function and substitute
     dlinspaces = search_for_func(expr1, dLinspace)
@@ -992,6 +1005,16 @@ def extract_unknown_term(expr, k: [Index, int]):
                 if end == k:
                     arg_list += [DT(DT_.symbol, k)]
                 expr2 = expr2.subs(DT_, Matrix(arg_list), commutative=DT_.is_commutative)
+            elif DT_.index != k and DT_.index != 0:
+                expr2 = expr2.subs(DT_, 0)
+
+    # if the coefficients of unknown terms contain k, then divide it
+    expr2_ = expr2
+    for symbol_ in list(expr2_.free_symbols):
+        if isinstance(symbol_, DT):
+            if symbol_.index == k and any([isinstance(arg, Index) for arg in list(expr2_.coeff(symbol_).free_symbols)]):
+                expr2 = expr2 / expr2_.coeff(symbol_)
+                expr1 = expr1 / expr2_.coeff(symbol_)
 
     return expr1, expr2
 
