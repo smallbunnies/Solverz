@@ -58,8 +58,7 @@ class Equations:
                 if symbol_.name not in self.PARAM:
                     eqn_diff = eqn_.EQN.diff(symbol_)
                     self.eqn_diffs[eqn_name][symbol_.name] = Eqn(name=f'Diff {eqn_name} w.r.t. {symbol_.name}',
-                                                                 e_str=eqn_diff.__repr__(),
-                                                                 commutative=eqn_.commutative)
+                                                                 eqn=eqn_diff.__repr__(), commutative=eqn_.commutative)
 
     @property
     def eqn_diffs(self):
@@ -484,9 +483,9 @@ class DAE(Equations):
     def is_autonomous(self):
 
         if 't' in self.SYMBOLS.keys():
-            return True
-        else:
             return False
+        else:
+            return True
 
     def __repr__(self):
         return f"DAE: {self.name}"

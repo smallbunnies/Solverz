@@ -5,7 +5,7 @@ from Solverz.eqn import Ode, Eqn
 from Solverz.equations import DAE
 from Solverz.event import Event
 from Solverz.param import Param
-from Solverz.solver import sirk_dae, sirk_ode
+from Solverz.solvers.daesolver import sirk_ode, sirk_dae
 from Solverz.var import TimeVar
 from Solverz.variables import TimeVars
 
@@ -25,8 +25,8 @@ df_bench = pd.read_excel('instances/test_sirk.xlsx',
 
 def test_sirk_ode():
     x_bench = np.asarray(df_bench['ode'])
-    vdp1_1 = Ode(name='vdp1_1', e_str='x2', diff_var='x1')
-    vdp1_2 = Ode(name='vdp1_2', e_str='(1-x1**2)*x2-x1', diff_var='x2')
+    vdp1_1 = Ode(name='vdp1_1', eqn='x2', diff_var='x1')
+    vdp1_2 = Ode(name='vdp1_2', eqn='(1-x1**2)*x2-x1', diff_var='x2')
     vdp1 = DAE([vdp1_1, vdp1_2], name='vdp1')
     x1 = TimeVar('x1')
     x1.v0 = [2]
@@ -45,8 +45,8 @@ def test_sirk_ode():
 
 def test_sirk_dae():
     xy_bench = np.asarray(df_bench['dae'])
-    f = Ode(name='f', e_str='-x**3+0.5*y**2', diff_var='x')
-    g = Eqn(name='g', e_str='x**2+y**2-2')
+    f = Ode(name='f', eqn='-x**3+0.5*y**2', diff_var='x')
+    g = Eqn(name='g', eqn='x**2+y**2-2')
     dae = DAE([f, g])
     x = TimeVar('x')
     x.v0 = [1]
@@ -67,17 +67,17 @@ def test_sirk_dae():
 
 def test_sirk_m3b9():
     xy_bench = np.asarray(df_bench['m3b9'])
-    rotator = Ode(name='rotator speed', e_str='(Pm-(Uxg*Ixg+Uyg*Iyg+(Ixg**2+Iyg**2)*ra)-D*(omega-1))/Tj',
+    rotator = Ode(name='rotator speed', eqn='(Pm-(Uxg*Ixg+Uyg*Iyg+(Ixg**2+Iyg**2)*ra)-D*(omega-1))/Tj',
                   diff_var='omega')
-    delta = Ode(name='delta', e_str='(omega-1)*omega_b', diff_var='delta')
-    generator_ux = Eqn(name='Generator Ux', e_str='Uxg-Ag*Ux', commutative=False)
-    generator_uy = Eqn(name='Generator Uy', e_str='Uyg-Ag*Uy', commutative=False)
-    Ed_prime = Eqn(name='Ed_prime', e_str='Edp-sin(delta)*(Uxg+ra*Ixg-Xqp*Iyg)+cos(delta)*(Uyg+ra*Iyg+Xqp*Ixg)')
-    Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
-    Ixg_inject = Eqn(name='Ixg_inject', e_str='Ixg-(Ag*G*Ux-Ag*B*Uy)', commutative=False)
-    Iyg_inject = Eqn(name='Iyg_inject', e_str='Iyg-(Ag*G*Uy+Ag*B*Ux)', commutative=False)
-    Ixng_inject = Eqn(name='Ixng_inject', e_str='Ang*G*Ux-Ang*B*Uy', commutative=False)
-    Iyng_inject = Eqn(name='Iyng_inject', e_str='Ang*G*Uy+Ang*B*Ux', commutative=False)
+    delta = Ode(name='delta', eqn='(omega-1)*omega_b', diff_var='delta')
+    generator_ux = Eqn(name='Generator Ux', eqn='Uxg-Ag*Ux', commutative=False)
+    generator_uy = Eqn(name='Generator Uy', eqn='Uyg-Ag*Uy', commutative=False)
+    Ed_prime = Eqn(name='Ed_prime', eqn='Edp-sin(delta)*(Uxg+ra*Ixg-Xqp*Iyg)+cos(delta)*(Uyg+ra*Iyg+Xqp*Ixg)')
+    Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
+    Ixg_inject = Eqn(name='Ixg_inject', eqn='Ixg-(Ag*G*Ux-Ag*B*Uy)', commutative=False)
+    Iyg_inject = Eqn(name='Iyg_inject', eqn='Iyg-(Ag*G*Uy+Ag*B*Ux)', commutative=False)
+    Ixng_inject = Eqn(name='Ixng_inject', eqn='Ang*G*Ux-Ang*B*Uy', commutative=False)
+    Iyng_inject = Eqn(name='Iyng_inject', eqn='Ang*G*Uy+Ang*B*Ux', commutative=False)
 
     param = [Param('Pm'), Param('ra'), Param('D'), Param('Tj'), Param('omega_b'), Param('Ag'), Param('Edp'),
              Param('Eqp'),

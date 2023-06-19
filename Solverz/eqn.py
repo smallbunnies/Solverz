@@ -4,7 +4,7 @@ from copy import deepcopy
 from typing import Union, List, Dict, Callable
 
 import numpy as np
-from sympy import sympify, lambdify, Symbol, preorder_traversal, Basic
+from sympy import sympify, lambdify, Symbol, preorder_traversal, Basic, Expr
 
 from Solverz.num.num_alg import Sympify_Mapping, F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
     traverse_for_mul
@@ -19,27 +19,31 @@ class Eqn:
 
     def __init__(self,
                  name: Union[str],
-                 e_str: Union[str],
+                 eqn: Union[str, Expr],
                  commutative: Union[bool] = True):
 
         self.name = name
-        self.e_str = e_str
-        self.commutative = commutative
+        if isinstance(eqn, str):
+            self.e_str = eqn
+            self.commutative = commutative
+            self.EQN = sympify(self.e_str, locals=Sympify_Mapping)
 
-        self.EQN = sympify(self.e_str, locals=Sympify_Mapping)
-
-        # commutative=False and real=True are inconsistent assumptions
-        if self.commutative:
-            temp_sympify_mapping = dict()
-            for symbol in self.EQN.free_symbols:
-                temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
-                self.EQN = sympify(self.e_str, temp_sympify_mapping)
+            # commutative=False and real=True are inconsistent assumptions
+            if self.commutative:
+                temp_sympify_mapping = dict()
+                for symbol in self.EQN.free_symbols:
+                    temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
+                    self.EQN = sympify(self.e_str, temp_sympify_mapping)
+            else:
+                temp_sympify_mapping = deepcopy(Sympify_Mapping)
+                for symbol in self.EQN.free_symbols:
+                    temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
+                # traverse the Expr tree and replace '*' by Mat_Mul
+                self.EQN = traverse_for_mul(sympify(self.e_str, temp_sympify_mapping))
         else:
-            temp_sympify_mapping = deepcopy(Sympify_Mapping)
-            for symbol in self.EQN.free_symbols:
-                temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
-            # traverse the Expr tree and replace '*' by Mat_Mul
-            self.EQN = traverse_for_mul(sympify(self.e_str, temp_sympify_mapping))
+            self.e_str = eqn.__str__()
+            self.EQN = eqn
+            self.commutative = eqn.is_commutative
 
         self.SYMBOLS: List[Symbol] = list(self.EQN.free_symbols)
         self.NUM_EQN: Callable = lambdify(self.SYMBOLS, self.EQN, [numerical_interface, 'numpy'])
@@ -63,12 +67,8 @@ class Ode(Eqn):
     The class of ordinary differential equations
     """
 
-    def __init__(self,
-                 name: Union[str],
-                 e_str: Union[str],
-                 diff_var: str,
-                 commutative: Union[bool] = True):
-        super().__init__(name, e_str, commutative)
+    def __init__(self, name: Union[str], eqn: Union[str], diff_var: str, commutative: Union[bool] = True):
+        super().__init__(name, eqn, commutative)
         self.diff_var = diff_var
 
     def discretize(self,
@@ -129,7 +129,7 @@ class Ode(Eqn):
             if symbol not in self.SYMBOLS and symbol.name not in param and symbol.name != self.diff_var:
                 param[symbol.name] = Param(symbol.name)
 
-        return param, Eqn('d_' + self.name, e_str=scheme.__str__(), commutative=self.commutative)
+        return param, Eqn('d_' + self.name, eqn=scheme.__str__(), commutative=self.commutative)
 
     def _subs_state_var_in_func_args(self, expr: Basic, symbol: Symbol):
         subs_dict: Dict[Union[StateVar, AliasVar, ComputeParam], Symbol] = dict()

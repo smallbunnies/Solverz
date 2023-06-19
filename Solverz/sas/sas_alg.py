@@ -154,7 +154,7 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
 
     >>> from Solverz.eqn import Eqn
     >>> from Solverz.sas.sas_alg import dtify
-    >>> Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
+    >>> Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
     >>> dtify(Eq_prime.EQN)
     Eqp[k] - dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi_delta[0:k]) - dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi_delta[0:k])
 
@@ -178,7 +178,7 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
         >>> import sympy as sp
         >>> x, y = sp.symbols('x, y')
         >>> dtify(x * sp.sin(y), etf=True)
-        [dConv_s(x[0:k], phi_y[0:k]), phi_y[k] - dConv_s(psi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k]), psi_y[k] + dConv_s(phi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])]
+        [dConv_s(x[0:k], phi_y[0:k]), (phi_y[k], phi_y[k] - dConv_s(psi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])), (psi_y[k], psi_y[k] + dConv_s(phi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k]))]
         >>> dtify(x * sp.sin(y))
         dConv_s(x[0:k], phi_y[0:k])
 
@@ -186,27 +186,31 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
 
         If set to ``True``, extract unknown $k$-th terms from the derived DT expressions.
 
-        >>> Eq_test = Eqn(name='Eq_test', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)')
+        >>> Eq_test = Eqn(name='Eq_test', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)')
         >>> dt_qen = dtify(Eq_test.EQN,etf=True,eut=True, constants=['ra', 'Xdp'])
         >>> dt_qen[0][0]
-        -dConv_s(-Xdp*Iyg[1:k - 1] + ra*Ixg[1:k - 1] + Uxg[1:k - 1], psi_delta[1:k - 1])
-        >>> dt_qen[0][1]
         Xdp*Iyg[0]*psi_delta[k] + Xdp*Iyg[k]*psi_delta[0] - ra*Ixg[0]*psi_delta[k] - ra*Ixg[k]*psi_delta[0] + Eqp[k] - Uxg[0]*psi_delta[k] - Uxg[k]*psi_delta[0]
+        >>> dt_qen[0][1]
+        -dConv_s(-Xdp*Iyg[1:k - 1] + ra*Ixg[1:k - 1] + Uxg[1:k - 1], psi_delta[1:k - 1])
         >>> dt_qen[1][0]
-        dConv_s(phi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
+        psi_delta[k]
         >>> dt_qen[1][1]
         delta[k]*phi_delta[0] + psi_delta[k]
+        >>> dt_qen[1][2]
+        dConv_s(phi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
         >>> dt_qen[2][0]
-        -dConv_s(psi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
+        phi_delta[k]
         >>> dt_qen[2][1]
         -delta[k]*psi_delta[0] + phi_delta[k]
+        >>> dt_qen[2][2]
+        -dConv_s(psi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
 
     constants : list of str (variable names)
 
         For example, if ``x`` is a constant, the DT of x should be ``x*dDelta(k)`` instead of DT object ``x[k]``.
 
         >>> from Solverz.eqn import Eqn
-        >>> Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg)')
+        >>> Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg)')
         >>> dtify(Eq_prime.EQN, constants=['ra'])
         Eqp[k] - dConv_s(ra*Ixg[0:k] + Uxg[0:k], psi_delta[0:k])
 
@@ -262,7 +266,7 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
                 if isinstance(symbol, phi):
                     exprs[symbol] = symbol - sin(symbol.eqn)
                     exprs[psi(symbol.eqn)] = psi(symbol.eqn) - cos(symbol.eqn)
-            exprs = [expr] + list(exprs.values())
+            exprs = [expr] + [(key, value) for key, value in exprs.items()]
         else:
             pt = preorder_traversal(expr)
             for node in pt:
@@ -285,12 +289,14 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
             # so only the first expression can contain Derivative.
             k_list[0] = k_list[0] + 1
         if len(exprs) > 1:
-            return [extract_unknown_term(_dtify(expr_, k), k_) for expr_, k_ in zip(exprs, k_list)]
+            return [extract_unknown_term(_dtify(expr_, k), k_) if isinstance(expr_, Expr)
+                    else (_dtify(expr_[0], k), *extract_unknown_term(_dtify(expr_[1], k), k_)) for expr_, k_ in zip(exprs, k_list)]
         else:
             return extract_unknown_term(_dtify(exprs[0], k), k_list[0])
     else:
         if len(exprs) > 1:
-            return [_dtify(expr_, k) for expr_ in exprs]
+            return [_dtify(expr_, k) if isinstance(expr_, Expr)
+                    else (_dtify(expr_[0], k), _dtify(expr_[1], k)) for expr_ in exprs]
         else:
             return _dtify(exprs[0], k)
 
@@ -959,7 +965,7 @@ def extract_unknown_term(expr: Expr, k: [Index, int]):
         raise ValueError(f"Expression contain dCon_v function!")
     expr1 = expr
     expr2 = expr
-    # derive $x[1:k-1]\otimes y[1:k-1]$, the known terms, using sp.subs
+    # derive $x[1:k-1]\otimes y[1:k-1]$, the known terms (left hand side), using sp.subs
     for DT_ in list(expr1.free_symbols):
         if isinstance(DT_, DT):
             if isinstance(DT_.index, Slice):
@@ -993,7 +999,7 @@ def extract_unknown_term(expr: Expr, k: [Index, int]):
             else:
                 expr2 = expr2.subs(dlinspace, *linspace_array)
 
-    # derive $x[0]y[k] + x[k]y[0]$, the unknown terms.
+    # derive $x[0]y[k] + x[k]y[0]$, the unknown terms (right hand side).
     for DT_ in list(expr2.free_symbols):
         if isinstance(DT_, DT):
             if isinstance(DT_.index, Slice):
@@ -1008,7 +1014,7 @@ def extract_unknown_term(expr: Expr, k: [Index, int]):
             elif DT_.index != k and DT_.index != 0:
                 expr2 = expr2.subs(DT_, 0)
 
-    # if the coefficients of unknown terms contain k, then divide it
+    # if the coefficients of unknown terms contain k, then divide both sides by the unknown coefficients
     expr2_ = expr2
     for symbol_ in list(expr2_.free_symbols):
         if isinstance(symbol_, DT):
@@ -1016,7 +1022,7 @@ def extract_unknown_term(expr: Expr, k: [Index, int]):
                 expr2 = expr2 / expr2_.coeff(symbol_)
                 expr1 = expr1 / expr2_.coeff(symbol_)
 
-    return expr1, expr2
+    return expr2, expr1
 
 
 def search_for_func(expr, func: type[Function]) -> List[Expr]:
@@ -1029,11 +1035,13 @@ def search_for_func(expr, func: type[Function]) -> List[Expr]:
     >>> from Solverz.eqn import Eqn
     >>> from Solverz.sas.sas_alg import dtify, search_for_func
     >>> from sympy import cos
-    >>> test = Eqn(name='test', e_str='cos(x)')
+    >>> test = Eqn(name='test', eqn='cos(x)')
     >>> search_for_func(test.EQN, cos)
     [cos(x)]
     >>> test_ = dtify(test.EQN,etf=True,eut=True)
-    >>> search_for_func(test_[2][0], dLinspace)
+    >>> test_[1][2]
+    dConv_s(phi_x[1:k - 1]*(k - dLinspace(1, k - 1))/k, x[1:k - 1])
+    >>> search_for_func(test_[1][2], dLinspace)
     [dLinspace(1, k - 1)]
 
     Parameters

@@ -5,6 +5,8 @@ from typing import Type
 
 import numpy as np
 import sympy as sp
+from numpy import linalg
+
 from Solverz.sas.sas_alg import DT, Slice, search_for_func, dLinspace, Index
 
 numerical_interface = {}
@@ -115,10 +117,10 @@ def lambdify(expr: Type[sp.Expr], modules=None):
     >>> from Solverz.num.num_interface import lambdify
     >>> from Solverz.sas.sas_alg import dtify
     >>> from Solverz.eqn import Ode
-    >>> test = Ode(name='test',e_str='2*(y-cos(t))',diff_var='y')
+    >>> test = Ode(name='test',eqn='2*(y-cos(t))',diff_var='y')
     >>> a=dtify(Derivative(y,t)-test.EQN,etf=True, k=Index('k'))
     >>> k = Index('k')
-    >>> test_a = lambdify(a[1])
+    >>> test_a = lambdify(a[1][1])
     >>> inspect.getsource(test_a)
     'def _lambdifygenerated(k):\n    return psi_t[k] + dConv_s(phi_t[0:k]*(k - dLinspace(0, k))/k, t[1:k + 1])\n'
 
@@ -138,3 +140,7 @@ def lambdify(expr: Type[sp.Expr], modules=None):
             expr_ = expr_.subs(dlinspace, dLinspace(start, end + 1))
 
     return sp.lambdify([Index('k')], expr_, modules)
+
+
+def inv(mat: np.ndarray):
+    return linalg.inv(mat)

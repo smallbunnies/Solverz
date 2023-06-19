@@ -1,26 +1,24 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
-from Solverz.num.num_alg import AliasVar, ComputeParam, F, X, Y
 from Solverz.eqn import Ode, Eqn
 from Solverz.equations import DAE
+from Solverz.event import Event
 from Solverz.param import Param
-from Solverz.solver import nr_method, implicit_trapezoid
+from Solverz.solvers.daesolver import implicit_trapezoid
 from Solverz.var import TimeVar
 from Solverz.variables import TimeVars
-from Solverz.event import Event
 
-rotator = Ode(name='rotator speed', e_str='(Pm-(Uxg*Ixg+Uyg*Iyg+(Ixg**2+Iyg**2)*ra)-D*(omega-1))/Tj', diff_var='omega')
-delta = Ode(name='delta', e_str='(omega-1)*omega_b', diff_var='delta')
-generator_ux = Eqn(name='Generator Ux', e_str='Uxg-Ag*Ux', commutative=False)
-generator_uy = Eqn(name='Generator Uy', e_str='Uyg-Ag*Uy', commutative=False)
-Ed_prime = Eqn(name='Ed_prime', e_str='Edp-sin(delta)*(Uxg+ra*Ixg-Xqp*Iyg)+cos(delta)*(Uyg+ra*Iyg+Xqp*Ixg)')
-Eq_prime = Eqn(name='Eq_prime', e_str='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
-Ixg_inject = Eqn(name='Ixg_inject', e_str='Ixg-(Ag*G*Ux-Ag*B*Uy)', commutative=False)
-Iyg_inject = Eqn(name='Iyg_inject', e_str='Iyg-(Ag*G*Uy+Ag*B*Ux)', commutative=False)
-Ixng_inject = Eqn(name='Ixng_inject', e_str='Ang*G*Ux-Ang*B*Uy', commutative=False)
-Iyng_inject = Eqn(name='Iyng_inject', e_str='Ang*G*Uy+Ang*B*Ux', commutative=False)
+rotator = Ode(name='rotator speed', eqn='(Pm-(Uxg*Ixg+Uyg*Iyg+(Ixg**2+Iyg**2)*ra)-D*(omega-1))/Tj', diff_var='omega')
+delta = Ode(name='delta', eqn='(omega-1)*omega_b', diff_var='delta')
+generator_ux = Eqn(name='Generator Ux', eqn='Uxg-Ag*Ux', commutative=False)
+generator_uy = Eqn(name='Generator Uy', eqn='Uyg-Ag*Uy', commutative=False)
+Ed_prime = Eqn(name='Ed_prime', eqn='Edp-sin(delta)*(Uxg+ra*Ixg-Xqp*Iyg)+cos(delta)*(Uyg+ra*Iyg+Xqp*Ixg)')
+Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
+Ixg_inject = Eqn(name='Ixg_inject', eqn='Ixg-(Ag*G*Ux-Ag*B*Uy)', commutative=False)
+Iyg_inject = Eqn(name='Iyg_inject', eqn='Iyg-(Ag*G*Uy+Ag*B*Ux)', commutative=False)
+Ixng_inject = Eqn(name='Ixng_inject', eqn='Ang*G*Ux-Ang*B*Uy', commutative=False)
+Iyng_inject = Eqn(name='Iyng_inject', eqn='Ang*G*Uy+Ang*B*Ux', commutative=False)
 
 param = [Param('Pm'), Param('ra'), Param('D'), Param('Tj'), Param('omega_b'), Param('Ag'), Param('Edp'), Param('Eqp'),
          Param('Xqp'), Param('Xdp'), Param('G'), Param('B'), Param('Ang')]
@@ -82,43 +80,6 @@ xy = implicit_trapezoid(m3b9,
                         TimeVars([delta, omega, Ux, Uy, Uxg, Uyg, Ixg, Iyg],
                                  length=int(T / dt) + 1),
                         dt=dt, T=T, event=e1)
-
-# plt.figure(1, figsize=(10,6))
-# labels = []
-# for i in range(3):
-#     plt.plot(np.arange(0, T + dt, dt), xy.array[i + 3, :].reshape((-1,)))
-#     labels.append(r'$\omega_%i$' % i)
-# plt.xlabel('Time/s', fontsize=15)
-# plt.ylabel(r'$\omega$/p.u.', fontsize=15)
-# plt.tick_params(labelsize=15)
-# plt.legend(labels, fontsize=15)
-# plt.show()
-#
-# plt.figure(2)
-# labels = []
-# for i in range(9):
-#     plt.plot(np.arange(0, T + dt, dt),
-#              (xy.array[i + 6, :].reshape((-1,)) ** 2 + xy.array[i + 15, :].reshape((-1,)) ** 2) ** (1 / 2))
-#     labels.append(r'$U_%i$' % i)
-# plt.legend(labels)
-#
-# plt.figure(3)
-# labels = []
-# for i in range(3):
-#     plt.plot(np.arange(0, T + dt, dt),
-#              (xy['Ixg'][i, :]))
-#     labels.append(r'$I_{xg%i}$' % i)
-# plt.legend(labels)
-#
-# plt.figure(4)
-# labels = []
-# for i in range(3):
-#     plt.plot(np.arange(0, T + dt, dt),
-#              (xy['Iyg'][i, :]))
-#     labels.append(r'$I_{yg%i}$' % i)
-# plt.legend(labels)
-#
-# plt.show()
 
 
 def test_m3b9():
