@@ -27,7 +27,8 @@ class DTeqn(DAE):
         self.G_lhs: Dict[str, Eqn] = dict()
         self.F_rhs: Dict[str, Eqn] = dict()
         self.G_rhs: Dict[str, Eqn] = dict()
-        self.intermediate_vars: Dict[str, Eqn] = dict()
+        self.intermediate_vars: Dict[str, DTcache] = dict()
+        self.int_v_temp = list()
 
         self.dtify()
 
@@ -65,17 +66,17 @@ class DTeqn(DAE):
                     if isinstance(var.symbol, psi):
                         var_name = psi(var.symbol.eqn).__str__()
                         self.SYMBOLS[var_name] = psi(var.symbol.eqn)
-                        self.intermediate_vars[var_name] = psi(var.symbol.eqn)
-                        self.g_dict[var_name] = Eqn(name=cos(var.symbol.eqn).__str__(),
-                                                                         eqn=cos(var.symbol.eqn),
-                                                                         commutative=var.symbol.is_commutative)
+                        self.int_v_temp += [var_name]
+                        self.add_eqn(Eqn(name=var_name,
+                                         eqn=cos(var.symbol.eqn),
+                                         commutative=var.symbol.is_commutative))
                     else:
                         var_name = phi(var.symbol.eqn).__str__()
                         self.SYMBOLS[var_name] = phi(var.symbol.eqn)
-                        self.intermediate_vars[var_name] = phi(var.symbol.eqn)
-                        self.g_dict[var_name] = Eqn(name=sin(var.symbol.eqn).__str__(),
-                                                                         eqn=sin(var.symbol.eqn),
-                                                                         commutative=var.symbol.is_commutative)
+                        self.int_v_temp += [var_name]
+                        self.add_eqn(Eqn(name=var_name,
+                                         eqn=sin(var.symbol.eqn),
+                                         commutative=var.symbol.is_commutative))
                     self.G_rhs[var_name] = Eqn(name=var_name, eqn=DT_eqn[i][1],
                                                commutative=DT_eqn[i][1].is_commutative)
                     self.G_lhs[var_name] = Eqn(name=var_name, eqn=DT_eqn[i][2],
@@ -101,26 +102,34 @@ class DTeqn(DAE):
                     if isinstance(var.symbol, psi):
                         var_name = psi(var.symbol.eqn).__str__()
                         self.SYMBOLS[var_name] = psi(var.symbol.eqn)
-                        self.intermediate_vars[var_name] = psi(var.symbol.eqn)
-                        self.g_dict[var_name] = Eqn(name=cos(var.symbol.eqn).__str__(),
-                                                    eqn=cos(var.symbol.eqn),
-                                                    commutative=var.symbol.is_commutative)
+                        self.int_v_temp += [var_name]
+                        self.add_eqn(Eqn(name=var_name,
+                                         eqn=cos(var.symbol.eqn),
+                                         commutative=var.symbol.is_commutative))
                     else:
                         var_name = phi(var.symbol.eqn).__str__()
                         self.SYMBOLS[var_name] = phi(var.symbol.eqn)
-                        self.intermediate_vars[var_name] = phi(var.symbol.eqn)
-                        self.g_dict[var_name] = Eqn(name=sin(var.symbol.eqn).__str__(),
-                                                    eqn=sin(var.symbol.eqn),
-                                                    commutative=var.symbol.is_commutative)
+                        self.int_v_temp += [var_name]
+                        self.add_eqn(Eqn(name=var_name,
+                                         eqn=sin(var.symbol.eqn),
+                                         commutative=var.symbol.is_commutative))
                     self.G_lhs[var_name] = Eqn(name=var_name, eqn=DT_eqn[i][1],
                                                commutative=DT_eqn[i][1].is_commutative)
                     self.G_rhs[var_name] = Eqn(name=var_name, eqn=DT_eqn[i][2],
                                                commutative=DT_eqn[i][2].is_commutative)
 
-    def lambdify(self, x: DTcache, y: DTcache):
+    def lambdify(self, x: DTcache, y: DTcache = None):
         # initialize intermediate variables
-        # for DT_name in self.intermediate_vars_eqn.keys():
-        #     self.intermediate_vars_eqn[DT_name] =
+        if y is not None:
+            temp_y = [TimeVar(name, value=value) for name, value in y[0].v.items()]
+            xy = (x[0], y[0])
+        else:
+            temp_y = []
+            xy = (x[0], )
+
+        for DT_name in self.int_v_temp:
+            temp_y += [TimeVar(DT_name, value=self.g(DT_name, *xy))]
+            y = DTcache(TimeVars(temp_y), x.K)
         # allocate addresses for variables and equations
 
         # perform lambdify
@@ -133,8 +142,9 @@ class DTeqn(DAE):
 
 class DTcache(TimeVars):
 
-    def __init__(self, timevars: TimeVars, K):
+    def __init__(self, timevars: TimeVars, K: int):
         super().__init__([TimeVar(var_name, value=value[:, 0]) for var_name, value in timevars.v.items()], length=K)
+        self.K = K
 
     def __getitem__(self, item):
 

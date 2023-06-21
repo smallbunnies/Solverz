@@ -33,11 +33,7 @@ class Equations:
             eqn = [eqn]
 
         for eqn_ in eqn:
-            self.EQNs[eqn_.name] = eqn_
-            for symbol_ in self.EQNs[eqn_.name].SYMBOLS:
-                # generate bare symbols without assumptions
-                self.SYMBOLS[symbol_.name] = symbols(symbol_.name)
-            self.__a[eqn_.name] = []
+            self.add_eqn(eqn_)
 
         # set parameters
         self.PARAM: Dict[str, Param] = dict()
@@ -52,13 +48,23 @@ class Equations:
                     self.PARAM[param_.name] = param_
 
         # generate derivatives of EQNs
-        for eqn_name, eqn_ in self.EQNs.items():
-            self.eqn_diffs[eqn_name] = dict()
-            for symbol_ in eqn_.SYMBOLS:
-                if symbol_.name not in self.PARAM:
-                    eqn_diff = eqn_.EQN.diff(symbol_)
-                    self.eqn_diffs[eqn_name][symbol_.name] = Eqn(name=f'Diff {eqn_name} w.r.t. {symbol_.name}',
-                                                                 eqn=eqn_diff.__repr__(), commutative=eqn_.commutative)
+        for eqn in self.EQNs.values():
+            self.gen_diff(eqn)
+
+    def add_eqn(self, eqn: Eqn):
+        self.EQNs[eqn.name] = eqn
+        for symbol_ in self.EQNs[eqn.name].SYMBOLS:
+            # generate bare symbols without assumptions
+            self.SYMBOLS[symbol_.name] = symbols(symbol_.name)
+        self.a[eqn.name] = []
+
+    def gen_diff(self, eqn: Eqn):
+        self.eqn_diffs[eqn.name] = dict()
+        for symbol_ in eqn.SYMBOLS:
+            if symbol_.name not in self.PARAM:
+                eqn_diff = eqn.EQN.diff(symbol_)
+                self.eqn_diffs[eqn.name][symbol_.name] = Eqn(name=f'Diff {eqn.name} w.r.t. {symbol_.name}',
+                                                             eqn=eqn_diff.__repr__(), commutative=eqn.commutative)
 
     @property
     def eqn_diffs(self):
@@ -272,20 +278,12 @@ class DAE(Equations):
                  name: str = None,
                  param: Union[List[Param], Param] = None
                  ):
-        super().__init__(eqn, name, param)
 
-        # # dict of f
-        self.f_dict: Dict[str, Eqn] = dict()
-        self.g_dict: Dict[str, Eqn] = dict()
+        self.f_dict: Dict[str, Ode] = dict()  # dict of state equations
+        self.g_dict: Dict[str, Eqn] = dict()  # dict of algebraic equations
         self.var_address: Dict[str, List[int]] = dict()
 
-        for eqn_name, eqn_ in self.EQNs.items():
-            if isinstance(eqn_, Ode):
-                self.f_dict[eqn_name] = eqn_
-            elif isinstance(eqn_, Eqn):
-                self.g_dict[eqn_name] = eqn_
-            else:
-                raise ValueError(f'Undefined equation: {eqn_.__class__.__name__}')
+        super().__init__(eqn, name, param)
 
         self.state_num: int = 0  # number of state variables
         self.algebra_num: int = 0  # number of algebraic variables
@@ -294,6 +292,19 @@ class DAE(Equations):
         # If not, raise error
         if not self.f_dict:
             raise ValueError(f'No ODE found. You should initialise AE instead!')
+
+    def add_eqn(self, eqn: Union[Eqn, Ode]):
+        self.EQNs[eqn.name] = eqn
+        for symbol_ in self.EQNs[eqn.name].SYMBOLS:
+            # generate bare symbols without assumptions
+            self.SYMBOLS[symbol_.name] = symbols(symbol_.name)
+        self.a[eqn.name] = []
+        if isinstance(eqn, Ode):
+            self.f_dict[eqn.name] = eqn
+        elif isinstance(eqn, Eqn):
+            self.g_dict[eqn.name] = eqn
+        else:
+            raise ValueError(f'Undefined equation: {eqn_.__class__.__name__}')
 
     def assign_eqn_var_address(self, *xys: Vars):
         """
@@ -458,13 +469,13 @@ class DAE(Equations):
         fxy = self.f_xy(*xys)
         for fxy_tuple in fxy:
             j[self.a[fxy_tuple[0]][0]:(self.a[fxy_tuple[0]][-1] + 1),
-                self.var_address[fxy_tuple[1]][0]:(self.var_address[fxy_tuple[1]][-1] + 1)] = fxy_tuple[2]
+            self.var_address[fxy_tuple[1]][0]:(self.var_address[fxy_tuple[1]][-1] + 1)] = fxy_tuple[2]
 
         if self.g_dict:
             gxy = self.g_xy(*xys)
             for gxy_tuple in gxy:
                 j[self.a[gxy_tuple[0]][0]:(self.a[gxy_tuple[0]][-1] + 1),
-                    self.var_address[gxy_tuple[1]][0]:(self.var_address[gxy_tuple[1]][-1] + 1)] = gxy_tuple[2]
+                self.var_address[gxy_tuple[1]][0]:(self.var_address[gxy_tuple[1]][-1] + 1)] = gxy_tuple[2]
 
         return j
 
