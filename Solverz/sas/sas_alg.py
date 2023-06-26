@@ -4,7 +4,7 @@ from functools import reduce
 from typing import Union, Type, Dict, Callable, List
 
 from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Pow, cos, Function, Integer, preorder_traversal, \
-    Basic, sympify, Float, Matrix, ImmutableDenseMatrix
+    Basic, sympify, Float, Matrix, ImmutableDenseMatrix, latex, simplify, lambdify
 
 dfunc_mapping: Dict[Type[Expr], Callable] = {}
 
@@ -156,7 +156,7 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
     >>> from Solverz.sas.sas_alg import dtify
     >>> Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
     >>> dtify(Eq_prime.EQN)
-    Eqp[k] - dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi_delta[0:k]) - dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi_delta[0:k])
+    Eqp[k] - dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi_delta[0:k]) - dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi_delta[0:k])=0
 
     Parameters
     ==========
@@ -178,32 +178,22 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
         >>> import sympy as sp
         >>> x, y = sp.symbols('x, y')
         >>> dtify(x * sp.sin(y), etf=True)
-        [dConv_s(x[0:k], phi_y[0:k]), (phi_y[k], phi_y[k] - dConv_s(psi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])), (psi_y[k], psi_y[k] + dConv_s(phi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k]))]
+        [dConv_s(x[0:k], phi_y[0:k])=0, phi_y[k] - dConv_s(psi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])=0, psi_y[k] + dConv_s(phi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])=0]
         >>> dtify(x * sp.sin(y))
-        dConv_s(x[0:k], phi_y[0:k])
+        dConv_s(x[0:k], phi_y[0:k])=0
 
     eut : bool
 
         If set to ``True``, extract unknown $k$-th terms from the derived DT expressions.
 
         >>> Eq_test = Eqn(name='Eq_test', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)')
-        >>> dt_qen = dtify(Eq_test.EQN,etf=True,eut=True, constants=['ra', 'Xdp'])
-        >>> dt_qen[0][0]
-        Xdp*Iyg[0]*psi_delta[k] + Xdp*Iyg[k]*psi_delta[0] - ra*Ixg[0]*psi_delta[k] - ra*Ixg[k]*psi_delta[0] + Eqp[k] - Uxg[0]*psi_delta[k] - Uxg[k]*psi_delta[0]
-        >>> dt_qen[0][1]
-        -dConv_s(-Xdp*Iyg[1:k - 1] + ra*Ixg[1:k - 1] + Uxg[1:k - 1], psi_delta[1:k - 1])
-        >>> dt_qen[1][0]
-        psi_delta[k]
-        >>> dt_qen[1][1]
-        delta[k]*phi_delta[0] + psi_delta[k]
-        >>> dt_qen[1][2]
-        dConv_s(phi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
-        >>> dt_qen[2][0]
-        phi_delta[k]
-        >>> dt_qen[2][1]
-        -delta[k]*psi_delta[0] + phi_delta[k]
-        >>> dt_qen[2][2]
-        -dConv_s(psi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
+        >>> dt_eqn = dtify(Eq_test.EQN,etf=True,eut=True, constants=['ra', 'Xdp', 'Eqp'])
+        >>> dt_eqn[0]
+        -Xdp*Iyg[0]*psi_delta[k] - Xdp*Iyg[k]*psi_delta[0] + ra*Ixg[0]*psi_delta[k] + ra*Ixg[k]*psi_delta[0] + Uxg[0]*psi_delta[k] + Uxg[k]*psi_delta[0]=Eqp*dDelta(k) - dConv_s(-Xdp*Iyg[1:k - 1] + ra*Ixg[1:k - 1] + Uxg[1:k - 1], psi_delta[1:k - 1])
+        >>> dt_eqn[1]
+        -delta[k]*phi_delta[0] - psi_delta[k]=dConv_s(phi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
+        >>> dt_eqn[2]
+        delta[k]*psi_delta[0] - phi_delta[k]=-dConv_s(psi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
 
     constants : list of str (variable names)
 
@@ -212,7 +202,7 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
         >>> from Solverz.eqn import Eqn
         >>> Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg)')
         >>> dtify(Eq_prime.EQN, constants=['ra'])
-        Eqp[k] - dConv_s(ra*Ixg[0:k] + Uxg[0:k], psi_delta[0:k])
+        Eqp[k] - dConv_s(ra*Ixg[0:k] + Uxg[0:k], psi_delta[0:k])=0
 
         In this case, ``ra`` is treated as a constant and no convolution is performed for ``Mul(ra, Ixg)``.
 
@@ -280,25 +270,11 @@ def dtify(expr, k=None, etf=False, eut=False, constants=None):
     else:
         exprs = [expr]
 
-    if eut:
-        # extract unknown terms
-        # if some expr contains sympy.Derivative, its unknown terms should be increased by one.
-        k_list = [k for i in range(len(exprs))]
-        if expr.has(Derivative):
-            # dtify() supports the input of only one expression, the others items in lists are DT of sin and cos
-            # so only the first expression can contain Derivative.
-            k_list[0] = k_list[0] + 1
-        if len(exprs) > 1:
-            return [extract_unknown_term(_dtify(expr_, k), k_) if isinstance(expr_, Expr)
-                    else (_dtify(expr_[0], k), *extract_unknown_term(_dtify(expr_[1], k), k_)) for expr_, k_ in zip(exprs, k_list)]
-        else:
-            return extract_unknown_term(_dtify(exprs[0], k), k_list[0])
+    if len(exprs) > 1:  # sin, cos found in the original expression
+        return [k_eqn(_dtify(expr_, k), eut) if isinstance(expr_, Expr) else k_eqn(_dtify(expr_[1], k), eut,
+                                                                                   int_var=expr_[0]) for expr_ in exprs]
     else:
-        if len(exprs) > 1:
-            return [_dtify(expr_, k) if isinstance(expr_, Expr)
-                    else (_dtify(expr_[0], k), _dtify(expr_[1], k)) for expr_ in exprs]
-        else:
-            return _dtify(exprs[0], k)
+        return k_eqn(_dtify(exprs[0], k), eut)
 
 
 def _dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
@@ -913,11 +889,11 @@ def extract_unknown_term(expr: Expr, k: [Index, int]):
     Returns
     =======
 
-    expr1 : Expr
+    RHS : Expr
 
         The known parts of input expr.
 
-    expr2: Expr
+    LHS: Expr
 
         The unknown parts of input expr.
 
@@ -963,10 +939,10 @@ def extract_unknown_term(expr: Expr, k: [Index, int]):
     expr = expr.expand(func=True, mul=False)
     if expr.has(dConv_v):
         raise ValueError(f"Expression contain dCon_v function!")
-    expr1 = expr
-    expr2 = expr
-    # derive $x[1:k-1]\otimes y[1:k-1]$, the known terms (left hand side), using sp.subs
-    for DT_ in list(expr1.free_symbols):
+    RHS = expr
+    LHS = -expr
+    # derive $x[1:k-1]\otimes y[1:k-1]$, the known terms (right hand side), using sp.subs
+    for DT_ in list(RHS.free_symbols):
         if isinstance(DT_, DT):
             if isinstance(DT_.index, Slice):
                 start = DT_.index.start
@@ -975,32 +951,32 @@ def extract_unknown_term(expr: Expr, k: [Index, int]):
                     start = 1
                 if end == k:
                     end = k - 1
-                expr1 = expr1.subs(DT_, DT(DT_.symbol, Slice(start, end), commutative=DT_.is_commutative))
+                RHS = RHS.subs(DT_, DT(DT_.symbol, Slice(start, end), commutative=DT_.is_commutative))
             elif DT_.index == k:
                 # if there is independent $x[k]$ in expr
-                expr1 = expr1.subs(DT_, 0)
+                RHS = RHS.subs(DT_, 0)
 
     # search for dLinspace function and substitute
-    dlinspaces = search_for_func(expr1, dLinspace)
+    dlinspaces = search_for_func(RHS, dLinspace)
     if len(dlinspaces) > 0:
         for dlinspace in dlinspaces:
             start = dlinspace.args[0]
             end = dlinspace.args[1]
-            linspace_array = []
+            array = []
             if start == 0:
                 start = 1
-                linspace_array += [0]
+                array += [0]
             if end == k:
                 end = k - 1
-                linspace_array += [k]
-            expr1 = expr1.subs(dlinspace, dLinspace(start, end))
-            if len(linspace_array) > 1:
-                expr2 = expr2.subs(dlinspace, Matrix(linspace_array))
+                array += [k]
+            RHS = RHS.subs(dlinspace, dLinspace(start, end))
+            if len(array) > 1:
+                LHS = LHS.subs(dlinspace, Matrix(array))
             else:
-                expr2 = expr2.subs(dlinspace, *linspace_array)
+                LHS = LHS.subs(dlinspace, *array)
 
-    # derive $x[0]y[k] + x[k]y[0]$, the unknown terms (right hand side).
-    for DT_ in list(expr2.free_symbols):
+    # derive $x[0]y[k] + x[k]y[0]$, the unknown terms (left hand side).
+    for DT_ in list(LHS.free_symbols):
         if isinstance(DT_, DT):
             if isinstance(DT_.index, Slice):
                 start = DT_.index.start
@@ -1010,19 +986,41 @@ def extract_unknown_term(expr: Expr, k: [Index, int]):
                     arg_list += [DT(DT_.symbol, 0)]
                 if end == k:
                     arg_list += [DT(DT_.symbol, k)]
-                expr2 = expr2.subs(DT_, Matrix(arg_list), commutative=DT_.is_commutative)
+                LHS = LHS.subs(DT_, Matrix(arg_list), commutative=DT_.is_commutative)
             elif DT_.index != k and DT_.index != 0:
-                expr2 = expr2.subs(DT_, 0)
+                LHS = LHS.subs(DT_, 0)
 
-    # if the coefficients of unknown terms contain k, then divide both sides by the unknown coefficients
-    expr2_ = expr2
-    for symbol_ in list(expr2_.free_symbols):
+    # if LHS contains t[k] then move it to RHS
+    for symbol_ in list(LHS.free_symbols):
         if isinstance(symbol_, DT):
-            if symbol_.index == k and any([isinstance(arg, Index) for arg in list(expr2_.coeff(symbol_).free_symbols)]):
-                expr2 = expr2 / expr2_.coeff(symbol_)
-                expr1 = expr1 / expr2_.coeff(symbol_)
+            if symbol_.symbol_name == 't':
+                temp = LHS.coeff(symbol_) * symbol_
+                LHS = LHS - temp
+                RHS = RHS - temp
+    # Eliminate dDelta(k) in LHS
+    temp_delta_list = search_for_func(LHS, dDelta)
+    for dDelta_ in temp_delta_list:
+        if dDelta_.args[0] == k:
+            LHS = LHS.subs(dDelta_, 0)
 
-    return expr2, expr1
+    # If the coefficients of unknown terms contain k, then divide both sides by the unknown coefficients
+    # this process combined into the above for-loop because the free_symbols dict of
+    # LHS changes accordingly after moving t[k] from LHS to RHS.
+    # This case typically happens when there is derivative in the equation, and
+    # we use sp.simplify function to perform simplification, but it is not a robust method.
+    for symbol_ in list(LHS.free_symbols):
+        if isinstance(symbol_, DT):
+            if any([isinstance(arg, Index) for arg in list(LHS.coeff(symbol_).free_symbols)]):
+                temp = LHS.coeff(symbol_)
+                LHS = symbol_
+                RHS = simplify(RHS / temp)
+    # check if there is still k in LHS, if so, raise error
+    for symbol_ in list(LHS.free_symbols):
+        if isinstance(symbol_, DT):
+            if any([isinstance(arg, Index) for arg in list(LHS.coeff(symbol_).free_symbols)]):
+                raise ValueError(f"{k}-th order still found in Left hand side of equation.")
+
+    return RHS, LHS
 
 
 def search_for_func(expr, func: type[Function]) -> List[Expr]:
@@ -1039,9 +1037,9 @@ def search_for_func(expr, func: type[Function]) -> List[Expr]:
     >>> search_for_func(test.EQN, cos)
     [cos(x)]
     >>> test_ = dtify(test.EQN,etf=True,eut=True)
-    >>> test_[1][2]
-    dConv_s(phi_x[1:k - 1]*(k - dLinspace(1, k - 1))/k, x[1:k - 1])
-    >>> search_for_func(test_[1][2], dLinspace)
+    >>> test_[1]
+    -phi_x[0]*x[k] - psi_x[k]=dConv_s(phi_x[1:k - 1]*(k - dLinspace(1, k - 1))/k, x[1:k - 1])
+    >>> search_for_func(test_[1].RHS, dLinspace)
     [dLinspace(1, k - 1)]
 
     Parameters
@@ -1066,3 +1064,74 @@ def search_for_func(expr, func: type[Function]) -> List[Expr]:
         if isinstance(node, func):
             results += [node]
     return results
+
+
+class k_eqn:
+    """
+    The basic class of k-domain equation
+
+    """
+
+    def __init__(self, expr: Expr, eut=True, int_var=None):
+        """
+
+        :param expr:
+        """
+        if not isinstance(expr, Expr):
+            raise TypeError(f"Expect sp.Expr, got {expr.__class__}")
+        self.expr = expr
+        if not any([isinstance(symbol_, DT) for symbol_ in self.SYMBOLS]):
+            raise TypeError("Support dtified equation only.")
+        self.k = self.obtain_unknown_index()
+        self.eut = eut
+        if eut:
+            self.RHS, self.LHS = extract_unknown_term(expr, self.k)
+        else:
+            self.RHS = Integer(0)
+            self.LHS = expr
+            # separate the coefficient of unknown terms
+
+        if int_var:
+            if isinstance(int_var, (psi, phi)):
+                if isinstance(int_var, psi):
+                    self.initialize_func = cos(int_var.eqn)
+                else:
+                    self.initialize_func = sin(int_var.eqn)
+            else:
+                raise NotImplementedError(f"Unknown intermediate variable {int_var}")
+
+    @property
+    def SYMBOLS(self):
+        return list(self.expr.free_symbols)
+
+    def obtain_unknown_index(self) -> Index:
+        # find the largest Index of DT symbols in the expression
+        index = []
+        value = []
+        for symbol_ in list(self.SYMBOLS):
+            if isinstance(symbol_, DT):
+                index_ = symbol_.index
+                if isinstance(index_, Slice):
+                    index_ = index_.end
+                index += [index_]
+                if isinstance(index_, (Number, int, float)):
+                    value += [index_]
+                elif isinstance(index_, Expr):
+                    value += [lambdify(list(index_.free_symbols), index_)(0)]
+        return index[value.index(max(value))]  # index method of list returns the first location of the input arg
+
+    def extract_unknown_terms(self):
+        if not self.eut:
+            self.RHS, self.LHS = extract_unknown_term(self.expr, self.k)
+        else:
+            raise ValueError("Unknown terms have already been extracted!")
+
+    def __repr__(self):
+        return self.LHS.__repr__() + r"=" + self.RHS.__repr__()
+
+    def _repr_latex_(self):
+        """
+        So that jupyter notebook can display latex equation of k_eqn object.
+        :return:
+        """
+        return r"$\displaystyle %s$" % (latex(self.LHS) + r"=" + latex(self.RHS))

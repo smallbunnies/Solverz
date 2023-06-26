@@ -45,7 +45,7 @@ def diag(x: np.ndarray) -> np.ndarray:
 
 
 @implements_nfunc('dConv_s')
-def DT_conv(*args, method='conv') -> float:
+def DT_conv(*args, method='conv') -> np.ndarray:
     r"""
     Perform the convolutions in DT computations.
 
@@ -69,7 +69,7 @@ def DT_conv(*args, method='conv') -> float:
     if len(args) <= 2 and method == 'conv':  # if input two vectors, then use scalar multiplications and additions
         x = args[0].reshape((1, -1))
         y = np.flip(args[0].reshape((-1, 1)), 0)
-        return (x@y).tolist()[0][0]
+        return x@y
 
     if len(args) > 2 or method == 'fft':  # if input more than three vectors, use fft and ifft
         k = args[0].shape[0]
@@ -80,7 +80,7 @@ def DT_conv(*args, method='conv') -> float:
             # extend the length of the vector to the power of 2
             arg = np.pad(arg, (0, int(np.maximum(m, n) - k)), constant_values=0)
             y += [np.fft.fft(arg)]
-        return np.real(np.fft.ifft(reduce(lambda a, b: a * b, y))[k - 1])
+        return np.array(np.real(np.fft.ifft(reduce(lambda a, b: a * b, y))[k - 1]))
 
 
 @implements_nfunc('dLinspace')
@@ -102,7 +102,7 @@ def linspace(start, end) -> np.ndarray:
     return np.arange(start, end, dtype=int)[:, np.newaxis]
 
 
-def lambdify(expr: Type[sp.Expr], modules=None):
+def lambdify(expr: sp.Expr, modules=None):
     r"""
     Convert symbolic DT expressions into numerical functions, with the sub-purpose of extending the `Slice` and
     `dLinspace` objects by one.
@@ -119,8 +119,7 @@ def lambdify(expr: Type[sp.Expr], modules=None):
     >>> from Solverz.eqn import Ode
     >>> test = Ode(name='test',eqn='2*(y-cos(t))',diff_var='y')
     >>> a=dtify(Derivative(y,t)-test.EQN,etf=True, k=Index('k'))
-    >>> k = Index('k')
-    >>> test_a = lambdify(a[1][1])
+    >>> test_a = lambdify(a[1].expr)
     >>> inspect.getsource(test_a)
     'def _lambdifygenerated(k):\n    return psi_t[k] + dConv_s(phi_t[0:k]*(k - dLinspace(0, k))/k, t[1:k + 1])\n'
 

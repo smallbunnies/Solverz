@@ -304,7 +304,7 @@ class DAE(Equations):
         elif isinstance(eqn, Eqn):
             self.g_dict[eqn.name] = eqn
         else:
-            raise ValueError(f'Undefined equation: {eqn_.__class__.__name__}')
+            raise ValueError(f'Undefined equation: {eqn.__class__.__name__}')
 
     def assign_eqn_var_address(self, *xys: Vars):
         """
