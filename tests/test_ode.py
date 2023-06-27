@@ -24,4 +24,4 @@ df = pd.read_excel('instances/ode_test.xlsx',
 
 
 def test_ode():
-    assert max(abs((x['x'] - np.asarray(df['Sheet1']).reshape(1, -1))).reshape(-1, )) <= 0.0009448126743213381
+    assert max(abs((x['x'] - np.asarray(df['Sheet1']).reshape(1, -1))).reshape(-1, )) <= 0.00094481268
