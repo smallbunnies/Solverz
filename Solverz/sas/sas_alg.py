@@ -4,7 +4,7 @@ from functools import reduce
 from typing import Union, Type, Dict, Callable, List
 
 from sympy import Symbol, Expr, Add, Mul, Number, sin, Derivative, Pow, cos, Function, Integer, preorder_traversal, \
-    Basic, sympify, Float, Matrix, ImmutableDenseMatrix, latex, simplify, lambdify
+    Basic, sympify, Float, Matrix, ImmutableDenseMatrix, simplify, latex, lambdify
 
 dfunc_mapping: Dict[Type[Expr], Callable] = {}
 
@@ -143,168 +143,6 @@ class Constant(Symbol):
         obj.symbol = symbol
         obj.name = symbol.name
         return obj
-
-
-def dtify(expr, k=None, etf=False, eut=False, constants=None):
-    r"""
-    Derive DTs of expressions.
-
-    Examples
-    ========
-
-    >>> from Solverz.eqn import Eqn
-    >>> from Solverz.sas.sas_alg import dtify
-    >>> Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
-    >>> dtify(Eq_prime.EQN)
-    Eqp[k] - dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi_delta[0:k]) - dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi_delta[0:k])=0
-
-    Parameters
-    ==========
-
-    expr : Expr or number
-
-        An expression to be evaluated.
-
-    k : Index, Slice, Type[Expr], int
-
-        DT Index of expr.
-
-    etf : bool
-
-        If set to ``True``, trigonometric components are extracted from expr and forms new equations.
-        Otherwise, trigonometric components will not be extracted from expr but will be simply replaced by $\psi$ and
-        $\phi$ symbols.
-
-        >>> import sympy as sp
-        >>> x, y = sp.symbols('x, y')
-        >>> dtify(x * sp.sin(y), etf=True)
-        [dConv_s(x[0:k], phi_y[0:k])=0, phi_y[k] - dConv_s(psi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])=0, psi_y[k] + dConv_s(phi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])=0]
-        >>> dtify(x * sp.sin(y))
-        dConv_s(x[0:k], phi_y[0:k])=0
-
-    eut : bool
-
-        If set to ``True``, extract unknown $k$-th terms from the derived DT expressions.
-
-        >>> Eq_test = Eqn(name='Eq_test', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)')
-        >>> dt_eqn = dtify(Eq_test.EQN,etf=True,eut=True, constants=['ra', 'Xdp', 'Eqp'])
-        >>> dt_eqn[0]
-        -Xdp*Iyg[0]*psi_delta[k] - Xdp*Iyg[k]*psi_delta[0] + ra*Ixg[0]*psi_delta[k] + ra*Ixg[k]*psi_delta[0] + Uxg[0]*psi_delta[k] + Uxg[k]*psi_delta[0]=Eqp*dDelta(k) - dConv_s(-Xdp*Iyg[1:k - 1] + ra*Ixg[1:k - 1] + Uxg[1:k - 1], psi_delta[1:k - 1])
-        >>> dt_eqn[1]
-        -delta[k]*phi_delta[0] - psi_delta[k]=dConv_s(phi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
-        >>> dt_eqn[2]
-        delta[k]*psi_delta[0] - phi_delta[k]=-dConv_s(psi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
-
-    constants : list of str (variable names)
-
-        For example, if ``x`` is a constant, the DT of x should be ``x*dDelta(k)`` instead of DT object ``x[k]``.
-
-        >>> from Solverz.eqn import Eqn
-        >>> Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg)')
-        >>> dtify(Eq_prime.EQN, constants=['ra'])
-        Eqp[k] - dConv_s(ra*Ixg[0:k] + Uxg[0:k], psi_delta[0:k])=0
-
-        In this case, ``ra`` is treated as a constant and no convolution is performed for ``Mul(ra, Ixg)``.
-
-    Returns
-    =======
-
-    expr : Expr
-        DT expression or list of DT expressions.
-
-    """
-
-    # if node is not instance of sympy.basic, convert node to sympy expressions first.
-    # for example, dtify(3) now returns 3*dDelta[k]
-    if not isinstance(expr, Basic):
-        expr = sympify(expr)
-
-    if constants is not None:
-        if not isinstance(constants, list):
-            constants = [constants]
-        symbol_dict = {}
-        for symbol in list(expr.free_symbols):
-            symbol_dict[symbol.name] = symbol
-        for var_name in constants:
-            try:
-                expr = expr.subs(symbol_dict[var_name],
-                                 Constant(symbol_dict[var_name], commutative=symbol_dict[var_name].is_commutative))
-            except KeyError:
-                pass
-
-    if any([isinstance(symbol, DT) for symbol in list(expr.free_symbols)]):
-        raise TypeError("DT expression cannot be dtified!")
-    if k is None:
-        k = Index('k')
-
-    if expr.has(sin, cos):
-        # subs $\phi$ and $\psi$ for $\sin$ and $\cos$.
-        if etf:
-            exprs = dict()
-            pt = preorder_traversal(expr)
-            for node in pt:
-                if isinstance(node, sin):
-                    phi_ = phi(node.args[0])
-                    expr = expr.subs(node, phi_)
-                elif isinstance(node, cos):
-                    psi_ = psi(node.args[0])
-                    expr = expr.subs(node, psi_)
-            for symbol in list(expr.free_symbols):
-                if isinstance(symbol, psi):
-                    exprs[symbol] = symbol - cos(symbol.eqn)
-                    exprs[phi(symbol.eqn)] = phi(symbol.eqn) - sin(symbol.eqn)
-                if isinstance(symbol, phi):
-                    exprs[symbol] = symbol - sin(symbol.eqn)
-                    exprs[psi(symbol.eqn)] = psi(symbol.eqn) - cos(symbol.eqn)
-            exprs = [expr] + [(key, value) for key, value in exprs.items()]
-        else:
-            pt = preorder_traversal(expr)
-            for node in pt:
-                if isinstance(node, sin):
-                    phi_ = phi(node.args[0])
-                    expr = expr.subs(node, phi_)
-                elif isinstance(node, cos):
-                    psi_ = psi(node.args[0])
-                    expr = expr.subs(node, psi_)
-            exprs = [expr]
-    else:
-        exprs = [expr]
-
-    if len(exprs) > 1:  # sin, cos found in the original expression
-        return [k_eqn(_dtify(expr_, k), eut) if isinstance(expr_, Expr) else k_eqn(_dtify(expr_[1], k), eut,
-                                                                                   int_var=expr_[0]) for expr_ in exprs]
-    else:
-        return k_eqn(_dtify(exprs[0], k), eut)
-
-
-def _dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
-    """
-    Replace sympy operator by DT operators/symbols
-    """
-    if isinstance(Node, tuple(dfunc_mapping.keys())):
-        return dfunc_mapping[Node.func](k, *Node.args)
-    elif isinstance(Node, Symbol) and not isinstance(Node, Constant):
-        if Node.name != 't':
-            return DT(Node, k)
-        else:  # dt of t
-            if isinstance(k, (Expr, Index)) and not isinstance(k, Slice):
-                if all([isinstance(symbol, Index) for symbol in k.free_symbols]) is False:
-                    raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
-                else:
-                    return DT(Node, k)
-            elif isinstance(k, Slice):
-                return DT(Node, k)
-            else:  # integer
-                if k < 0:
-                    raise ValueError("DT index must be great than zero!")
-                elif k == 1:
-                    return 1
-                else:
-                    return 0
-    elif isinstance(Node, (Number, Constant)):
-        return Node * dDelta(k)
-    else:
-        raise TypeError(f"Unsupported Expr {Node.func}!")
 
 
 def implements_dt_algebra(sym_expr: Type[Expr]):
@@ -1034,9 +872,9 @@ def search_for_func(expr, func: type[Function]) -> List[Expr]:
     >>> from Solverz.sas.sas_alg import dtify, search_for_func
     >>> from sympy import cos
     >>> test = Eqn(name='test', eqn='cos(x)')
-    >>> search_for_func(test.EQN, cos)
+    >>> search_for_func(test.expr, cos)
     [cos(x)]
-    >>> test_ = dtify(test.EQN,etf=True,eut=True)
+    >>> test_ = dtify(test.expr,etf=True,eut=True)
     >>> test_[1]
     -phi_x[0]*x[k] - psi_x[k]=dConv_s(phi_x[1:k - 1]*(k - dLinspace(1, k - 1))/k, x[1:k - 1])
     >>> search_for_func(test_[1].RHS, dLinspace)
@@ -1077,8 +915,9 @@ class k_eqn:
 
         :param expr:
         """
+
         if not isinstance(expr, Expr):
-            raise TypeError(f"Expect sp.Expr, got {expr.__class__}")
+            raise TypeError(f"Expect sympy.Expr, got {expr.__class__}")
         self.expr = expr
         if not any([isinstance(symbol_, DT) for symbol_ in self.SYMBOLS]):
             raise TypeError("Support dtified equation only.")
@@ -1089,22 +928,32 @@ class k_eqn:
         else:
             self.RHS = Integer(0)
             self.LHS = expr
-            # separate the coefficient of unknown terms
 
+        self.int = dict()  # if the k_eqn stems from some intermediate variable
         if int_var:
             if isinstance(int_var, (psi, phi)):
                 if isinstance(int_var, psi):
-                    self.initialize_func = cos(int_var.eqn)
+                    self.int['var'] = int_var
+                    self.int['func'] = cos(int_var.eqn)
                 else:
-                    self.initialize_func = sin(int_var.eqn)
+                    self.int['var'] = int_var
+                    self.int['func'] = sin(int_var.eqn)
             else:
                 raise NotImplementedError(f"Unknown intermediate variable {int_var}")
+
+        # separate the coefficient of unknown terms
+        self.coeff_var_pair: Dict[str, Expr] = dict()
+        for symbol_ in list(self.LHS.free_symbols):
+            if isinstance(symbol_, DT):
+                self.coeff_var_pair[symbol_.__repr__()] = self.LHS.coeff(symbol_)
+
+        self.RHS_NUM_FUNC: Callable = lambda x: None  # return empty function
 
     @property
     def SYMBOLS(self):
         return list(self.expr.free_symbols)
 
-    def obtain_unknown_index(self) -> Index:
+    def obtain_unknown_index(self) -> Expr:
         # find the largest Index of DT symbols in the expression
         index = []
         value = []
@@ -1126,6 +975,11 @@ class k_eqn:
         else:
             raise ValueError("Unknown terms have already been extracted!")
 
+    def lambdify(self, modules):
+        for symbol_ in list(self.k.free_symbols):
+            if isinstance(symbol_, Index):
+                self.RHS_NUM_FUNC = lambdify(symbol_, pre_lambdify(self.RHS), modules=modules)
+
     def __repr__(self):
         return self.LHS.__repr__() + r"=" + self.RHS.__repr__()
 
@@ -1135,3 +989,197 @@ class k_eqn:
         :return:
         """
         return r"$\displaystyle %s$" % (latex(self.LHS) + r"=" + latex(self.RHS))
+
+
+def _dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
+    """
+    Replace sympy operator by DT operators/symbols
+    """
+    if isinstance(Node, tuple(dfunc_mapping.keys())):
+        return dfunc_mapping[Node.func](k, *Node.args)
+    elif isinstance(Node, Symbol) and not isinstance(Node, Constant):
+        if Node.name != 't':
+            return DT(Node, k)
+        else:  # dt of t
+            if isinstance(k, (Expr, Index)) and not isinstance(k, Slice):
+                if all([isinstance(symbol, Index) for symbol in k.free_symbols]) is False:
+                    raise TypeError(f"Non-Index symbol found in Index Expression {k}!")
+                else:
+                    return DT(Node, k)
+            elif isinstance(k, Slice):
+                return DT(Node, k)
+            else:  # integer
+                if k < 0:
+                    raise ValueError("DT index must be great than zero!")
+                elif k == 1:
+                    return 1
+                else:
+                    return 0
+    elif isinstance(Node, (Number, Constant)):
+        return Node * dDelta(k)
+    else:
+        raise TypeError(f"Unsupported Expr {Node.func}!")
+
+
+def dtify(expr, k=None, etf=False, eut=False, constants=None) -> Union[k_eqn, List[k_eqn]]:
+    r"""
+    Derives DTs of expressions and returns k equations.
+
+    Examples
+    ========
+
+    >>> from Solverz.eqn import Eqn
+    >>> from Solverz.sas.sas_alg import dtify
+    >>> Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
+    >>> dtify(Eq_prime.expr)
+    -Eqp[k] + dConv_s(Uxg[0:k] + dConv_v(Ixg[0:k], ra[0:k]) - dConv_v(Iyg[0:k], Xdp[0:k]), psi_delta[0:k]) + dConv_s(Uyg[0:k] + dConv_v(Ixg[0:k], Xdp[0:k]) + dConv_v(Iyg[0:k], ra[0:k]), phi_delta[0:k])=0
+
+    Parameters
+    ==========
+
+    expr : Expr or number
+
+        An expression to be evaluated.
+
+    k : Index, Slice, Type[Expr], int
+
+        DT Index of expr.
+
+    etf : bool
+
+        If set to ``True``, trigonometric components are extracted from expr and forms new equations.
+        Otherwise, trigonometric components will not be extracted from expr but will be simply replaced by $\psi$ and
+        $\phi$ symbols.
+
+        >>> import sympy as sp
+        >>> x, y = sp.symbols('x, y')
+        >>> dtify(x * sp.sin(y), etf=True)
+        [dConv_s(x[0:k], phi_y[0:k])=0, phi_y[k] - dConv_s(psi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])=0, psi_y[k] + dConv_s(phi_y[0:k - 1]*(k - dLinspace(0, k - 1))/k, y[1:k])=0]
+        >>> dtify(x * sp.sin(y))
+        dConv_s(x[0:k], phi_y[0:k])=0
+
+    eut : bool
+
+        If set to ``True``, extract unknown $k$-th terms from the derived DT expressions.
+
+        >>> Eq_test = Eqn(name='Eq_test', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)')
+        >>> dt_eqn = dtify(Eq_test.expr,etf=True,eut=True, constants=['ra', 'Xdp', 'Eqp'])
+        >>> dt_eqn[0]
+        Xdp*Iyg[0]*psi_delta[k] + Xdp*Iyg[k]*psi_delta[0] - ra*Ixg[0]*psi_delta[k] - ra*Ixg[k]*psi_delta[0] - Uxg[0]*psi_delta[k] - Uxg[k]*psi_delta[0]=-Eqp*dDelta(k) + dConv_s(-Xdp*Iyg[1:k - 1] + ra*Ixg[1:k - 1] + Uxg[1:k - 1], psi_delta[1:k - 1])
+        >>> dt_eqn[1]
+        -delta[k]*phi_delta[0] - psi_delta[k]=dConv_s(phi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
+        >>> dt_eqn[2]
+        delta[k]*psi_delta[0] - phi_delta[k]=-dConv_s(psi_delta[1:k - 1]*(k - dLinspace(1, k - 1))/k, delta[1:k - 1])
+
+    constants : list of str (variable names)
+
+        For example, if ``x`` is a constant, the DT of x should be ``x*dDelta(k)`` instead of DT object ``x[k]``.
+
+        >>> from Solverz.eqn import Eqn
+        >>> Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg)')
+        >>> dtify(Eq_prime.expr, constants=['ra'])
+        -Eqp[k] + dConv_s(ra*Ixg[0:k] + Uxg[0:k], psi_delta[0:k])=0
+
+        In this case, ``ra`` is treated as a constant and no convolution is performed for ``Mul(ra, Ixg)``.
+
+    Returns
+    =======
+
+    expr : Expr
+        DT expression or list of DT expressions.
+
+    """
+
+    # if node is not instance of sympy.basic, convert node to sympy expressions first.
+    # for example, dtify(3) now returns 3*dDelta[k]
+    if not isinstance(expr, Basic):
+        expr = sympify(expr)
+
+    if constants is not None:
+        if not isinstance(constants, list):
+            constants = [constants]
+        symbol_dict = {}
+        for symbol in list(expr.free_symbols):
+            symbol_dict[symbol.name] = symbol
+        for var_name in constants:
+            try:
+                expr = expr.subs(symbol_dict[var_name],
+                                 Constant(symbol_dict[var_name], commutative=symbol_dict[var_name].is_commutative))
+            except KeyError:
+                pass
+
+    if any([isinstance(symbol, DT) for symbol in list(expr.free_symbols)]):
+        raise TypeError("DT expression cannot be dtified!")
+    if k is None:
+        k = Index('k')
+
+    if expr.has(sin, cos):
+        # subs $\phi$ and $\psi$ for $\sin$ and $\cos$.
+        if etf:
+            exprs = dict()
+            pt = preorder_traversal(expr)
+            for node in pt:
+                if isinstance(node, sin):
+                    phi_ = phi(node.args[0])
+                    expr = expr.subs(node, phi_)
+                elif isinstance(node, cos):
+                    psi_ = psi(node.args[0])
+                    expr = expr.subs(node, psi_)
+            for symbol in list(expr.free_symbols):
+                if isinstance(symbol, psi):
+                    exprs[symbol] = symbol - cos(symbol.eqn)
+                    exprs[phi(symbol.eqn)] = phi(symbol.eqn) - sin(symbol.eqn)
+                if isinstance(symbol, phi):
+                    exprs[symbol] = symbol - sin(symbol.eqn)
+                    exprs[psi(symbol.eqn)] = psi(symbol.eqn) - cos(symbol.eqn)
+            exprs = [expr] + [(key, value) for key, value in exprs.items()]
+        else:
+            pt = preorder_traversal(expr)
+            for node in pt:
+                if isinstance(node, sin):
+                    phi_ = phi(node.args[0])
+                    expr = expr.subs(node, phi_)
+                elif isinstance(node, cos):
+                    psi_ = psi(node.args[0])
+                    expr = expr.subs(node, psi_)
+            exprs = [expr]
+    else:
+        exprs = [expr]
+
+    if len(exprs) > 1:  # sin, cos found in the original expression
+        return [k_eqn(_dtify(expr_, k), eut) if isinstance(expr_, Expr) else k_eqn(_dtify(expr_[1], k), eut,
+                                                                                   int_var=expr_[0]) for expr_ in exprs]
+    else:
+        return k_eqn(_dtify(exprs[0], k), eut)
+
+
+def pre_lambdify(expr: Expr):
+    r"""
+    Extending the `Slice` and `dLinspace` objects by one. This is because, for example a=[1,2,3], a[0:2] returns [1,2].
+
+    Examples
+    ========
+
+    >>> from Solverz.sas.sas_alg import dtify, pre_lambdify
+    >>> from Solverz.eqn import Ode
+    >>> test = Ode(name='test',eqn='2*(y-cos(t))',diff_var='y')
+    >>> a=dtify(test.expr,etf=True, k=Index('k'))
+    >>> pre_lambdify(a[1].expr)
+    psi_t[k] + dConv_s(phi_t[0:k]*(k - dLinspace(0, k))/k, t[1:k + 1])
+
+    """
+    expr_ = expr
+    for DT_ in list(expr.free_symbols):
+        if isinstance(DT_, DT):
+            if isinstance(DT_.index, Slice):
+                expr_ = expr_.subs(DT_, DT(DT_.symbol, Slice(DT_.index.start, DT_.index.end + 1)))
+
+    dlinspaces = search_for_func(expr_, dLinspace)
+
+    if len(dlinspaces) > 0:
+        for dlinspace in dlinspaces:
+            start = dlinspace.args[0]
+            end = dlinspace.args[1]
+            expr_ = expr_.subs(dlinspace, dLinspace(start, end + 1))
+
+    return expr_

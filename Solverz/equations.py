@@ -62,7 +62,7 @@ class Equations:
         self.eqn_diffs[eqn.name] = dict()
         for symbol_ in eqn.SYMBOLS:
             if symbol_.name not in self.PARAM:
-                eqn_diff = eqn.EQN.diff(symbol_)
+                eqn_diff = eqn.RHS.diff(symbol_)
                 self.eqn_diffs[eqn.name][symbol_.name] = Eqn(name=f'Diff {eqn.name} w.r.t. {symbol_.name}',
                                                              eqn=eqn_diff.__repr__(), commutative=eqn.commutative)
 

@@ -29,7 +29,7 @@ Here, with the aid of Solverz, you can solve the equation as easily as follows
 
    >>> from Solverz.eqn import Eqn
    >>> from Solverz.equations import AE
-   >>> E = Eqn(name='E', e_str='exp(x)+x-3')
+   >>> E = Eqn(name='E', eqn='exp(x)+x-3')
    >>> g = AE(name='g', eqn=E)
 
 2. Declare the unknown variables and give the initial values.

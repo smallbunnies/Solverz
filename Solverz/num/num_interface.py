@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 from functools import reduce
-from typing import Type
 
 import numpy as np
-import sympy as sp
 from numpy import linalg
-
-from Solverz.sas.sas_alg import DT, Slice, search_for_func, dLinspace, Index
 
 numerical_interface = {}
 
@@ -69,7 +65,7 @@ def DT_conv(*args, method='conv') -> np.ndarray:
     if len(args) <= 2 and method == 'conv':  # if input two vectors, then use scalar multiplications and additions
         x = args[0].reshape((1, -1))
         y = np.flip(args[0].reshape((-1, 1)), 0)
-        return x@y
+        return x @ y
 
     if len(args) > 2 or method == 'fft':  # if input more than three vectors, use fft and ifft
         k = args[0].shape[0]
@@ -100,45 +96,6 @@ def linspace(start, end) -> np.ndarray:
 
     """
     return np.arange(start, end, dtype=int)[:, np.newaxis]
-
-
-def lambdify(expr: sp.Expr, modules=None):
-    r"""
-    Convert symbolic DT expressions into numerical functions, with the sub-purpose of extending the `Slice` and
-    `dLinspace` objects by one.
-
-    Examples
-    ========
-
-    >>> import numpy as np
-    >>> from sympy import Derivative
-    >>> from sympy.abc import y, t
-    >>> import inspect
-    >>> from Solverz.num.num_interface import lambdify
-    >>> from Solverz.sas.sas_alg import dtify
-    >>> from Solverz.eqn import Ode
-    >>> test = Ode(name='test',eqn='2*(y-cos(t))',diff_var='y')
-    >>> a=dtify(Derivative(y,t)-test.EQN,etf=True, k=Index('k'))
-    >>> test_a = lambdify(a[1].expr)
-    >>> inspect.getsource(test_a)
-    'def _lambdifygenerated(k):\n    return psi_t[k] + dConv_s(phi_t[0:k]*(k - dLinspace(0, k))/k, t[1:k + 1])\n'
-
-    """
-    expr_ = expr
-    for DT_ in list(expr.free_symbols):
-        if isinstance(DT_, DT):
-            if isinstance(DT_.index, Slice):
-                expr_ = expr_.subs(DT_, DT(DT_.symbol, Slice(DT_.index.start, DT_.index.end + 1)))
-
-    dlinspaces = search_for_func(expr_, dLinspace)
-
-    if len(dlinspaces) > 0:
-        for dlinspace in dlinspaces:
-            start = dlinspace.args[0]
-            end = dlinspace.args[1]
-            expr_ = expr_.subs(dlinspace, dLinspace(start, end + 1))
-
-    return sp.lambdify([Index('k')], expr_, modules)
 
 
 def inv(mat: np.ndarray):

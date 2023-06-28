@@ -4,7 +4,8 @@ from copy import deepcopy
 from typing import Union, List, Dict, Callable
 
 import numpy as np
-from sympy import sympify, lambdify, Symbol, preorder_traversal, Basic, Expr
+from sympy import sympify, lambdify, Symbol, preorder_traversal, Basic, Expr, latex, Derivative, symbols
+from sympy.abc import t
 
 from Solverz.num.num_alg import Sympify_Mapping, F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
     traverse_for_mul
@@ -23,30 +24,31 @@ class Eqn:
                  commutative: Union[bool] = True):
 
         self.name = name
+        self.LHS = 0
         if isinstance(eqn, str):
             self.e_str = eqn
             self.commutative = commutative
-            self.EQN = sympify(self.e_str, locals=Sympify_Mapping)
+            self.RHS = sympify(self.e_str, locals=Sympify_Mapping)
 
             # commutative=False and real=True are inconsistent assumptions
             if self.commutative:
                 temp_sympify_mapping = dict()
-                for symbol in self.EQN.free_symbols:
+                for symbol in self.RHS.free_symbols:
                     temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
-                    self.EQN = sympify(self.e_str, temp_sympify_mapping)
+                    self.RHS = sympify(self.e_str, temp_sympify_mapping)
             else:
                 temp_sympify_mapping = deepcopy(Sympify_Mapping)
-                for symbol in self.EQN.free_symbols:
+                for symbol in self.RHS.free_symbols:
                     temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
                 # traverse the Expr tree and replace '*' by Mat_Mul
-                self.EQN = traverse_for_mul(sympify(self.e_str, temp_sympify_mapping))
+                self.RHS = traverse_for_mul(sympify(self.e_str, temp_sympify_mapping))
         else:
             self.e_str = eqn.__str__()
-            self.EQN = eqn
+            self.RHS = eqn
             self.commutative = eqn.is_commutative
 
-        self.SYMBOLS: List[Symbol] = list(self.EQN.free_symbols)
-        self.NUM_EQN: Callable = lambdify(self.SYMBOLS, self.EQN, [numerical_interface, 'numpy'])
+        self.SYMBOLS: List[Symbol] = list(self.RHS.free_symbols)
+        self.NUM_EQN: Callable = lambdify(self.SYMBOLS, self.RHS, [numerical_interface, 'numpy'])
 
     def eval(self, *args: Union[np.ndarray]) -> np.ndarray:
         return self.NUM_EQN(*args)
@@ -55,11 +57,22 @@ class Eqn:
         """"""
         pass
 
+    @property
+    def expr(self):
+        return self.LHS-self.RHS
+
     def subs(self, *args, **kwargs):
-        return self.EQN.subs(*args, **kwargs)
+        return self.RHS.subs(*args, **kwargs)
 
     def __repr__(self):
-        return f"Equation: {self.name}"
+        return self.LHS.__repr__() + r"=" + self.RHS.__repr__()
+
+    def _repr_latex_(self):
+        """
+        So that jupyter notebook can display latex equation of k_eqn object.
+        :return:
+        """
+        return r"$\displaystyle %s$" % (latex(self.LHS) + r"=" + latex(self.RHS))
 
 
 class Ode(Eqn):
@@ -70,6 +83,7 @@ class Ode(Eqn):
     def __init__(self, name: Union[str], eqn: Union[str], diff_var: str, commutative: Union[bool] = True):
         super().__init__(name, eqn, commutative)
         self.diff_var = diff_var
+        self.LHS = Derivative(symbols(diff_var, commutative=self.commutative), t)
 
     def discretize(self,
                    scheme: Basic,
@@ -160,9 +174,6 @@ class Ode(Eqn):
             elif isinstance(symbol_, ComputeParam):
                 subs_dict[symbol_] = new_symbols(symbol_.name, commutative=self.commutative)
         return expr.subs(subs_dict)
-
-    def __repr__(self):
-        return f"Ode: {self.name}"
 
 
 class Pde(Eqn):
