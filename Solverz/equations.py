@@ -18,7 +18,8 @@ class Equations:
     def __init__(self,
                  eqn: Union[List[Eqn], Eqn],
                  name: str = None,
-                 param: Union[List[Param], Param] = None
+                 param: Union[List[Param], Param] = None,
+                 const: Union[List[Param], Param] = None
                  ):
         self.name = name
 
@@ -46,6 +47,18 @@ class Equations:
                     raise ValueError(f'Parameter {param_.name} not defined in equations!')
                 else:
                     self.PARAM[param_.name] = param_
+
+        # set constants
+        self.CONST: Dict[str, Param] = dict()
+        if const:
+            if isinstance(const, Param):
+                const = [const]
+
+            for const_ in const:
+                if not self.is_param_defined(const_.name):
+                    raise ValueError(f'Constant {const_.name} not defined in equations!')
+                else:
+                    self.CONST[const_.name] = const_
 
         # generate derivatives of EQNs
         for eqn in self.EQNs.values():
@@ -276,14 +289,15 @@ class DAE(Equations):
     def __init__(self,
                  eqn: Union[List[Eqn], Eqn],
                  name: str = None,
-                 param: Union[List[Param], Param] = None
+                 param: Union[List[Param], Param] = None,
+                 const: Union[List[Param], Param] = None
                  ):
 
         self.f_dict: Dict[str, Ode] = dict()  # dict of state equations
         self.g_dict: Dict[str, Eqn] = dict()  # dict of algebraic equations
         self.var_address: Dict[str, List[int]] = dict()
 
-        super().__init__(eqn, name, param)
+        super().__init__(eqn, name, param, const)
 
         self.state_num: int = 0  # number of state variables
         self.algebra_num: int = 0  # number of algebraic variables

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from typing import Union, Dict, List, Callable
-
 import numpy as np
+import sympy as sp
 
 from Solverz.num.num_interface import numerical_interface
 from Solverz.eqn import Eqn
 from Solverz.equations import DAE
 from Solverz.param import Param
-from Solverz.sas.sas_alg import dtify, k_eqn
+from Solverz.sas.sas_alg import dtify, k_eqn, DT
 from Solverz.var import Var, TimeVar
 from Solverz.variables import VarsBasic, Vars, TimeVars
 
@@ -18,58 +18,136 @@ class DTeqn(DAE):
     def __init__(self,
                  eqn: Union[List[Eqn], Eqn],
                  name: str = None,
-                 param: Union[List[Param], Param] = None
+                 param: Union[List[Param], Param] = None,
+                 const: Union[List[Param], Param] = None
                  ):
 
-        super().__init__(eqn, name, param)
+        super().__init__(eqn, name, param, const)
 
         self.F_dict: Dict[str, k_eqn] = dict()
         self.G_dict: Dict[str, k_eqn] = dict()
 
         self.dtify()
+        self.__Acache: np.ndarray = np.array([])
 
-        # The following must be placed after self.dtify() because we do not derive the DT of parameters but 't' is
-        # assumed to be a parameter in DTeqn object.
-        if not self.is_autonomous:
-            self.PARAM['t'] = Param('t', value=[0])
+    def F(self, *eqnk):
+        eqn = None
+        if isinstance(eqnk[0], str):
+            eqn = eqnk[0]
+            k = eqnk[1]
+        else:
+            k = eqnk[0]
 
-    def F(self, k):
         temp_F = np.array([])
-        for keqn in self.F_dict.values():
-            temp = keqn.RHS_NUM_FUNC(k)
-            if temp.ndim == 1:
-                temp_F = np.concatenate([temp_F, temp])
-            elif temp.shape[1] > 1:
-                raise ValueError(f'The array concatenated should be vector!')
-            else:
-                temp_F = np.concatenate([temp_F, temp.reshape(-1, )])
-        return temp_F
+        if eqn:
+            if eqn in self.F_dict.keys():
+                return self.F_dict[eqn].RHS_NUM_FUNC(k)
+        else:
+            for keqn in self.F_dict.values():
+                temp = keqn.RHS_NUM_FUNC(k)
+                if temp.ndim == 1:
+                    temp_F = np.concatenate([temp_F, temp])
+                elif temp.shape[1] > 1:
+                    raise ValueError(f'The array concatenated should be vector!')
+                else:
+                    temp_F = np.concatenate([temp_F, temp.reshape(-1, )])
+            return temp_F
 
-    def G(self, k):
+    def G(self, *eqnk):
+        eqn = None
+        if isinstance(eqnk[0], str):
+            eqn = eqnk[0]
+            k = eqnk[1]
+        else:
+            k = eqnk[0]
+
         temp_G = np.array([])
-        for keqn in self.G_dict.values():
-            temp = keqn.RHS_NUM_FUNC(k)
-            if temp.ndim == 1:
-                temp_G = np.concatenate([temp_G, temp])
-            elif temp.shape[1] > 1:
-                raise ValueError(f'The array concatenated should be vector!')
-            else:
-                temp_G = np.concatenate([temp_G, temp.reshape(-1, )])
-        return temp_G
-
-    def update_Ainv(self, x, y):
-        pass
+        if eqn:
+            if eqn in self.G_dict.keys():
+                return self.G_dict[eqn].RHS_NUM_FUNC(k)
+        else:
+            for keqn in self.G_dict.values():
+                temp = keqn.RHS_NUM_FUNC(k)
+                if temp.ndim == 1:
+                    temp_G = np.concatenate([temp_G, temp])
+                elif temp.shape[1] > 1:
+                    raise ValueError(f'The array concatenated should be vector!')
+                else:
+                    temp_G = np.concatenate([temp_G, temp.reshape(-1, )])
+            return temp_G
 
     @property
-    def A(self, *xy) -> np.ndarray:
+    def DTs(self) -> Dict[str, sp.Symbol]:
+        symbol_dict = dict()
+        for keqn in self.F_dict.values():
+            for symbol_ in keqn.SYMBOLS.values():
+                if isinstance(symbol_, DT):
+                    symbol_dict[symbol_.symbol_name] = symbol_.symbol
+        for keqn in self.G_dict.values():
+            for symbol_ in keqn.SYMBOLS.values():
+                if isinstance(symbol_, DT):
+                    symbol_dict[symbol_.symbol_name] = symbol_.symbol
+        return symbol_dict
+
+    def assign_eqn_var_address(self, *xys: DTcache):
+        """
+        ASSIGN ADDRESSES TO EQUATIONS f and g
+        """
+
+        temp = 0
+        for eqn_name in self.F_dict.keys():
+            eqn_size = self.F(eqn_name, 0).shape[0]
+            self.a[eqn_name] = [temp, temp + eqn_size - 1]
+            temp = temp + eqn_size
+            self.size[eqn_name] = eqn_size
+
+        self.state_num = temp
+
+        for eqn_name in self.G_dict.keys():
+            eqn_size = self.G(eqn_name, 0).shape[0]
+            self.a[eqn_name] = [temp, temp + eqn_size - 1]
+            temp = temp + eqn_size
+            self.size[eqn_name] = eqn_size
+
+        self.algebra_num = temp - self.state_num
+
+        temp = 0
+        for xy in xys:
+            for var_name, a in xy.a.items():
+                if var_name in self.DTs.keys():
+                    self.var_address[var_name] = [temp + xy.a[var_name][0], xy.a[var_name][-1] + temp]
+                else:
+                    raise ValueError(f"DAE {self.name} has no variable {var_name}")
+            temp = temp + xy.total_size
+
+        self.var_size: int = temp
+
+    def A(self, *xy: DTcache) -> np.ndarray:
         # allocate addresses for variables and equations
-        self.assign_eqn_var_address(*xy)
-        pass
+        if not self.eqn_size:
+            self.assign_eqn_var_address(*xy)
+            self.__Acache = np.zeros((self.algebra_num, self.algebra_num))
+
+        for eqn_name, eqn_a in self.G_dict.items():
+            eqn_a = [a - self.state_num for a in self.a[eqn_name]]
+            for var_name, var_a in self.var_address.items():
+                var_a = [a - self.state_num for a in var_a]
+                if var_name in self.G_dict[eqn_name].COEFF.NUM_FUNC.keys():
+                    temp = np.array(self.G_dict[eqn_name].COEFF[var_name])
+                    if temp.ndim > 1:
+                        self.__Acache[eqn_a[0]:eqn_a[1] + 1, var_a[0]:var_a[1] + 1] = temp
+                    elif temp.ndim == 1 and temp.shape[0] > 1:
+                        self.__Acache[eqn_a[0]:eqn_a[1] + 1, var_a[0]:var_a[1] + 1] = np.diag(temp)
+                    else:
+                        self.__Acache[eqn_a[0]:eqn_a[1] + 1, var_a[0]:var_a[1] + 1] = temp * np.identity(
+                            self.var_address[var_name][1]-self.var_address[var_name][0]+1)
+
+        return self.__Acache
 
     def dtify(self):
 
         for eqn_name, eqn in self.g_dict.items():
-            DT_eqn = dtify(eqn.expr, etf=True, eut=True, constants=list(self.PARAM.keys()))
+            DT_eqn = dtify(eqn.expr, etf=True, eut=True, constants=list(self.CONST.keys()))
             if isinstance(DT_eqn, k_eqn):
                 self.G_dict[eqn_name] = DT_eqn
             elif isinstance(DT_eqn, list):
@@ -80,7 +158,7 @@ class DTeqn(DAE):
                     self.add_eqn(Eqn(name=eqn_.int['var'].__str__(), eqn=eqn_.int['func']))
 
         for eqn_name, eqn in self.f_dict.items():
-            DT_eqn = dtify(eqn.expr, etf=True, eut=True, constants=list(self.PARAM.keys()))
+            DT_eqn = dtify(eqn.expr, etf=True, eut=True, constants=list(self.CONST.keys()))
             if isinstance(DT_eqn, k_eqn):
                 self.F_dict[eqn_name] = DT_eqn
             elif isinstance(DT_eqn, list):
@@ -107,15 +185,16 @@ class DTeqn(DAE):
             xy = (x[0], y[0])
 
         # perform lambdify using DTcache.v
-        temp_t = np.zeros((x.K, 1))
-        temp_t[1] = 1
-        t = {'t': temp_t}
-        temp_param = self.PARAM
-        del temp_param['t']
+        modules = [x.v, y.v, self.CONST, numerical_interface, 'numpy']
+        if not self.is_autonomous:
+            temp_t = np.zeros((x.K, 1))
+            temp_t[1] = 1
+            t = {'t': temp_t}
+            modules = [t] + modules
         for eqn in self.F_dict.values():
-            eqn.lambdify(modules=[x.v, y.v, t, temp_param, numerical_interface, 'numpy'])
+            eqn.lambdify(modules=modules)
         for eqn in self.G_dict.values():
-            eqn.lambdify(modules=[x.v, y.v, t, temp_param, numerical_interface, 'numpy'])
+            eqn.lambdify(modules=modules)
         return x, y
 
     def __repr__(self):

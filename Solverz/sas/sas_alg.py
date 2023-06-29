@@ -919,7 +919,7 @@ class k_eqn:
         if not isinstance(expr, Expr):
             raise TypeError(f"Expect sympy.Expr, got {expr.__class__}")
         self.expr = expr
-        if not any([isinstance(symbol_, DT) for symbol_ in self.SYMBOLS]):
+        if not any([isinstance(symbol_, DT) for symbol_ in self.SYMBOLS.values()]):
             raise TypeError("Support dtified equation only.")
         self.k = self.obtain_unknown_index()
         self.eut = eut
@@ -942,22 +942,25 @@ class k_eqn:
                 raise NotImplementedError(f"Unknown intermediate variable {int_var}")
 
         # separate the coefficient of unknown terms
-        self.coeff_var_pair: Dict[str, Expr] = dict()
+        self.COEFF = Coeffs()
         for symbol_ in list(self.LHS.free_symbols):
             if isinstance(symbol_, DT):
-                self.coeff_var_pair[symbol_.__repr__()] = self.LHS.coeff(symbol_)
+                self.COEFF.add_coeff(self.LHS.coeff(symbol_), symbol_.symbol_name)
 
         self.RHS_NUM_FUNC: Callable = lambda x: None  # return empty function
 
     @property
     def SYMBOLS(self):
-        return list(self.expr.free_symbols)
+        symbol_dict = dict()
+        for symbol in list(self.expr.free_symbols):
+            symbol_dict[symbol.name] = symbol
+        return symbol_dict
 
     def obtain_unknown_index(self) -> Expr:
         # find the largest Index of DT symbols in the expression
         index = []
         value = []
-        for symbol_ in list(self.SYMBOLS):
+        for symbol_ in self.SYMBOLS.values():
             if isinstance(symbol_, DT):
                 index_ = symbol_.index
                 if isinstance(index_, Slice):
@@ -979,6 +982,7 @@ class k_eqn:
         for symbol_ in list(self.k.free_symbols):
             if isinstance(symbol_, Index):
                 self.RHS_NUM_FUNC = lambdify(symbol_, pre_lambdify(self.RHS), modules=modules)
+        self.COEFF.lambdify(modules)
 
     def __repr__(self):
         return self.LHS.__repr__() + r"=" + self.RHS.__repr__()
@@ -989,6 +993,30 @@ class k_eqn:
         :return:
         """
         return r"$\displaystyle %s$" % (latex(self.LHS) + r"=" + latex(self.RHS))
+
+
+class Coeffs:
+    """
+    The class of coeff of unknown DT terms in LHS of k_eqn
+    """
+
+    def __init__(self):
+        self.expr: Dict[str, Expr] = dict()
+        self.NUM_FUNC: Dict[str, Callable] = dict()
+
+    def add_coeff(self, expr: Expr, var: str):
+        self.expr[var] = expr
+
+    def lambdify(self, modules):
+        for var, expr in self.expr.items():
+            self.NUM_FUNC[var] = lambdify([], expr, modules=modules)
+
+    def __getitem__(self, item):
+        if isinstance(item, str):
+            return self.NUM_FUNC[item]()
+
+    def __repr__(self):
+        return self.expr.__repr__()
 
 
 def _dtify(Node: Expr, k: [Index, Slice, Type[Expr], int]):
