@@ -181,13 +181,17 @@ class DTeqn(DAE):
             if keqn.int is not None:
                 # initialize intermediate variables
                 temp_y += [TimeVar(var_name, value=self.g(var_name, *xy))]
+        if len(temp_y) > 0:
             y = DTcache(TimeVars(temp_y), x.K)
-            xy = (x[0], y[0])
 
         # perform lambdify using DTcache.v
-        modules = [x.v, y.v, self.CONST, numerical_interface, 'numpy']
+        if y is not None:
+            modules = [x.v, y.v, self.CONST, numerical_interface, 'numpy']
+        else:
+            modules = [x.v, self.CONST, numerical_interface, 'numpy']
+
         if not self.is_autonomous:
-            temp_t = np.zeros((x.K, 1))
+            temp_t = np.zeros((x.K+1, 1))
             temp_t[1] = 1
             t = {'t': temp_t}
             modules = [t] + modules
@@ -204,11 +208,11 @@ class DTeqn(DAE):
 class DTcache(TimeVars):
 
     def __init__(self, timevars: TimeVars, K: int):
-        super().__init__([TimeVar(var_name, value=value[:, 0]) for var_name, value in timevars.v.items()], length=K)
+        self.K = K
+        super().__init__([TimeVar(var_name, value=value[:, 0]) for var_name, value in timevars.v.items()], length=self.K+1)
         # For time vars, column number denote different time nodes while row number denote different variables
         # For array x, x[0] returns the first row, but we want it to return the 0th order DT of different variables,
         # so we have to transpose the array of DTcache by overriding self.link_var_and_array().
-        self.K = K
 
     def link_var_and_array(self):
         self.array = np.zeros((self.len, self.total_size))
@@ -231,26 +235,31 @@ class DTcache(TimeVars):
         else:
             return self.array[item]
 
+    def __setitem__(self, key, value):
+        self.array[key] = value
+
     def __repr__(self):
         return f'DT-series (order {self.len}) {list(self.v.keys())}'
 
 
-class DTvar(VarsBasic):
+class DTvar:
 
     def __init__(self,
-                 dtvar: DTcache,
+                 cache: DTcache,
                  N=100):
-        super().__init__([Var(var_name, value=value[:, 0]) for var_name, value in dtvar.v.items()])
 
+        self.cache = cache
         self.len = N
-        self.frame_shape = dtvar.array.shape
+        self.frame_shape = cache.array.shape
+        self.array: np.ndarray = np.array([])
+        self.v: Dict[str, np.ndarray] = dict()
         self.link_var_and_array()
 
     def link_var_and_array(self):
         self.array = np.zeros((self.len, *self.frame_shape))
-        for var_name in self.var_size.keys():
-            self.array[0, self.a[var_name][0]:self.a[var_name][-1] + 1, 0] = self.v[var_name]
-            self.v[var_name] = self.array[:, self.a[var_name][0]:self.a[var_name][-1] + 1, :]
+        for var_name in self.cache.var_size.keys():
+            self.array[0, :, self.cache.a[var_name][0]:self.cache.a[var_name][-1] + 1] = self.cache.v[var_name]
+            self.v[var_name] = self.array[:, :, self.cache.a[var_name][0]:self.cache.a[var_name][-1] + 1]
 
     def __getitem__(self, item):
 
@@ -258,6 +267,9 @@ class DTvar(VarsBasic):
             return self.v[item]
         else:
             return self.array[item]
+
+    def __setitem__(self, key, value):
+        self.array[key] = np.array(value)
 
     def __repr__(self):
         return f'DT-storage object (shape: {self.array.shape}) {list(self.v.keys())}'

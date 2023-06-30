@@ -13,6 +13,7 @@ from Solverz.solvers.aesolver import nr_method
 from Solverz.var import TimeVar
 from Solverz.variables import TimeVars
 from Solverz.sas.sas_num import DTcache, DTvar, DTeqn
+from Solverz.solvers.aesolver import inv
 
 
 def implicit_trapezoid(dae: DAE,
@@ -346,42 +347,76 @@ def ode15s(ode: DAE,
     pass
 
 
-def DTsolver(eqn: DAE,
-             x: TimeVars,
-             y: TimeVars,
-             dt,
-             T,
-             K):
-    dteqn = DTeqn(eqn)
-    x = DTcache(x, K)
-    y = DTcache(y, K)
-    xdt = DTvar(x, K)
-    ydt = DTvar(y, K)
-    x, y = dteqn.lambdify(x, y)  # attach intermediate variables
+def DTsolver(eqn: DTeqn, **args):
+    if 'x' not in args:
+        raise ValueError("No TimeVars input")
+    else:
+        x_: TimeVars = args['x']
+        K: int = args['K']
+        x = DTcache(x_, K)
+        xdt = DTvar(x)
+        if 'y' in args:
+            y_: TimeVars = args['y']
+            y = DTcache(y_, K)
+            x, y = eqn.lambdify(x, y)  # attach intermediate variables
+            ydt = DTvar(y)
+        else:
+            y = None
+            x, y = eqn.lambdify(x, y)  # attach intermediate variables
+            if y is not None:
+                ydt = DTvar(y)
 
+    dt = args['dt']
+    dt_array = np.array([[dt ** i] for i in range(K + 1)])
+    T = args['T']
+    i = 0
     t = 0
     done = False
 
-    while not done:
+    if y is None:
+        # ode and no intermediate variables
+        while not done:
+            i = i + 1
+            # Stretch the step if within 10% of T-t.
+            if dt >= np.abs(T - t):
+                dt = T - t
+                done = True
 
-        # Stretch the step if within 10% of T-t.
-        if dt >= np.abs(T - t):
-            dt = T - t
-            done = True
-        # recursive calculation
-        for k in range(0, K):
-            x[:, k + 1] = DTeqn.F(k)
-            y[:, k + 1] = DTeqn.Ainv @ DTeqn.G(k)  # Ainv matrix is cached
+            # recursive calculation
+            for k in range(0, K):
+                x[:, k + 1] = eqn.F(k)
 
-        # store the DTs
-        xdt[i] = x
-        ydt[i] = y
-        # update initial values and the coefficient matrix
-        dt_array = np.array([[dt ** i] for i in range(K + 1)])
-        x[:, 0] = x @ dt_array
-        y[:, 0] = y @ dt_array
-        DTeqn.update_Ainv(x, y)
+            # store the DTs
+            xdt[i] = x
+            # update initial values and the coefficient matrix
+            x[:, 0] = x @ dt_array
 
-        t = t + dt
+            t = t + dt
 
+        return xdt
+
+    else:
+        while not done:
+
+            # Stretch the step if within 10% of T-t.
+            if dt >= np.abs(T - t):
+                dt = T - t
+                done = True
+            A = eqn.A()
+            Ainv = inv(A)
+            # recursive calculation
+            for k in range(0, K):
+                x[k + 1, :] = eqn.F(k)
+                y[k + 1, :] = Ainv @ eqn.G(k + 1)  # Ainv matrix is cached
+
+            # store the DTs
+            xdt[i] = x[:, :]
+            ydt[i] = y[:, :]
+            # update initial values and the coefficient matrix
+
+            x[0, :] = (x.T @ dt_array).reshape(-1, )
+            y[0, :] = (y.T @ dt_array).reshape(-1, )
+
+            t = t + dt
+            i = i + 1
         return xdt, ydt

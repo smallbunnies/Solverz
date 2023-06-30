@@ -64,7 +64,7 @@ def DT_conv(*args, method='conv') -> np.ndarray:
     """
     if len(args) <= 2 and method == 'conv':  # if input two vectors, then use scalar multiplications and additions
         x = args[0].reshape((1, -1))
-        y = np.flip(args[0].reshape((-1, 1)), 0)
+        y = np.flip(args[1].reshape((-1, 1)), 0)
         return x @ y
 
     if len(args) > 2 or method == 'fft':  # if input more than three vectors, use fft and ifft
