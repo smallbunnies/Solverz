@@ -18,7 +18,7 @@ Assume that $g(x)=e^x+x-3$ and given initial value $x_0$ of variable $x$, the so
     .. math::
         x_{k+1} = x_k - \frac{g(x_k)}{g'(x_k)}\quad k=0,1,2,\cdots
 
-where $g'(x)$ denotes the derivative of $f$ w.r.t. $x$.
+where $g'(x)$ denotes the derivative of $g$ w.r.t. $x$.
 
 We, or more likely a computer, keeps increasing $k$ and deriving $x_k$ until for some $k$, $g(x_k)$ is within the prescribed tolerance, such as 1e-10.
 
