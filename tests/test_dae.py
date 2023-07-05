@@ -1,10 +1,10 @@
-from Solverz.numeqn.num_alg import AliasVar, ComputeParam, F, X, Y
+from Solverz.num.num_alg import AliasVar, ComputeParam, F, X, Y
 from Solverz.eqn import Ode, Eqn
 from Solverz.equations import DAE
 from Solverz.param import Param
 from Solverz.var import TimeVar
 from Solverz.variables import TimeVars
-from Solverz.solver import implicit_trapezoid
+from Solverz.solvers.daesolver import implicit_trapezoid
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -18,8 +18,8 @@ t0 = ComputeParam('t0')
 dt = ComputeParam('dt')
 
 scheme = X - X0 - dt / 2 * (F(X, Y, t) + F(X0, Y0, t0))
-f = Ode(name='f', e_str='-x**3+0.5*y**2', diff_var='x')
-g = Eqn(name='g', e_str='x**2+y**2-2')
+f = Ode(name='f', eqn='-x**3+0.5*y**2', diff_var='x')
+g = Eqn(name='g', eqn='x**2+y**2-2')
 dae = DAE([f, g])
 x = TimeVar('x')
 x.v0 = [1]
@@ -41,7 +41,7 @@ def test_discretize():
     Xk1 = AliasVar(X, 'k1')
     Yk1 = AliasVar(Y, 'k1')
     scheme1 = F(X + 1 / 2 * Xk1, Y + 1 / 3 * Yk1, t + dt * c)
-    f1 = Ode(name='F', e_str='(Pm-D*omega)', diff_var='omega')
+    f1 = Ode(name='F', eqn='(Pm-D*omega)', diff_var='omega')
 
     param0, eqn0 = f1.discretize(scheme1)
     assert 'omegak1' in param0.keys()

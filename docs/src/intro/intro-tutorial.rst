@@ -29,7 +29,7 @@ Here, with the aid of Solverz, you can solve the equation as easily as follows
 
    >>> from Solverz.eqn import Eqn
    >>> from Solverz.equations import AE
-   >>> E = Eqn(name='E', e_str='exp(x)+x-3')
+   >>> E = Eqn(name='E', eqn='exp(x)+x-3')
    >>> g = AE(name='g', eqn=E)
 
 2. Declare the unknown variables and give the initial values.
@@ -49,7 +49,7 @@ Here, with the aid of Solverz, you can solve the equation as easily as follows
 
 To explain how this happened, let's get an insight into the Newton method function, which is
 
-    .. literalinclude:: ../../../Solverz/solver.py
+    .. literalinclude:: ../../../Solverz/solvers/aesolver.py
         :language: python
         :pyobject: nr_method
 
@@ -92,18 +92,18 @@ It is easily implemented in Solverz as well:
        :format: doctest
        :include-source: True
 
-       >>> # Declare your equations using strings
        >>> from Solverz.eqn import Ode, Eqn
        >>> from Solverz.equations import DAE
        >>> from Solverz.var import TimeVar
        >>> from Solverz.variables import TimeVars
-       >>> from Solverz.solver import implicit_trapezoid
+       >>> from Solverz.solvers.daesolver import implicit_trapezoid
        >>> import matplotlib.pyplot as plt
        >>> import numpy as np
-       >>> f = Ode(name='f', e_str='-x**3+0.5*y**2', diff_var='x')
-       >>> g = Eqn(name='g', e_str='x**2+y**2-2')
+       >>> # Declare your equations using strings
+       >>> f = Ode(name='f', eqn='-x**3+0.5*y**2', diff_var='x')
+       >>> g = Eqn(name='g', eqn='x**2+y**2-2')
        >>> dae = DAE([f, g])
-       >>> #Declare the time-serise variables and give the initial values.
+       >>> # Declare the time-serise variables and give the initial values.
        >>> x = TimeVar('x')
        >>> x.v0 = [1]
        >>> y = TimeVar('y')
@@ -119,7 +119,7 @@ It is easily implemented in Solverz as well:
 
 Let's take a look at the inside of `implicit_trapezoid()` function
 
-    .. literalinclude:: ../../../Solverz/solver.py
+    .. literalinclude:: ../../../Solverz/solvers/daesolver.py
         :language: python
         :pyobject: implicit_trapezoid
 

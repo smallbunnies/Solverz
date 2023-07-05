@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Union, Callable
 
 from Solverz.equations import Equations
-from Solverz.solver import nr_method
+from Solverz.solvers.aesolver import nr_method
 from Solverz.var import Var
 from Solverz.variables import Vars
 

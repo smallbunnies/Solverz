@@ -4,12 +4,12 @@ from numpy import linalg
 
 from Solverz.eqn import Ode
 from Solverz.equations import DAE
-from Solverz.solver import ode45, nrtp45
+from Solverz.solvers.daesolver import ode45, nrtp45
 from Solverz.var import TimeVar
 from Solverz.variables import TimeVars
 
-vdp1_1 = Ode(name='vdp1_1', e_str='x2', diff_var='x1')
-vdp1_2 = Ode(name='vdp1_2', e_str='(1-x1**2)*x2-x1', diff_var='x2')
+vdp1_1 = Ode(name='vdp1_1', eqn='x2', diff_var='x1')
+vdp1_2 = Ode(name='vdp1_2', eqn='(1-x1**2)*x2-x1', diff_var='x2')
 vdp1 = DAE([vdp1_1, vdp1_2], name='vdp1')
 x1 = TimeVar('x1')
 x1.v0 = [2]

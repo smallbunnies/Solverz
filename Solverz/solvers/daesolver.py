@@ -1,66 +1,19 @@
 from __future__ import annotations
 
-import numpy as np
-import tqdm
-from numpy import abs, max, min, linalg, sum, sqrt
 from typing import Union, List
 
-from Solverz.numeqn.num_alg import AliasVar, ComputeParam, F, X, Y
-from Solverz.equations import AE, DAE
+import numpy as np
+import tqdm
+from numpy import abs, linalg
+
+from Solverz.equations import DAE
 from Solverz.event import Event
+from Solverz.num.num_alg import AliasVar, X, Y, ComputeParam, F
+from Solverz.solvers.aesolver import nr_method
 from Solverz.var import TimeVar
-from Solverz.variables import Vars, TimeVars
-
-
-def inv(mat: np.ndarray):
-    return linalg.inv(mat)
-
-
-def nr_method(eqn: AE,
-              y: Vars,
-              tol: float = 1e-8):
-    df = eqn.g(y)
-    while max(abs(df)) > tol:
-        y = y - inv(eqn.j(y)) @ df
-        df = eqn.g(y)
-    return y
-
-
-def continuous_nr(eqn: AE,
-                  y: Vars,
-                  tol: float = 1e-8):
-    def f(y) -> np.ndarray:
-        return -inv(eqn.j(y)) @ eqn.g(y)
-
-    dt = 1
-    atol = 1e-3
-    rtol = 1e-3
-    fac = 0.99
-    fac_max = 1.015
-    fac_min = 0.985
-    # atol and rtol can not be too small
-    ite = 0
-    while max(abs(eqn.g(y))) > tol:
-        ite = ite + 1
-        err = 2
-        while err > 1:
-            k1 = f(y)
-            k2 = f(y + 0.5 * dt * k1)
-            k3 = f(y + 0.5 * dt * k2)
-            k4 = f(y + dt * k3)
-            k5 = f(y + 5 / 32 * k1 + 7 / 32 * k2 + 13 / 32 * k3 - 1 / 32 * k4)
-            temp_y = y + dt * (k1 + 2 * k2 + 2 * k3 + k4) / 6
-
-            # step size control
-            err_ = (1 / 6 + 1 / 2) * k1 + (1 / 3 - 7 / 3) * k2 + (1 / 3 - 7 / 3) * k3 + (1 / 6 - 13 / 6) * k4 + (
-                    0 + 16 / 3) * k5
-            y_ = temp_y - err_
-            sc = atol + max(np.concatenate([abs(temp_y.array), abs(y_.array)], axis=1), axis=1) * rtol
-            err = sqrt(sum((err_ / sc) ** 2) / temp_y.total_size)
-            if err < 1:
-                y = temp_y
-            dt = dt * min([fac_max, max([fac_min, fac * (1 / err) ** (1 / 4)])])
-    return y
+from Solverz.variables import TimeVars
+from Solverz.sas.sas_num import DTcache, DTvar, DTeqn
+from Solverz.solvers.aesolver import inv
 
 
 def implicit_trapezoid(dae: DAE,
@@ -392,3 +345,78 @@ def ode15s(ode: DAE,
            T,
            event: Event = None):
     pass
+
+
+def DTsolver(eqn: DTeqn, **args):
+    if 'x' not in args:
+        raise ValueError("No TimeVars input")
+    else:
+        x_: TimeVars = args['x']
+        K: int = args['K']
+        x = DTcache(x_, K)
+        xdt = DTvar(x)
+        if 'y' in args:
+            y_: TimeVars = args['y']
+            y = DTcache(y_, K)
+            x, y = eqn.lambdify(x, y)  # attach intermediate variables
+            ydt = DTvar(y)
+        else:
+            y = None
+            x, y = eqn.lambdify(x, y)  # attach intermediate variables
+            if y is not None:
+                ydt = DTvar(y)
+
+    dt = args['dt']
+    dt_array = np.array([[dt ** i] for i in range(K + 1)])
+    T = args['T']
+    i = 0
+    t = 0
+    done = False
+
+    if y is None:
+        # ode and no intermediate variables
+        while not done:
+            i = i + 1
+            # Stretch the step if within 10% of T-t.
+            if dt >= np.abs(T - t):
+                dt = T - t
+                done = True
+
+            # recursive calculation
+            for k in range(0, K):
+                x[:, k + 1] = eqn.F(k)
+
+            # store the DTs
+            xdt[i] = x
+            # update initial values and the coefficient matrix
+            x[:, 0] = x @ dt_array
+
+            t = t + dt
+
+        return xdt
+
+    else:
+        while not done:
+
+            # Stretch the step if within 10% of T-t.
+            if dt >= np.abs(T - t):
+                dt = T - t
+                done = True
+            A = eqn.A()
+            Ainv = inv(A)
+            # recursive calculation
+            for k in range(0, K):
+                x[k + 1, :] = eqn.F(k)
+                y[k + 1, :] = Ainv @ eqn.G(k + 1)  # Ainv matrix is cached
+
+            # store the DTs
+            xdt[i] = x[:, :]
+            ydt[i] = y[:, :]
+            # update initial values and the coefficient matrix
+
+            x[0, :] = (x.T @ dt_array).reshape(-1, )
+            y[0, :] = (y.T @ dt_array).reshape(-1, )
+
+            t = t + dt
+            i = i + 1
+        return xdt, ydt

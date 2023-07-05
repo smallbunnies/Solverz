@@ -30,10 +30,7 @@ class VarsBasic:
         self.array = None
 
     def link_var_and_array(self):
-        self.array = np.zeros((self.total_size, 1))
-        for var_name in self.var_size.keys():
-            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0] = self.v[var_name]
-            self.v[var_name] = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0]
+        pass
 
     def __array__(self):
         return self.array
@@ -61,6 +58,12 @@ class Vars(VarsBasic):
                  var: Union[List[Var], Var]):
         super().__init__(var)
         self.link_var_and_array()
+
+    def link_var_and_array(self):
+        self.array = np.zeros((self.total_size, 1))
+        for var_name in self.var_size.keys():
+            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0] = self.v[var_name]
+            self.v[var_name] = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0]
 
     def __getitem__(self, item):
         return self.v[item]
