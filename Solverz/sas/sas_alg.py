@@ -565,7 +565,7 @@ class dConv_s(Function):
 
         return self
 
-    def _latex(self, printer):
+    def _latex(self, printer, **kwargs):
 
         arg_latex_str = []
         for arg in self.args:
@@ -576,7 +576,10 @@ class dConv_s(Function):
         _latex_str = arg_latex_str[0]
         for arg_latex_str_ in arg_latex_str[1:]:
             _latex_str = _latex_str + r'\otimes ' + arg_latex_str_
-        return _latex_str
+        if 'exp' in kwargs.keys():
+            return r'\left (' + _latex_str + r'\right )^{' + kwargs['exp'] + r'}'
+        else:
+            return _latex_str
 
 
 class dConv_v(Function):
@@ -659,7 +662,7 @@ class dConv_v(Function):
 
         return self
 
-    def _latex(self, printer):
+    def _latex(self, printer, **kwargs):
 
         arg_latex_str = []
         for arg in self.args:
@@ -670,7 +673,10 @@ class dConv_v(Function):
         _latex_str = arg_latex_str[0]
         for arg_latex_str_ in arg_latex_str[1:]:
             _latex_str = _latex_str + r'\overline{\otimes} ' + arg_latex_str_
-        return _latex_str
+        if 'exp' in kwargs.keys():
+            return r'\left (' + _latex_str + r'\right )^{' + kwargs['exp'] + r'}'
+        else:
+            return _latex_str
 
 
 class dLinspace(Function):
