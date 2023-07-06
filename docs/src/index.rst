@@ -3,7 +3,7 @@
 .. module:: solverz
 
 Welcome to Solverz's documentation!
-----------------------------------
+-----------------------------------
 
 .. A `PDF version of these docs <https://github.com/sympy/sympy/releases>`_ is also available.
 

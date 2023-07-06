@@ -78,6 +78,22 @@ class Mat_Mul(Function):
         else:
             return Mul(*self.args[0:argindex - 1])
 
+    def _latex(self, printer, **kwargs):
+
+        arg_latex_str = []
+        for arg in self.args:
+            if isinstance(arg, Symbol):
+                arg_latex_str = [*arg_latex_str, printer._print(arg)]
+            else:
+                arg_latex_str = [*arg_latex_str, r'\left (' + printer._print(arg) + r'\right )']
+        _latex_str = arg_latex_str[0]
+        for arg_latex_str_ in arg_latex_str[1:]:
+            _latex_str = _latex_str + arg_latex_str_
+        if 'exp' in kwargs.keys():
+            return r'\left (' + _latex_str + r'\right )^{' + kwargs['exp'] + r'}'
+        else:
+            return _latex_str
+
 
 @implements_sympify('Diagonal')
 class Diagonal(Function):
@@ -85,6 +101,19 @@ class Diagonal(Function):
 
     def fdiff(self, argindex=1):
         return 1  # the 1 also means Identity matrix here
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) > 1:
+            raise TypeError(f"Diagonal takes 1 positional arguments but {len(args)} were given!")
+
+    def _latex(self, printer, **kwargs):
+
+        _latex_str = r'\operatorname{diag}\left (' + printer._print(self.args[0]) + r'\right )'
+        if 'exp' in kwargs.keys():
+            return r'\left (' + _latex_str + r'\right )^{' + kwargs['exp'] + r'}'
+        else:
+            return _latex_str
 
 
 @implements_sympify('Abs')
