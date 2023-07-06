@@ -12,7 +12,7 @@ x.v0 = [0]
 f1 = Ode(name='f', eqn='-2*(x-cos(t))', diff_var='x')
 
 x = TimeVars(x, length=201)
-x = implicit_trapezoid(DAE(f1), x, 0.1, 20)
+x = implicit_trapezoid(DAE(f1), x, [0, 20], 0.1)
 
 plt.plot(np.arange(0, 20.1, 0.1), x.array.reshape((-1,)))
 

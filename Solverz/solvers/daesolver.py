@@ -18,8 +18,8 @@ from Solverz.solvers.aesolver import inv
 
 def implicit_trapezoid(dae: DAE,
                        x: TimeVars,
+                       tspan: Union[List, np.ndarray],
                        dt,
-                       T,
                        event: Event = None,
                        pbar=False):
     X0 = AliasVar(X, '0')
@@ -29,9 +29,12 @@ def implicit_trapezoid(dae: DAE,
     Dt = ComputeParam('Dt')
     scheme = X - X0 - Dt / 2 * (F(X, Y, t) + F(X0, Y0, t0))
     ae = dae.discretize(scheme)
-
+    
+    tspan = np.array(tspan)
+    T_initial = tspan[0]
+    T_end = tspan[-1]
     i = 0
-    t = 0
+    t = T_initial
 
     xi1 = x[0]  # x_{i+1}
     xi0 = xi1.derive_alias('0')  # x_{i}
@@ -39,7 +42,7 @@ def implicit_trapezoid(dae: DAE,
     if pbar:
         bar = tqdm.tqdm(total=T)
 
-    while abs(t - T) > dt / 10:
+    while abs(t - T_end) > abs(dt)/10:
         ae.update_param('Dt', dt)
 
         if event:

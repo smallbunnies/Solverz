@@ -79,7 +79,7 @@ e1.add_var('G', [10000, np.asarray(df['G'])[6, 6], np.asarray(df['G'])[6, 6]], (
 xy = implicit_trapezoid(m3b9,
                         TimeVars([delta, omega, Ux, Uy, Uxg, Uyg, Ixg, Iyg],
                                  length=int(T / dt) + 1),
-                        dt=dt, T=T, event=e1)
+                        tspan=[0, T], dt=dt, event=e1)
 
 
 def test_m3b9():
