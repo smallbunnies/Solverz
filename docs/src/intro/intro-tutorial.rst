@@ -42,7 +42,7 @@ Here, with the aid of Solverz, you can solve the equation as easily as follows
 
 3. Solve the equation with Solverz' built-in Newton Solver
 
-   >>> from Solverz.solver import nr_method
+   >>> from Solverz.solvers.aesolver import nr_method
    >>> x = nr_method(g, x)
    >>> x['x']
    array([0.79205997])

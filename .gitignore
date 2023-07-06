@@ -16,3 +16,7 @@ tests/test_julia.jl
 tests/test_sp.ipynb
 *.pyc
 /docs/build/
+Solverz/Lib/
+Solverz/pyvenv.cfg
+Solverz/Scripts
+Solverz/share
