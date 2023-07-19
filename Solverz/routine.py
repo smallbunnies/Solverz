@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import List, Union, Callable
 
-from Solverz.equations import Equations
+from Solverz.equation.equations import Equations
 from Solverz.solvers.aesolver import nr_method
-from Solverz.var import Var
-from Solverz.variables import Vars
+from Solverz.variable.var import Var
+from Solverz.variable.variables import Vars
 
 
 class Routine:

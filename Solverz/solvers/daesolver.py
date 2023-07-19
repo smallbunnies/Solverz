@@ -6,12 +6,12 @@ import numpy as np
 import tqdm
 from numpy import abs, linalg
 
-from Solverz.equations import DAE
+from Solverz.equation.equations import DAE
 from Solverz.event import Event
 from Solverz.num.num_alg import AliasVar, X, Y, ComputeParam, F
 from Solverz.solvers.aesolver import nr_method
-from Solverz.var import TimeVar
-from Solverz.variables import TimeVars
+from Solverz.variable.var import TimeVar
+from Solverz.variable.variables import TimeVars
 from Solverz.sas.sas_num import DTcache, DTvar, DTeqn
 from Solverz.solvers.aesolver import inv
 
@@ -40,7 +40,7 @@ def implicit_trapezoid(dae: DAE,
     xi0 = xi1.derive_alias('0')  # x_{i}
 
     if pbar:
-        bar = tqdm.tqdm(total=T)
+        bar = tqdm.tqdm(total=T_end)
 
     while abs(t - T_end) > abs(dt)/10:
         ae.update_param('Dt', dt)

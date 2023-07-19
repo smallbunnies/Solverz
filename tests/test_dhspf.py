@@ -2,13 +2,7 @@ import pandas as pd
 import numpy as np
 from functools import partial
 
-from Solverz.eqn import Eqn
-from Solverz.equations import AE
-from Solverz.solvers.aesolver import nr_method, continuous_nr
-from Solverz.variables import Vars
-from Solverz.var import Var
-from Solverz.param import Param
-
+from Solverz import Eqn, AE, nr_method, Var, Vars, Var_, Param, continuous_nr, Param_, Const_, idx, Abs
 
 # %% initialize variables and params
 sys_df = pd.read_excel('instances/4node3pipe.xlsx',
@@ -26,9 +20,6 @@ param_dict['Cp'] = Param(name='Cp', value=np.asarray(sys_df['Cp']).reshape(-1, )
 param_dict['L'] = Param(name='L', value=np.asarray(sys_df['L']).reshape(-1, ))
 param_dict['coeff_lambda'] = Param(name='coeff_lambda', value=np.asarray(sys_df['coeff_lambda']).reshape(-1, ))
 param_dict['Ta'] = Param(name='Ta', value=np.asarray(sys_df['Ta']).reshape(-1, ))
-param_dict['A_i'] = Param(name='A_i', value=np.asarray(sys_df['A_i']))
-param_dict['m_L'] = Param(name='m_L', value=np.asarray(sys_df['m_L']))
-param_dict['K'] = Param(name='K', value=np.asarray(sys_df['K']).reshape(-1, ))
 param_dict['V_rs'] = Param(name='V_rs', value=np.asarray(sys_df['V_rs']))
 
 
@@ -133,42 +124,29 @@ param_dict['phi_set'] = Param(name='phi_set', value=np.asarray(sys_df['phi_set']
 # %% md
 # Declare equations and parameters
 # %%
+mL = Const_('mL', dim=2, value=np.asarray(sys_df['m_L']))
+K = Const_(name='K', value=np.asarray(sys_df['K']))
+i = idx(name='i', value=[1, 2, 3])
+m = Var_(name='m', value=np.asarray(sys_df['var']['m']))
+mq = Var_(name='m', value=np.asarray(sys_df['var']['mq']))
 
-E1 = Eqn(name='E1', eqn='(Tins-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Touts', commutative=True)
-
-E2 = Eqn(name='E2', eqn='Tins+transpose(Vm)*Ts', commutative=False)
-
-E3 = Eqn(name='E3', eqn='(Tinr-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Toutr', commutative=True)
-
-E4 = Eqn(name='E4', eqn='Tinr-transpose(Vp)*Tr', commutative=False)
-
-E5 = Eqn(name='E5', eqn='V_rs*m+A_rs*mq', commutative=False)
-
-E6 = Eqn(name='E6', eqn='V_l*m-A_l*mq', commutative=False)
-
-E7 = Eqn(name='E7', eqn='V_i*m', commutative=False)
-
-E8 = Eqn(name='E8', eqn='m_L*Diagonal(K)*Mat_Mul(Diagonal(Abs(m)),m)', commutative=False)
-
-E9 = Eqn(name='E9', eqn='Diagonal(A_li*Ts)*V_p_li*Abs(m)-V_p_li*Diagonal(Touts)*Abs(m)', commutative=False)
-
-E10 = Eqn(name='E10', eqn='Diagonal(A_rsi*Tr)*V_m_rsi*Abs(m)-V_m_rsi*Diagonal(Toutr)*Abs(m)', commutative=False)
-
-E11 = Eqn(name='E11', eqn='A_rsl*phi-4182*Diagonal(A_rsl*mq)*(A_rsl*Ts-A_rsl*Tr)', commutative=False)
-
-E12 = Eqn(name='E12', eqn='A_rs*Ts-Ts_set', commutative=False)
-
-E13 = Eqn(name='E13', eqn='A_l*Tr-Tr_set', commutative=False)
-
-E14 = Eqn(name='E14', eqn='A_sl*phi-phi_set', commutative=False)
-
-E15 = Eqn(name='E15', eqn='A_i*phi', commutative=False)
-
-E16 = Eqn(name='E16', eqn='A_i*mq', commutative=False)
-
-E = AE(name='Pipe Equations',
-       eqn=[E1, E2, E3, E4, E5, E6, E7, E8, E9, E10, E11, E12, E13, E14, E15, E16],
-       param=list(param_dict.values()))
+E1 = Eqn(name='E1', eqn='(Tins-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Touts')
+E2 = Eqn(name='E2', eqn='Tins+transpose(Vm)*Ts')
+E3 = Eqn(name='E3', eqn='(Tinr-Ta)*exp(-coeff_lambda*L/(Cp*Abs(m)))+Ta-Toutr')
+E4 = Eqn(name='E4', eqn='Tinr-transpose(Vp)*Tr')
+E5 = Eqn(name='E5', eqn='V_rs*m+A_rs*mq')
+E6 = Eqn(name='E6', eqn='V_l*m-A_l*mq')
+E7 = Eqn(name='E7', eqn=m[i])
+E8 = Eqn(name='E8', eqn=mL * K * Abs(m) * m)
+E9 = Eqn(name='E9', eqn='Diagonal(A_li*Ts)*V_p_li*Abs(m)-V_p_li*Diagonal(Touts)*Abs(m)')
+E10 = Eqn(name='E10', eqn='Diagonal(A_rsi*Tr)*V_m_rsi*Abs(m)-V_m_rsi*Diagonal(Toutr)*Abs(m)')
+E11 = Eqn(name='E11', eqn='A_rsl*phi-4182*Diagonal(A_rsl*mq)*(A_rsl*Ts-A_rsl*Tr)')
+E12 = Eqn(name='E12', eqn='A_rs*Ts-Ts_set')
+E13 = Eqn(name='E13', eqn='A_l*Tr-Tr_set')
+E14 = Eqn(name='E14', eqn='A_sl*phi-phi_set')
+E15 = Eqn(name='E15', eqn='A_i*phi')
+E16 = Eqn(name='E16', eqn=mq[i])
+E = AE(name='Pipe Equations', eqn=[E1, E2, E3, E4, E5, E6, E7, E8, E9, E10, E11, E12, E13, E14, E15, E16])
 
 y0 = Vars(list(var_dict.values()))
 

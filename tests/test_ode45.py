@@ -2,11 +2,11 @@ import numpy as np
 import pandas as pd
 from numpy import linalg
 
-from Solverz.eqn import Ode
-from Solverz.equations import DAE
+from Solverz.equation.eqn import Ode
+from Solverz.equation.equations import DAE
 from Solverz.solvers.daesolver import ode45, nrtp45
-from Solverz.var import TimeVar
-from Solverz.variables import TimeVars
+from Solverz.variable.var import TimeVar
+from Solverz.variable.variables import TimeVars
 
 vdp1_1 = Ode(name='vdp1_1', eqn='x2', diff_var='x1')
 vdp1_2 = Ode(name='vdp1_2', eqn='(1-x1**2)*x2-x1', diff_var='x2')

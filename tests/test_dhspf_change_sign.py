@@ -2,11 +2,11 @@ import pandas as pd
 import numpy as np
 from functools import partial
 
-from Solverz.eqn import Eqn
-from Solverz.equations import AE
+from Solverz.equation.eqn import Eqn
+from Solverz.equation.equations import AE
 from Solverz.solvers.aesolver import nr_method
-from Solverz.variables import Vars
-from Solverz.var import Var
+from Solverz.variable.variables import Vars
+from Solverz.variable.var import Var
 from Solverz.param import Param
 
 

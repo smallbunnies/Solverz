@@ -1,9 +1,9 @@
 from Solverz.num.num_alg import AliasVar, ComputeParam, F, X, Y
-from Solverz.eqn import Ode, Eqn
-from Solverz.equations import DAE
+from Solverz.equation.eqn import Ode, Eqn
+from Solverz.equation.equations import DAE
 from Solverz.param import Param
-from Solverz.var import TimeVar
-from Solverz.variables import TimeVars
+from Solverz.variable.var import TimeVar
+from Solverz.variable.variables import TimeVars
 from Solverz.solvers.daesolver import implicit_trapezoid
 import matplotlib.pyplot as plt
 import pandas as pd

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from typing import Union, Dict, List, Callable
+from typing import Union, Dict, List
 import numpy as np
 import sympy as sp
 
 from Solverz.num.num_interface import numerical_interface
-from Solverz.eqn import Eqn
-from Solverz.equations import DAE
+from Solverz.equation.eqn import Eqn
+from Solverz.equation.equations import DAE
 from Solverz.param import Param
 from Solverz.sas.sas_alg import dtify, k_eqn, DT
-from Solverz.var import Var, TimeVar
-from Solverz.variables import VarsBasic, Vars, TimeVars
+from Solverz.variable.var import Var, TimeVar
+from Solverz.variable.variables import Vars, TimeVars
 
 
 class DTeqn(DAE):
@@ -99,7 +99,7 @@ class DTeqn(DAE):
             eqn_size = self.F(eqn_name, 0).shape[0]
             self.a[eqn_name] = [temp, temp + eqn_size - 1]
             temp = temp + eqn_size
-            self.size[eqn_name] = eqn_size
+            self.esize[eqn_name] = eqn_size
 
         self.state_num = temp
 
@@ -107,7 +107,7 @@ class DTeqn(DAE):
             eqn_size = self.G(eqn_name, 0).shape[0]
             self.a[eqn_name] = [temp, temp + eqn_size - 1]
             temp = temp + eqn_size
-            self.size[eqn_name] = eqn_size
+            self.esize[eqn_name] = eqn_size
 
         self.algebra_num = temp - self.state_num
 

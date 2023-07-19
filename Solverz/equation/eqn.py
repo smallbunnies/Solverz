@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from typing import Union, List, Dict, Callable
+from typing import Union, List, Dict, Callable, Tuple
 
 import numpy as np
-from sympy import sympify, lambdify, Symbol, preorder_traversal, Basic, Expr, latex, Derivative, symbols
+import sympy
+from sympy import Symbol, preorder_traversal, Basic, Expr, latex, Derivative
+from sympy import lambdify as splambdify
 from sympy.abc import t
 
-from Solverz.num.num_alg import Sympify_Mapping, F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
-    traverse_for_mul
+from Solverz.num.num_alg import F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
+    pre_lambdify
+from Solverz.num.num_alg import Param_, Var_, IdxVar, idx, IdxParam, Const_, IdxConst
 from Solverz.num.num_interface import numerical_interface
 from Solverz.param import Param
 
@@ -19,47 +21,80 @@ class Eqn:
     """
 
     def __init__(self,
-                 name: Union[str],
-                 eqn: Union[str, Expr],
-                 commutative: Union[bool] = True):
+                 name: str,
+                 eqn: Expr):
 
         self.name = name
         self.LHS = 0
-        if isinstance(eqn, str):
-            self.e_str = eqn
-            self.commutative = commutative
-            self.RHS = sympify(self.e_str, locals=Sympify_Mapping)
+        self.RHS = eqn
+        self.SYMBOLS: Dict[str, Symbol] = self.obtain_symbols()
 
-            # commutative=False and real=True are inconsistent assumptions
-            if self.commutative:
-                temp_sympify_mapping = dict()
-                for symbol in self.RHS.free_symbols:
-                    temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
-                    self.RHS = sympify(self.e_str, temp_sympify_mapping)
-            else:
-                temp_sympify_mapping = deepcopy(Sympify_Mapping)
-                for symbol in self.RHS.free_symbols:
-                    temp_sympify_mapping[symbol.name] = new_symbols(symbol.name, commutative=self.commutative)
-                # traverse the Expr tree and replace '*' by Mat_Mul
-                self.RHS = traverse_for_mul(sympify(self.e_str, temp_sympify_mapping))
+        # if the eqn has no Param_ with dim==2, then re-sympify all the Var_ as commutative
+        self.commutative = True
+        for symbol_ in self.SYMBOLS.values():
+            if isinstance(symbol_, (Param_, Const_)):
+                if symbol_.dim > 1:
+                    self.commutative = False
+        if self.commutative:
+            self.commutatify()
+
+        self.NUM_EQN: Callable = self.lambdify()
+        self.derivatives: Dict[str, EqnDiff] = dict()
+
+    def obtain_symbols(self) -> Dict[str, Symbol]:
+        temp_dict = dict()
+        for symbol_ in list(self.RHS.free_symbols):
+            if isinstance(symbol_, (Var_, Param_, Const_)):
+                temp_dict[symbol_.name] = symbol_
+            elif isinstance(symbol_, (IdxVar, IdxParam, IdxConst)):
+                temp_dict[symbol_.symbol.name] = symbol_.symbol
+                if isinstance(symbol_.idx, idx):
+                    temp_dict[symbol_.idx.name] = symbol_.idx
+                elif isinstance(symbol_.idx, tuple):
+                    for idx_ in symbol_.idx:
+                        if isinstance(idx_, idx):
+                            temp_dict[idx_.name] = idx_
+
+        return temp_dict
+
+    def commutatify(self):
+        # pass
+        for symbol_ in self.SYMBOLS:
+            if isinstance(symbol_, Var_):
+                self.RHS = self.subs(symbol_, Var_(symbol_.name, symbol_.value, commutative=True))
+            elif isinstance(symbol_, Param_):
+                self.RHS = self.subs(symbol_, Param_(symbol_.name, symbol_.value, dim=symbol_.dim, commutative=True))
+            elif isinstance(symbol_, Const_):
+                self.RHS = self.subs(symbol_, Const_(symbol_.name, symbol_.value, dim=symbol_.dim, commutative=True))
+        self.SYMBOLS = self.obtain_symbols()
+
+    def lambdify(self) -> Callable:
+        if not self.commutative:
+            temp = pre_lambdify(self.RHS)
         else:
-            self.e_str = eqn.__str__()
-            self.RHS = eqn
-            self.commutative = eqn.is_commutative
-
-        self.SYMBOLS: List[Symbol] = list(self.RHS.free_symbols)
-        self.NUM_EQN: Callable = lambdify(self.SYMBOLS, self.RHS, [numerical_interface, 'numpy'])
+            temp = self.RHS
+        return splambdify(self.SYMBOLS.values(), temp, [numerical_interface, 'numpy'])
 
     def eval(self, *args: Union[np.ndarray]) -> np.ndarray:
         return self.NUM_EQN(*args)
 
-    def diff(self, var: str):
+    def derive_derivative(self):
         """"""
-        pass
+        for symbol_ in list(self.RHS.free_symbols):
+            if isinstance(symbol_, (IdxVar, IdxParam, IdxConst)):  # if the equation contains Indexed variables
+                idx_ = symbol_.idx
+                self.derivatives[symbol_.name] = EqnDiff(name=f'Diff {self.name} w.r.t. {symbol_.name}',
+                                                         eqn=self.RHS.diff(symbol_),
+                                                         diff_var=symbol_,
+                                                         var_idx=idx_.name if isinstance(idx_, idx) else idx_)
+            elif isinstance(symbol_, (Var_, Param_, Const_)):
+                self.derivatives[symbol_.name] = EqnDiff(name=f'Diff {self.name} w.r.t. {symbol_.name}',
+                                                         eqn=self.RHS.diff(symbol_),
+                                                         diff_var=symbol_)
 
     @property
     def expr(self):
-        return self.LHS-self.RHS
+        return self.LHS - self.RHS
 
     def subs(self, *args, **kwargs):
         return self.RHS.subs(*args, **kwargs)
@@ -69,10 +104,23 @@ class Eqn:
 
     def _repr_latex_(self):
         """
-        So that jupyter notebook can display latex equation of k_eqn object.
+        So that jupyter notebook can display latex equation of Eqn object.
         :return:
         """
         return r"$\displaystyle %s$" % (latex(self.LHS) + r"=" + latex(self.RHS))
+
+
+class EqnDiff(Eqn):
+    """
+    To store the derivatives of equations W.R.T. variables
+    """
+
+    def __init__(self, name: str, eqn: Expr, diff_var: Symbol, var_idx=None):
+        super().__init__(name, eqn)
+        self.diff_var = diff_var
+        self.diff_var_name = diff_var.symbol.name if isinstance(diff_var, IdxVar) else diff_var.name
+        self.var_idx: str = var_idx  # df/dPi[i] then var_idx=i
+        self.LHS = Derivative(sympy.Function('g'), diff_var)
 
 
 class Ode(Eqn):
@@ -80,10 +128,10 @@ class Ode(Eqn):
     The class of ordinary differential equations
     """
 
-    def __init__(self, name: Union[str], eqn: Union[str], diff_var: str, commutative: Union[bool] = True):
-        super().__init__(name, eqn, commutative)
+    def __init__(self, name: str, eqn: Expr, diff_var: Var_):
+        super().__init__(name, eqn)
         self.diff_var = diff_var
-        self.LHS = Derivative(symbols(diff_var, commutative=self.commutative), t)
+        self.LHS = Derivative(diff_var, t)
 
     def discretize(self,
                    scheme: Basic,

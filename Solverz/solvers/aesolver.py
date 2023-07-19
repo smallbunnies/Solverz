@@ -3,9 +3,9 @@ from __future__ import annotations
 import numpy as np
 from numpy import abs, max, min, sum, sqrt
 
-from Solverz.equations import AE
+from Solverz.equation.equations import AE
 from Solverz.num.num_interface import inv
-from Solverz.variables import Vars
+from Solverz.variable.variables import Vars
 
 
 def nr_method(eqn: AE,

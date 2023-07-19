@@ -5,7 +5,15 @@ from typing import Union, List, Dict
 
 import numpy as np
 
-from Solverz.var import Var, TimeVar
+from Solverz.variable.var import Var, TimeVar
+from Solverz.num.num_alg import Var_
+from Solverz.auxiliary import Address
+
+
+def as_Vars(var_s: Union[Var_, List[Var_]]):
+    if isinstance(var_s, Var_):
+        var_s = [var_s]
+    return Vars([Var(var_.name, value=var_.value) for var_ in var_s])
 
 
 class VarsBasic:
@@ -16,16 +24,16 @@ class VarsBasic:
         if isinstance(var, Var):
             var = [var]
 
-        self.__v: Dict[str, np.ndarray] = {}
-        self.__var_size: Dict[str, int] = {}
-        self.__a: Dict[str, List[int]] = {}
+        self.v: Dict[str, np.ndarray] = {}
+        self.var_size: Dict[str, int] = {}
+        self.a: Address = Address()
 
         temp = 0
         for var_ in var:
-            self.__v[var_.name] = var_.v
-            self.__var_size[var_.name] = var_.v.shape[0]
-            self.__a[var_.name] = [temp, temp + self.__var_size[var_.name] - 1]
-            temp = temp + self.__var_size[var_.name]
+            self.v[var_.name] = var_.v
+            self.var_size[var_.name] = var_.v.shape[0]
+            self.a.add(var_.name, temp, temp + self.var_size[var_.name] - 1)
+            temp = temp + self.var_size[var_.name]
 
         self.array = None
 
@@ -36,20 +44,8 @@ class VarsBasic:
         return self.array
 
     @property
-    def v(self):
-        return self.__v
-
-    @property
-    def var_size(self):
-        return self.__var_size
-
-    @property
-    def a(self):
-        return self.__a
-
-    @property
     def total_size(self):
-        return np.sum(list(self.__var_size.values()))
+        return np.sum(list(self.var_size.values()))
 
 
 class Vars(VarsBasic):
@@ -62,8 +58,8 @@ class Vars(VarsBasic):
     def link_var_and_array(self):
         self.array = np.zeros((self.total_size, 1))
         for var_name in self.var_size.keys():
-            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0] = self.v[var_name]
-            self.v[var_name] = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0]
+            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0:] = self.v[var_name]
+            self.v[var_name] = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0:]
 
     def __getitem__(self, item):
         return self.v[item]
@@ -247,7 +243,9 @@ class TimeVars(VarsBasic):
         elif isinstance(item, slice):
             time_var = []
             for name in self.var_size.keys():
-                time_var = [*time_var, TimeVar(name=name, value=self.v[name][:, 0:item.stop].reshape((-1, item.stop - item.start)), length=item.stop - item.start)]
+                time_var = [*time_var,
+                            TimeVar(name=name, value=self.v[name][:, 0:item.stop].reshape((-1, item.stop - item.start)),
+                                    length=item.stop - item.start)]
             return TimeVars(time_var, length=item.stop - item.start)
         else:
             # not implemented

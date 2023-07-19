@@ -18,16 +18,9 @@ def implements_nfunc(nfunc_name: str):
     return decorator
 
 
-@implements_nfunc('Mat_Mul')
-def matmul(*args: np.ndarray) -> np.ndarray:
-    """
-    np.multiply supports only two arguments
-    So a new function is presented to generate multiplication of np.ndarray
-    :PARAM args: np.ndarray
-    :return:
-    """
-
-    return reduce(np.dot, args)
+@implements_nfunc('Sign')
+def _sign(arg):
+    return np.sign(arg)
 
 
 @implements_nfunc('Diagonal')

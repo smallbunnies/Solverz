@@ -1,13 +1,13 @@
 import numpy as np
 import pandas as pd
 
-from Solverz.eqn import Ode, Eqn
-from Solverz.equations import DAE
+from Solverz.equation.eqn import Ode, Eqn
+from Solverz.equation.equations import DAE
 from Solverz.event import Event
 from Solverz.param import Param
 from Solverz.solvers.daesolver import implicit_trapezoid
-from Solverz.var import TimeVar
-from Solverz.variables import TimeVars
+from Solverz.variable.var import TimeVar
+from Solverz.variable.variables import TimeVars
 
 rotator = Ode(name='rotator speed', eqn='(Pm-(Uxg*Ixg+Uyg*Iyg+(Ixg**2+Iyg**2)*ra)-D*(omega-1))/Tj', diff_var='omega')
 delta = Ode(name='delta', eqn='(omega-1)*omega_b', diff_var='delta')

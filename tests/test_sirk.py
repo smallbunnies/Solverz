@@ -1,13 +1,13 @@
 import numpy as np
 import pandas as pd
 
-from Solverz.eqn import Ode, Eqn
-from Solverz.equations import DAE
+from Solverz.equation.eqn import Ode, Eqn
+from Solverz.equation.equations import DAE
 from Solverz.event import Event
 from Solverz.param import Param
 from Solverz.solvers.daesolver import sirk_ode, sirk_dae
-from Solverz.var import TimeVar
-from Solverz.variables import TimeVars
+from Solverz.variable.var import TimeVar
+from Solverz.variable.variables import TimeVars
 
 df = pd.read_excel('instances/test_m3b9.xlsx',
                    sheet_name=None,
