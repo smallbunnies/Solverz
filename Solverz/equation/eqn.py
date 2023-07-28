@@ -9,9 +9,10 @@ from sympy import lambdify as splambdify
 from sympy.abc import t
 
 from Solverz.num.num_alg import F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
-    pre_lambdify
+    pre_lambdify, Mat_Mul
 from Solverz.num.num_alg import Param_, Var_, IdxVar, idx, IdxParam, Const_, IdxConst
 from Solverz.num.num_interface import numerical_interface
+from Solverz.num.matrix_calculus import MixedEquationDiff
 from Solverz.param import Param
 
 
@@ -29,14 +30,11 @@ class Eqn:
         self.RHS = eqn
         self.SYMBOLS: Dict[str, Symbol] = self.obtain_symbols()
 
-        # if the eqn has no Param_ with dim==2, then re-sympify all the Var_ as commutative
-        self.commutative = True
-        for symbol_ in self.SYMBOLS.values():
-            if isinstance(symbol_, (Param_, Const_)):
-                if symbol_.dim > 1:
-                    self.commutative = False
-        if self.commutative:
-            self.commutatify()
+        # if the eqn has Mat_Mul, then label it as mixed-matrix-vector equation
+        if self.expr.has(Mat_Mul):
+            self.mixed_matrix_vector = True
+        else:
+            self.mixed_matrix_vector = False
 
         self.NUM_EQN: Callable = self.lambdify()
         self.derivatives: Dict[str, EqnDiff] = dict()
@@ -48,32 +46,17 @@ class Eqn:
                 temp_dict[symbol_.name] = symbol_
             elif isinstance(symbol_, (IdxVar, IdxParam, IdxConst)):
                 temp_dict[symbol_.symbol.name] = symbol_.symbol
-                if isinstance(symbol_.idx, idx):
-                    temp_dict[symbol_.idx.name] = symbol_.idx
-                elif isinstance(symbol_.idx, tuple):
-                    for idx_ in symbol_.idx:
+                if isinstance(symbol_.index, idx):
+                    temp_dict[symbol_.index.name] = symbol_.index
+                elif isinstance(symbol_.index, tuple):
+                    for idx_ in symbol_.index:
                         if isinstance(idx_, idx):
                             temp_dict[idx_.name] = idx_
 
         return temp_dict
 
-    def commutatify(self):
-        # pass
-        for symbol_ in self.SYMBOLS:
-            if isinstance(symbol_, Var_):
-                self.RHS = self.subs(symbol_, Var_(symbol_.name, symbol_.value, commutative=True))
-            elif isinstance(symbol_, Param_):
-                self.RHS = self.subs(symbol_, Param_(symbol_.name, symbol_.value, dim=symbol_.dim, commutative=True))
-            elif isinstance(symbol_, Const_):
-                self.RHS = self.subs(symbol_, Const_(symbol_.name, symbol_.value, dim=symbol_.dim, commutative=True))
-        self.SYMBOLS = self.obtain_symbols()
-
     def lambdify(self) -> Callable:
-        if not self.commutative:
-            temp = pre_lambdify(self.RHS)
-        else:
-            temp = self.RHS
-        return splambdify(self.SYMBOLS.values(), temp, [numerical_interface, 'numpy'])
+        return splambdify(self.SYMBOLS.values(), pre_lambdify(self.RHS), [numerical_interface, 'numpy'])
 
     def eval(self, *args: Union[np.ndarray]) -> np.ndarray:
         return self.NUM_EQN(*args)
@@ -81,15 +64,24 @@ class Eqn:
     def derive_derivative(self):
         """"""
         for symbol_ in list(self.RHS.free_symbols):
-            if isinstance(symbol_, (IdxVar, IdxParam, IdxConst)):  # if the equation contains Indexed variables
-                idx_ = symbol_.idx
+            # differentiate only to variables
+            if isinstance(symbol_, IdxVar):  # if the equation contains Indexed variables
+                idx_ = symbol_.index
+                if self.mixed_matrix_vector:
+                    diff = MixedEquationDiff(self.RHS, symbol_)
+                else:
+                    diff = self.RHS.diff(symbol_)
                 self.derivatives[symbol_.name] = EqnDiff(name=f'Diff {self.name} w.r.t. {symbol_.name}',
-                                                         eqn=self.RHS.diff(symbol_),
+                                                         eqn=diff,
                                                          diff_var=symbol_,
                                                          var_idx=idx_.name if isinstance(idx_, idx) else idx_)
-            elif isinstance(symbol_, (Var_, Param_, Const_)):
+            elif isinstance(symbol_, Var_):
+                if self.mixed_matrix_vector:
+                    diff = MixedEquationDiff(self.RHS, symbol_)
+                else:
+                    diff = self.RHS.diff(symbol_)
                 self.derivatives[symbol_.name] = EqnDiff(name=f'Diff {self.name} w.r.t. {symbol_.name}',
-                                                         eqn=self.RHS.diff(symbol_),
+                                                         eqn=diff,
                                                          diff_var=symbol_)
 
     @property
@@ -100,7 +92,8 @@ class Eqn:
         return self.RHS.subs(*args, **kwargs)
 
     def __repr__(self):
-        return self.LHS.__repr__() + r"=" + self.RHS.__repr__()
+        # sympy objects' printing prefers __str__() to __repr__()
+        return self.LHS.__str__() + r"=" + self.RHS.__str__()
 
     def _repr_latex_(self):
         """

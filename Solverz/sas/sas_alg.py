@@ -370,7 +370,7 @@ class dCos(Function):
     @classmethod
     def eval(cls, k, *args):
         if len(args) > 1:
-            raise ValueError(f'Sin supports one operand while {len(args)} input!')
+            raise TypeError(f'Sin supports one operand while {len(args)} input!')
         if isinstance(k, (Expr, Index)) and not isinstance(k, (Integer, Slice)):
             if any([not isinstance(symbol, Index) for symbol in k.free_symbols]):
                 raise TypeError(f"Non-Index symbol found in Index Expression {k}!")

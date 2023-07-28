@@ -40,7 +40,7 @@ class Param:
         else:
             self.__v = np.array(value, dtype=self.dtype)
         if self.v.ndim < 2 and self.dtype == int:
-            # idx param has only one dim
+            # index param has only one dim
             self.__v = self.v.reshape((-1, ))
         elif self.v.ndim == 2:
             # matrix-like param

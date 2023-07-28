@@ -1,8 +1,10 @@
-from sympy import Symbol, Function, Mul, sign, Expr, symbols, Number
+from sympy import Symbol, Function, Mul, Expr, symbols, Number, S, Add
+from sympy import exp as spexp
+from sympy import Abs as spabs
 from sympy.core.function import ArgumentIndexError
-from sympy import Abs as spAbs
 import numpy as np
 from typing import Union
+from functools import reduce
 
 Sympify_Mapping = {}
 
@@ -25,14 +27,16 @@ class idx(Symbol):
         obj.value = value
         return obj
 
+    def __array__(self):
+        return self.value
+
 
 class Var_(Symbol):
-    # To retain the sequence of input variables, Var_ is assumed not to be commutative by default.
 
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
 
-    def __new__(cls, name, value=None, commutative=False):
-        obj = Symbol.__new__(cls, name, commutative=commutative)
+    def __new__(cls, name, value=None):
+        obj = Symbol.__new__(cls, name)
         obj.name = name
         if value is not None:
             obj.value = np.array(value).reshape((-1, 1))
@@ -52,17 +56,17 @@ class IdxVar(Symbol):
             raise TypeError(f"Unsupported idx type {type(index)}")
         obj = Symbol.__new__(cls, f'{symbol.name}[{index}]')
         obj.symbol = symbol
-        obj.idx = index
+        obj.index = index
         obj.symbol_name = symbol.name
         obj.name = f'{symbol.name}[{index}]'
         return obj
 
     def _numpycode(self, printer, **kwargs):
-        if isinstance(self.idx, idx):
-            temp = self.symbol.name + '[ix_({i})]'.format(i=printer._print(self.idx))
+        if isinstance(self.index, idx):
+            temp = self.symbol.name + '[ix_({i})]'.format(i=printer._print(self.index))
             return temp
         else:
-            return self.symbol.name + '[{i}]'.format(i=printer._print(self.idx))
+            return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
@@ -72,12 +76,11 @@ class IdxVar(Symbol):
 
 
 class Param_(Symbol):
-    # To retain the sequence of input variables, Var_ is assumed not to be commutative by default.
 
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
 
-    def __new__(cls, name, value=None, dim=1, commutative=False, trigger=False):
-        obj = Symbol.__new__(cls, name, commutative=False)
+    def __new__(cls, name, value=None, dim=1, trigger=False):
+        obj = Symbol.__new__(cls, name)
         obj.name = name
         if value is not None:
             temp_value = np.array(value)
@@ -126,18 +129,18 @@ class IdxConst(Symbol):
 
         obj = Symbol.__new__(cls, name)
         obj.symbol = symbol
-        obj.idx = index
+        obj.index = index
         obj.symbol_name = symbol.name
         obj.dim = dim
 
         return obj
 
     def _numpycode(self, printer, **kwargs):
-        if isinstance(self.idx, idx):
-            temp = self.symbol.name + '[ix_({i})]'.format(i=printer._print(self.idx))
+        if isinstance(self.index, idx):
+            temp = self.symbol.name + '[ix_({i})]'.format(i=printer._print(self.index))
             return temp
         else:
-            return self.symbol.name + '[{i}]'.format(i=printer._print(self.idx))
+            return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
@@ -147,12 +150,11 @@ class IdxConst(Symbol):
 
 
 class Const_(Symbol):
-    # To retain the sequence of input variables, Var_ is assumed not to be commutative by default.
 
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
 
-    def __new__(cls, name, value=None, dim=1, commutative=False):
-        obj = Symbol.__new__(cls, name, commutative=False)
+    def __new__(cls, name, value=None, dim=1):
+        obj = Symbol.__new__(cls, name)
         obj.name = name
         if value is not None:
             temp_value = np.array(value)
@@ -295,26 +297,57 @@ def new_symbols(names, commutative: bool):
         return symbols(names, commutative=commutative)
 
 
-def implements_sympify(symbolic_func: str):
-    """Register an __array_function__ implementation for PSArray objects."""
-
-    def decorator(func):
-        Sympify_Mapping[symbolic_func] = func
-        return func
-
-    return decorator
-
-
-@implements_sympify('Mat_Mul')
-class Mat_Mul(Function):
+class MatrixFunction(Function):
+    """
+    The basic Function class of matrix computation
+    """
     is_commutative = False
+    dim = 2
 
-    def fdiff(self, argindex=1):
 
-        if isinstance(self.args[argindex - 1], Diagonal):
-            return Mul(*self.args[0:argindex - 1], Diagonal(Mul(*self.args[argindex:])))
-        else:
-            return Mul(*self.args[0:argindex - 1])
+class transpose(MatrixFunction):
+    @classmethod
+    def eval(cls, *args):
+        if len(args) > 1:
+            raise TypeError(f'Supports one operand while {len(args)} input!')
+
+
+class Mat_Mul(MatrixFunction):
+
+    @classmethod
+    def eval(cls, *args):
+        for arg in args:
+            if arg == S.Zero:
+                return 0
+
+    def __repr__(self):
+        return self.__str__()
+
+    def _eval_derivative(self, s):
+        # this is a mimic of sp.Mul and assumes that the equation declared satisfies the matrix computation rules
+        terms = []
+        for i in range(len(self.args)):
+            args = list(self.args)
+            # if i < len(args) - 1:
+            #     args[-1] = Diag(args[-1])
+            # Based on above assumption, the last element in Mat_Mul is always vector
+            d = args[i].diff(s)
+            if d:
+                if isinstance(args[i], Diag) and i < len(args) - 1 and not isinstance(d, Number):
+                    # Which means the original arg needs Diag() to expand itself as a matrix
+                    # The last arg does not need Diag()
+                    d = Diag(d)
+                    # for arg in args[i+1:]:
+
+                elif i == len(args) - 1 and not isinstance(d, Number):
+                    d = Diag(d)
+                else:
+                    d = d
+
+                #  * is replaced by @ in EqnDiff.__init__()
+                terms.append(reduce(lambda x, y: x * y, (args[:i] + [d] + args[i + 1:]), S.One))
+
+        return Add.fromiter(terms)
 
     def _latex(self, printer, **kwargs):
 
@@ -332,12 +365,24 @@ class Mat_Mul(Function):
         else:
             return _latex_str
 
+    def _sympystr(self, printer, **kwargs):
+        temp = printer._print(self.args[0])
+        for arg in self.args[1:]:
+            if isinstance(arg, (Symbol, Function)):
+                temp += '@{operand}'.format(operand=printer._print(arg))
+            else:
+                temp += '@({operand})'.format(operand=printer._print(arg))
+        return r'(' + temp + r')'
+
     def _numpycode(self, printer, **kwargs):
 
         temp = printer._print(self.args[0])
         for arg in self.args[1:]:
-            temp += '@{operand}'.format(operand=printer._print(arg))
-            return temp
+            if isinstance(arg, (Symbol, Function)):
+                temp += '@{operand}'.format(operand=printer._print(arg))
+            else:
+                temp += '@({operand})'.format(operand=printer._print(arg))
+        return r'(' + temp + r')'
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
@@ -346,14 +391,7 @@ class Mat_Mul(Function):
         return self._numpycode(printer, **kwargs)
 
 
-@implements_sympify('Abs')
-class Abs(spAbs):
-    pass
-
-
-@implements_sympify('Diagonal')
-class Diagonal(Function):
-    is_commutative = False
+class Diag(MatrixFunction):
 
     def fdiff(self, argindex=1):
         return 1  # the 1 also means Identity matrix here
@@ -363,6 +401,17 @@ class Diagonal(Function):
         if len(args) > 1:
             raise TypeError(f"Diagonal takes 1 positional arguments but {len(args)} were given!")
 
+        if args[0] == S.Zero:
+            return 0
+        elif isinstance(args[0], Number):
+            return args[0]
+
+    def _sympystr(self, printer, **kwargs):
+
+        temp = 'diag({operand})'.format(operand=printer._print(self.args[0]))
+
+        return temp
+
     def _latex(self, printer, **kwargs):
 
         _latex_str = r'\operatorname{diag}\left (' + printer._print(self.args[0]) + r'\right )'
@@ -371,39 +420,88 @@ class Diagonal(Function):
         else:
             return _latex_str
 
+    def _numpycode(self, printer, **kwargs):
+
+        temp = printer._print(self.args[0])
+        return r'diagflat(' + temp + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
 
 
-@implements_sympify('sign')
-class sign(Function):
-    is_commutative = False
+class ElementwiseFunction(Function):
+
+    pass
+
+
+class Abs(Function):
+
+    def fdiff(self, argindex=1):
+        """
+        Get the first derivative of the argument to Abs().
+
+        """
+        if argindex == 1:
+            return sign(self.args[0])
+        else:
+            raise ArgumentIndexError(self, argindex)
+
+
+class exp(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) > 1:
+            raise TypeError(f'Supports one operand while {len(args)} input!')
+
+    def fdiff(self, argindex=1):
+        return spexp(*self.args)
+
+
+class sign(ElementwiseFunction):
+    pass
 
 
 def traverse_for_mul(node: Expr):
     """
-    traverse the expression tree and replace sympy.Mul, if the args of which have matrices, with Mat_Mul
-    :param node:
-    :return:
+    traverse the expression tree and replace sympy.Mul with Mat_Mul
+
+    .. note::
+
+        This is deprecated because now we should declare matrix/vector operation explicitly.
+
+    This is
+
+    Examples
+    ========
+
+    >>> from Solverz import Var_, Param_
+    >>> from Solverz.num.num_alg import traverse_for_mul
+    >>> f = Var_('f')
+    >>> b = Var_('b')
+    >>> A = Param_('A', dim=2)
+    >>> B = Param_('B', dim=2)
+    >>> traverse_for_mul(-A*f)
+    -(A@f)
+    >>> traverse_for_mul(2*A*B*b)
+    2*(A@B@b)
     """
 
-    if isinstance(node, Symbol) or isinstance(node, Number):
+    if isinstance(node, (Symbol, Number, Function)):
         return node
     elif isinstance(node, Mul):
-        arg_len = len(node.args)
-        args = node.args
-        for i in range(arg_len):
-            argi = args[i]
-            if isinstance(argi, (Param_, Const_, IdxConst, IdxParam)):
-                if argi.dim > 1:  # matrix symbol
-                    # If A is a matrix and b is a symbol, then A * b should be Mat_Mul(A, b)
-                    if i == arg_len - 1:  # argi is the last operand
-                        return Mul(*args)
-                    elif i == 0:  # argi is the first operand
-                        return Mat_Mul(argi, traverse_for_mul(Mul(*node.args[1:])))
-                    else:
-                        args0 = node.args[0:i]
-                        args1 = node.args[i + 1:]
-                        return Mul(*args0) * Mat_Mul(argi, traverse_for_mul(Mul(*args1)))
-        return Mul(*args)
+        args = []
+        for arg in node.args[1:]:
+            args = [*args, traverse_for_mul(arg)]
+        if isinstance(node.args[0], Number):
+            return node.args[0] * Mat_Mul(*args)
+        elif node.args[0] is S.NegativeOne:
+            return -Mat_Mul(*args)
+        else:
+            return Mat_Mul(node.args[0], *args)
     else:
         args = []
         for arg in node.args:
@@ -413,20 +511,6 @@ def traverse_for_mul(node: Expr):
 
 def pre_lambdify(expr: Expr):
     r"""
-    Repalce `*` multiplication between matrix and vector by `mat_mul`.
-
-    Examples
-    ========
-
-    >>> from Solverz import Var_, Param_
-    >>> from Solverz import Eqn
-    >>> from Solverz.num.num_alg import pre_lambdify
-    >>> fin = Param_('fin')
-    >>> f = Var_('f')
-    >>> A = Param_('A', dim=2)
-    >>> test = Eqn(name='test',eqn=fin-A*f)
-    >>> pre_lambdify(test.RHS)
-    fin - Mat_Mul(A, f)
 
     """
-    return traverse_for_mul(expr)
+    return expr

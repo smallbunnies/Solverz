@@ -216,21 +216,7 @@ class AE(Equations):
                         args = self.obtain_eqn_args(eqn_diffs[key], y)
                         var_idx = eqn_diffs[key].var_idx
                         temp = np.array(self.eval_diffs(eqn_name, key, *args))
-                        if not eqn_diffs[key].commutative and temp.ndim > 1:
-                            # two-dimensional derivative of non-commutative equation is viewed as matrix
-                            gy = [*gy, (eqn_name, var_name, var_idx, temp)]
-                        elif eqn_diffs[key].commutative and temp.ndim > 1:
-                            # two-dimensional derivative of commutative equation is viewed as vector
-                            gy = [*gy, (eqn_name, var_name, var_idx, temp)]
-                        else:
-                            # [number]
-                            if var_idx is None:
-                                gy = [*gy, (eqn_name, var_name, var_idx, temp * np.identity(y.var_size[var_name]))]
-                            elif isinstance(var_idx, (int, float)):
-                                gy = [*gy, (eqn_name, var_name, var_idx, temp)]
-                            elif isinstance(var_idx, str):
-                                gy = [*gy,
-                                      (eqn_name, var_name, var_idx, temp * np.ones((len(self.PARAM[var_idx].v), 1)))]
+                        gy = [*gy, (eqn_name, var_name, var_idx, temp)]
         return gy
 
     def j(self, y: Vars) -> np.ndarray:
@@ -245,15 +231,26 @@ class AE(Equations):
             var_name = gy_tuple[1]
             var_idx = gy_tuple[2]
             value = gy_tuple[3]
+
             if var_idx is None:
-                self.j_cache[self.a[eqn_name][0]:(self.a[eqn_name][-1] + 1), y.a[var_name][0]:(y.a[var_name][-1] + 1)] \
-                    = value
+                equation_address = np.arange(self.a[eqn_name][0], self.a[eqn_name][-1] + 1)
+                variable_address = np.arange(y.a[var_name][0], y.a[var_name][-1] + 1)
             elif isinstance(var_idx, (float, int)):
-                self.j_cache[self.a[eqn_name], y.a[var_name][var_idx]] = value
-            elif isinstance(var_idx, str):  # map gy_tuple to var_idx
-                variable_address = (y.a[var_name][np.ix_(self.PARAM[var_idx].v)]).tolist()
-                equation_address = (np.arange(self.a[eqn_name][0], self.a[eqn_name][-1] + 1)).tolist()
-                self.j_cache[equation_address, variable_address] = value.reshape(-1, )
+                equation_address = self.a[eqn_name]
+                variable_address = np.array(y.a[var_name][var_idx])
+            elif isinstance(var_idx, str):
+                equation_address = np.arange(self.a[eqn_name][0], self.a[eqn_name][-1] + 1)
+                variable_address = y.a[var_name][np.ix_(self.PARAM[var_idx].v)]
+
+            if isinstance(value, np.ndarray):
+                if value.ndim > 1:
+                    if value.shape[1] > 1:  # matrix
+                        self.j_cache[np.ix_(equation_address, variable_address)] = value
+                    else:  # vector reshaped as diagonal matrix
+                        self.j_cache[equation_address.tolist(), variable_address.tolist()] = value.reshape((-1,))
+                else:
+                    self.j_cache[equation_address.tolist(), variable_address.tolist()] = value
+
         return self.j_cache
 
     def __repr__(self):
