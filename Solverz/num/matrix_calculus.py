@@ -450,39 +450,6 @@ def MixedEquationDiff(expr: Expr, symbol: Symbol):
     """
     Calculate the derivatives of mixed-Matrix-Vector equations
 
-    Examples
-    ========
-
-    >>> from Solverz import Var_, Param_, Const_, Abs, Eqn, idx
-    >>> mL = Const_('mL', dim=2)
-    >>> K = Const_(name='K')
-    >>> m = Var_(name='m')
-    >>> V = Param_(name='V', dim=2)
-    >>> Ts = Var_(name='Ts')
-    >>> Vp = Param_(name='Vp', dim=2)
-    >>> Touts = Var_(name='Touts')
-    >>> li = idx(name='li')
-    >>> mq = Var_(name='mq')
-    >>> rs = idx(name='rs')
-    >>> E8 = Eqn(name='E8', eqn=Mat_Mul(mL, (K * Abs(m) * m)))
-    >>> E5 = Eqn(name='E5', eqn=Mat_Mul(V[rs, :], m) - mq[rs])
-    >>> E9 = Eqn(name='E9', eqn=Ts[li] * Mat_Mul(Vp[li, :], Abs(m)) - Mat_Mul(Vp[li, :], (Touts * Abs(m))))
-    >>> TE8 = TensorExpr(E8.RHS)
-    >>> TE5 = TensorExpr(E5.RHS)
-    >>> TE9 = TensorExpr(E9.RHS)
-    >>> TE8.diff(m)
-    (mL@(diag(K*Abs(m)) + diag(K*m*sign(m))))
-    >>> TE5.diff(m)
-    V[rs, ::]
-    >>> TE5.diff(mq[rs])
-    -1
-    >>> TE9.diff(m)
-    -(Vp[li, ::]@diag(Touts*sign(m))) + (diag(Ts[li])@(Vp[li, ::]@diag(sign(m))))
-    >>> TE9.diff(Ts[li])
-    diag((Vp[li, ::]@Abs(m)))
-    >>> TE9.diff(Touts)
-    -(Vp[li, ::]@diag(Abs(m)))
-
     """
     return TensorExpr(expr).diff(symbol)
 

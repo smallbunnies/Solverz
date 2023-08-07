@@ -175,6 +175,7 @@ class AE(Equations):
             temp = temp + self.g(y, eqn_name).shape[0]
             self.esize[eqn_name] = self.g(y, eqn_name).shape[0]
         self.vsize = y.total_size
+        self.j_cache = np.zeros((self.eqn_size, y.total_size))
 
     def g(self, y: Vars, eqn: str = None) -> np.ndarray:
         """
@@ -222,34 +223,37 @@ class AE(Equations):
     def j(self, y: Vars) -> np.ndarray:
         if not self.eqn_size:
             self.assign_equation_address(y)
-            self.j_cache = np.zeros((self.eqn_size, y.total_size))
 
         gy = self.g_y(y)
-
+        self.j_cache[:, :] = 0
         for gy_tuple in gy:
             eqn_name = gy_tuple[0]
             var_name = gy_tuple[1]
             var_idx = gy_tuple[2]
             value = gy_tuple[3]
 
+            equation_address = self.a[eqn_name]
             if var_idx is None:
-                equation_address = np.arange(self.a[eqn_name][0], self.a[eqn_name][-1] + 1)
-                variable_address = np.arange(y.a[var_name][0], y.a[var_name][-1] + 1)
+                variable_address = y.a[var_name]
             elif isinstance(var_idx, (float, int)):
-                equation_address = self.a[eqn_name]
-                variable_address = np.array(y.a[var_name][var_idx])
+                variable_address = y.a[var_name][var_idx: var_idx + 1]
             elif isinstance(var_idx, str):
-                equation_address = np.arange(self.a[eqn_name][0], self.a[eqn_name][-1] + 1)
                 variable_address = y.a[var_name][np.ix_(self.PARAM[var_idx].v)]
+            elif isinstance(var_idx, (slice, list)):
+                variable_address = y.a[var_name][var_idx]
+            else:
+                raise TypeError(f"Unsupported variable index {var_idx} for equation {eqn_name}")
 
             if isinstance(value, np.ndarray):
+                # we use `+=` instead of `=` here because sometimes, Var_ `e` and IdxVar `e[0]` exists in the same equation
+                # in which case we have to add the jacobian element of Var_ `e` if it is not zero.
                 if value.ndim > 1:
-                    if value.shape[1] > 1:  # matrix
-                        self.j_cache[np.ix_(equation_address, variable_address)] = value
-                    else:  # vector reshaped as diagonal matrix
-                        self.j_cache[equation_address.tolist(), variable_address.tolist()] = value.reshape((-1,))
+                    if value.shape[1] > 1:  # np.ix_() creates a mesh for matrix
+                        self.j_cache[np.ix_(equation_address, variable_address)] += value
+                    else:  # equation and variable lists constitute a address tuple for vector
+                        self.j_cache[equation_address.tolist(), variable_address.tolist()] += value.reshape((-1,))
                 else:
-                    self.j_cache[equation_address.tolist(), variable_address.tolist()] = value
+                    self.j_cache[equation_address.tolist(), variable_address.tolist()] += value
 
         return self.j_cache
 

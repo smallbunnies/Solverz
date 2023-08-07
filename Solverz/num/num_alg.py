@@ -1,4 +1,4 @@
-from sympy import Symbol, Function, Mul, Expr, symbols, Number, S, Add
+from sympy import Symbol, Function, Mul, Expr, symbols, Number, S, Add, Integer
 from sympy import exp as spexp
 from sympy import Abs as spabs
 from sympy.core.function import ArgumentIndexError
@@ -32,7 +32,6 @@ class idx(Symbol):
 
 
 class Var_(Symbol):
-
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
 
     def __new__(cls, name, value=None):
@@ -52,7 +51,7 @@ class Var_(Symbol):
 class IdxVar(Symbol):
 
     def __new__(cls, symbol, index):
-        if not isinstance(index, (idx, int, slice)):
+        if not isinstance(index, (idx, int, slice, list)):
             raise TypeError(f"Unsupported idx type {type(index)}")
         obj = Symbol.__new__(cls, f'{symbol.name}[{index}]')
         obj.symbol = symbol
@@ -76,7 +75,6 @@ class IdxVar(Symbol):
 
 
 class Param_(Symbol):
-
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
 
     def __new__(cls, name, value=None, dim=1, trigger=False):
@@ -93,13 +91,11 @@ class Param_(Symbol):
         return obj
 
     def __getitem__(self, item):
-        if isinstance(item, idx):
+        if isinstance(item, (idx, int)):
             return IdxParam(self, item, self.dim)
         elif isinstance(item, tuple):
-            if all([isinstance(item_, (idx, Number, slice)) for item_ in list(item)]):
+            if all([isinstance(item_, (idx, Integer, int, slice)) for item_ in list(item)]):
                 return IdxParam(self, item, self.dim)
-        else:
-            return self.value[item]
 
 
 class IdxConst(Symbol):
@@ -150,7 +146,6 @@ class IdxConst(Symbol):
 
 
 class Const_(Symbol):
-
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
 
     def __new__(cls, name, value=None, dim=1):
@@ -167,13 +162,11 @@ class Const_(Symbol):
         return obj
 
     def __getitem__(self, item):
-        if isinstance(item, idx):
+        if isinstance(item, (idx, int)):
             return IdxConst(self, item, self.dim)
         elif isinstance(item, tuple):
-            if all([isinstance(item_, (idx, Number)) for item_ in list(item)]):
+            if all([isinstance(item_, (idx, Integer, int, slice)) for item_ in list(item)]):
                 return IdxConst(self, item, self.dim)
-        else:
-            return self.value[item]
 
 
 class IdxParam(IdxConst):
@@ -316,9 +309,32 @@ class Mat_Mul(MatrixFunction):
 
     @classmethod
     def eval(cls, *args):
+        # This is to simplify the `0`, `1` and `-1` derived by matrix calculus, which shall be removed
+        # by further improvements of the matrix calculus module.
+        i = 0
+        args = list(args)
         for arg in args:
             if arg == S.Zero:
                 return 0
+            elif arg == S.NegativeOne:
+                del args[i]
+                if len(args) > 1:
+                    return -Mat_Mul(*args)
+                else:
+                    if i > 0:
+                        return - args[0]
+                    else:
+                        return - args[1]
+            elif arg == S.One:
+                del args[i]
+                if len(args) > 1:
+                    return Mat_Mul(*args)
+                else:
+                    if i > 0:
+                        return args[0]
+                    else:
+                        return args[1]
+            i = i + 1
 
     def __repr__(self):
         return self.__str__()
@@ -372,7 +388,7 @@ class Mat_Mul(MatrixFunction):
                 temp += '@{operand}'.format(operand=printer._print(arg))
             else:
                 temp += '@({operand})'.format(operand=printer._print(arg))
-        return r'(' + temp + r')'
+        return temp
 
     def _numpycode(self, printer, **kwargs):
 
@@ -433,7 +449,6 @@ class Diag(MatrixFunction):
 
 
 class ElementwiseFunction(Function):
-
     pass
 
 
