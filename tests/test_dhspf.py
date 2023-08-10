@@ -86,7 +86,7 @@ E = AE(name='Pipe Equations', eqn=[E1, E3, E5, E6, E7, E8, E9, E10, E11, E12, E1
 y0 = as_Vars([m, mq, Ts, Tr, Touts, Toutr, phi])
 
 y_nr = nr_method(E, y0)
-y_cnr = continuous_nr(E, y0)
+y_cnr, ite = continuous_nr(E, y0)
 
 sys_df = pd.read_excel('instances/4node3pipe_bench.xlsx',
                        sheet_name=None,

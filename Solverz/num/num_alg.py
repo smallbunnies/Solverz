@@ -24,7 +24,12 @@ class idx(Symbol):
         obj = Symbol.__new__(cls, f'{name}')
         obj.is_Integer = True
         obj.name = f'{name}'
-        obj.value = value
+        if value is not None:
+            if isinstance(value, list):
+                value = np.array(value, dtype=int)
+            if value.ndim > 1:
+                raise TypeError('Only support 1-dim index value')
+            obj.value = np.asarray(value, dtype=int).reshape((-1,))
         return obj
 
     def __array__(self):
