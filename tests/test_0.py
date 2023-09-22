@@ -1,10 +1,8 @@
-from Solverz.eqn import Eqn
-from Solverz.equations import AE
-from Solverz.solvers.aesolver import nr_method
-from Solverz.var import Var
-from Solverz.variables import Vars
+from Solverz import Eqn, AE, nr_method, Var, Vars, Var_
 
-e = Eqn(name='e', eqn='X**2-1')
+X = Var_(name='X')
+
+e = Eqn(name='e', eqn=X**2-1)
 f = AE(name='F',
        eqn=e)
 x = Var(name='X')

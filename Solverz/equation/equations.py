@@ -7,28 +7,26 @@ from typing import Union, List, Dict, Tuple
 import numpy as np
 from sympy import symbols, Symbol
 
-from Solverz.eqn import Eqn, Ode
+from Solverz.equation.eqn import Eqn, Ode
 from Solverz.event import Event
 from Solverz.param import Param
-from Solverz.variables import Vars
+from Solverz.num.num_alg import Var_, Param_, Const_, idx
+from Solverz.variable.variables import Vars
+from Solverz.auxiliary import Address
 
 
 class Equations:
 
     def __init__(self,
                  eqn: Union[List[Eqn], Eqn],
-                 name: str = None,
-                 param: Union[List[Param], Param] = None,
-                 const: Union[List[Param], Param] = None
-                 ):
+                 name: str = None):
         self.name = name
 
         self.EQNs: Dict[str, Eqn] = dict()
-        self.__eqn_diffs: Dict[str, Dict[str, Eqn]] = dict()
         self.SYMBOLS: Dict[str, Symbol] = dict()
-        self.__a: Dict[str, List[int]] = dict()  # equation address
-        self.__eqn_size: Dict[str, int] = dict()  # equation size
-        self.__var_size: int = 0  # potential equation size
+        self.a = Address()  # equation address
+        self.esize: Dict[str, int] = dict()  # size of each equation
+        self.vsize: int = 0  # size of variables
 
         if isinstance(eqn, Eqn):
             eqn = [eqn]
@@ -36,72 +34,26 @@ class Equations:
         for eqn_ in eqn:
             self.add_eqn(eqn_)
 
-        # set parameters
         self.PARAM: Dict[str, Param] = dict()
-        if param:
-            if isinstance(param, Param):
-                param = [param]
-
-            for param_ in param:
-                if not self.is_param_defined(param_.name):
-                    raise ValueError(f'Parameter {param_.name} not defined in equations!')
-                else:
-                    self.PARAM[param_.name] = param_
-
-        # set constants
         self.CONST: Dict[str, Param] = dict()
-        if const:
-            if isinstance(const, Param):
-                const = [const]
 
-            for const_ in const:
-                if not self.is_param_defined(const_.name):
-                    raise ValueError(f'Constant {const_.name} not defined in equations!')
-                else:
-                    self.CONST[const_.name] = const_
-
-        # generate derivatives of EQNs
-        for eqn in self.EQNs.values():
-            self.gen_diff(eqn)
+        for symbol_ in self.SYMBOLS.values():
+            if isinstance(symbol_, Param_):
+                self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value)
+            elif isinstance(symbol_, idx):
+                self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dtype=int)
+            elif isinstance(symbol_, Const_):
+                self.CONST[symbol_.name] = Param(symbol_.name, value=symbol_.value)
 
     def add_eqn(self, eqn: Eqn):
-        self.EQNs[eqn.name] = eqn
-        for symbol_ in self.EQNs[eqn.name].SYMBOLS:
-            # generate bare symbols without assumptions
-            self.SYMBOLS[symbol_.name] = symbols(symbol_.name)
-        self.a[eqn.name] = []
-
-    def gen_diff(self, eqn: Eqn):
-        self.eqn_diffs[eqn.name] = dict()
-        for symbol_ in eqn.SYMBOLS:
-            if symbol_.name not in self.PARAM:
-                eqn_diff = eqn.RHS.diff(symbol_)
-                self.eqn_diffs[eqn.name][symbol_.name] = Eqn(name=f'Diff {eqn.name} w.r.t. {symbol_.name}',
-                                                             eqn=eqn_diff.__repr__(), commutative=eqn.commutative)
-
-    @property
-    def eqn_diffs(self):
-        return self.__eqn_diffs
-
-    @property
-    def a(self):
-        return self.__a
-
-    @property
-    def size(self):
-        return self.__eqn_size
+        self.EQNs.update({eqn.name: eqn})
+        self.SYMBOLS.update(eqn.SYMBOLS)
+        self.a.add(eqn.name)
 
     @property
     def eqn_size(self):
-        return np.sum(np.array(list(self.size.values())))
-
-    @property
-    def var_size(self):
-        return self.__var_size
-
-    @var_size.setter
-    def var_size(self, value: int):
-        self.__var_size = value
+        # total size of all the equations
+        return np.sum(np.array(list(self.esize.values())))
 
     def is_param_defined(self, param: str) -> bool:
 
@@ -112,6 +64,17 @@ class Equations:
 
     with warnings.catch_warnings():
         warnings.simplefilter("once")
+
+    def param_initializer(self, name, param: Param):
+        if not self.is_param_defined(name):
+            raise ValueError(f'Parameter {name} not defined in equations!')
+        if isinstance(param, Param):
+            if name in self.PARAM:
+                self.PARAM[name] = param
+            elif name in self.CONST:
+                self.CONST[name] = param
+        else:
+            raise TypeError(f"Unsupported parameter type {type(param)}")
 
     def update_param(self, *args):
 
@@ -153,7 +116,7 @@ class Equations:
         :return:
         """
         args = []
-        for symbol in eqn.SYMBOLS:
+        for symbol in eqn.SYMBOLS.values():
             value_obtained = False
             if symbol.name in self.PARAM:
                 if self.PARAM[symbol.name].triggerable:
@@ -162,6 +125,9 @@ class Equations:
                             self.PARAM[symbol.name].v = self.PARAM[symbol.name].trigger_fun(
                                 y[self.PARAM[symbol.name].trigger_var])
                 args = [*args, self.PARAM[symbol.name].v]
+                value_obtained = True
+            elif symbol.name in self.CONST:
+                args = [*args, self.CONST[symbol.name].v]
                 value_obtained = True
             else:
                 for y in xys:
@@ -180,16 +146,19 @@ class Equations:
         :param args:
         :return:
         """
-        return self.eqn_diffs[eqn_name][var_name].NUM_EQN(*args)
+        return self.EQNs[eqn_name].derivatives[var_name].NUM_EQN(*args)
 
 
 class AE(Equations):
 
     def __init__(self,
                  eqn: Union[List[Eqn], Eqn],
-                 name: str = None,
-                 param: Union[List[Param], Param] = None):
-        super().__init__(eqn, name, param)
+                 name: str = None):
+        super().__init__(eqn, name)
+        for eqn in self.EQNs.values():
+            eqn.derive_derivative()
+
+        self.j_cache = np.array([])
 
         # Check if some equation in self.eqn is Eqn.
         # If not, raise error
@@ -202,10 +171,11 @@ class AE(Equations):
         """
         temp = 0
         for eqn_name in self.EQNs.keys():
-            self.a[eqn_name] = [temp, temp + self.g(y, eqn_name).shape[0] - 1]
+            self.a.update(eqn_name, temp, temp + self.g(y, eqn_name).shape[0] - 1)
             temp = temp + self.g(y, eqn_name).shape[0]
-            self.size[eqn_name] = self.g(y, eqn_name).shape[0]
-        self.var_size = y.total_size
+            self.esize[eqn_name] = self.g(y, eqn_name).shape[0]
+        self.vsize = y.total_size
+        self.j_cache = np.zeros((self.eqn_size, y.total_size))
 
     def g(self, y: Vars, eqn: str = None) -> np.ndarray:
         """
@@ -214,7 +184,6 @@ class AE(Equations):
         :param eqn:
         :return:
         """
-        # FIXME: deprecate np.concatenate() here. The functions should be concatenated/combined first and then lambdified
         if not eqn:
             temp = np.array([])
             for eqn_name, eqn_ in self.EQNs.items():
@@ -241,63 +210,72 @@ class AE(Equations):
         gy: List[Tuple[str, str, np.ndarray]] = []
 
         for eqn_name in eqn:
+            eqn_diffs = self.EQNs[eqn_name].derivatives
             for var_name in var:
-                if var_name in self.eqn_diffs[eqn_name]:
-                    args = self.obtain_eqn_args(self.eqn_diffs[eqn_name][var_name], y)
-                    temp = np.array(self.eval_diffs(eqn_name, var_name, *args))
-                    if temp.ndim > 1:
-                        #  matrix or row vector
-                        gy = [*gy, (eqn_name, var_name, temp)]
-                    elif temp.ndim == 1 and temp.shape[0] > 1:
-                        # column vector
-                        gy = [*gy, (eqn_name, var_name, np.diag(temp))]
-                    else:
-                        # [number]
-                        gy = [*gy, (eqn_name, var_name, temp * np.identity(y.var_size[var_name]))]
+                for key, value in eqn_diffs.items():
+                    if var_name == value.diff_var_name:  # f is viewed as f[k]
+                        args = self.obtain_eqn_args(eqn_diffs[key], y)
+                        var_idx = eqn_diffs[key].var_idx
+                        temp = np.array(self.eval_diffs(eqn_name, key, *args))
+                        gy = [*gy, (eqn_name, var_name, var_idx, temp)]
         return gy
 
     def j(self, y: Vars) -> np.ndarray:
         if not self.eqn_size:
             self.assign_equation_address(y)
+
         gy = self.g_y(y)
-        j = np.zeros((self.eqn_size, y.total_size))
-
+        self.j_cache[:, :] = 0
         for gy_tuple in gy:
-            j[self.a[gy_tuple[0]][0]:(self.a[gy_tuple[0]][-1] + 1), y.a[gy_tuple[1]][0]:(y.a[gy_tuple[1]][-1] + 1)] = \
-                gy_tuple[2]
+            eqn_name = gy_tuple[0]
+            var_name = gy_tuple[1]
+            var_idx = gy_tuple[2]
+            value = gy_tuple[3]
 
-        return j
+            equation_address = self.a[eqn_name]
+            if var_idx is None:
+                variable_address = y.a[var_name]
+            elif isinstance(var_idx, (float, int)):
+                variable_address = y.a[var_name][var_idx: var_idx + 1]
+            elif isinstance(var_idx, str):
+                variable_address = y.a[var_name][np.ix_(self.PARAM[var_idx].v)]
+            elif isinstance(var_idx, (slice, list)):
+                variable_address = y.a[var_name][var_idx]
+            else:
+                raise TypeError(f"Unsupported variable index {var_idx} for equation {eqn_name}")
 
-    def __setitem__(self, key, value):
-        """
-        hai mei xiang hao ke yi yong lai gan ma
-        :param key:
-        :param value:
-        :return:
-        """
-        pass
+            if isinstance(value, np.ndarray):
+                # we use `+=` instead of `=` here because sometimes, Var_ `e` and IdxVar `e[0]` exists in the same equation
+                # in which case we have to add the jacobian element of Var_ `e` if it is not zero.
+                if value.ndim > 1:
+                    if value.shape[1] > 1:  # np.ix_() creates a mesh for matrix
+                        self.j_cache[np.ix_(equation_address, variable_address)] += value
+                    else:  # equation and variable lists constitute a address tuple for vector
+                        self.j_cache[equation_address.tolist(), variable_address.tolist()] += value.reshape((-1,))
+                else:
+                    self.j_cache[equation_address.tolist(), variable_address.tolist()] += value
+
+        return self.j_cache
 
     def __repr__(self):
         if not self.eqn_size:
             return f"Algebraic equation {self.name} with addresses uninitialized"
         else:
-            return f"Algebraic equation {self.name} ({self.eqn_size}×{self.var_size})"
+            return f"Algebraic equation {self.name} ({self.eqn_size}×{self.vsize})"
 
 
 class DAE(Equations):
 
     def __init__(self,
                  eqn: Union[List[Eqn], Eqn],
-                 name: str = None,
-                 param: Union[List[Param], Param] = None,
-                 const: Union[List[Param], Param] = None
+                 name: str = None
                  ):
 
         self.f_dict: Dict[str, Ode] = dict()  # dict of state equations
         self.g_dict: Dict[str, Eqn] = dict()  # dict of algebraic equations
         self.var_address: Dict[str, List[int]] = dict()
 
-        super().__init__(eqn, name, param, const)
+        super().__init__(eqn, name)
 
         self.state_num: int = 0  # number of state variables
         self.algebra_num: int = 0  # number of algebraic variables
@@ -309,7 +287,7 @@ class DAE(Equations):
 
     def add_eqn(self, eqn: Union[Eqn, Ode]):
         self.EQNs[eqn.name] = eqn
-        for symbol_ in self.EQNs[eqn.name].SYMBOLS:
+        for symbol_ in self.EQNs[eqn.name].SYMBOLS.values():
             # generate bare symbols without assumptions
             self.SYMBOLS[symbol_.name] = symbols(symbol_.name)
         self.a[eqn.name] = []
@@ -330,7 +308,7 @@ class DAE(Equations):
             eqn_size = self.f(eqn_name, *xys).shape[0]
             self.a[eqn_name] = [temp, temp + eqn_size - 1]
             temp = temp + eqn_size
-            self.size[eqn_name] = eqn_size
+            self.esize[eqn_name] = eqn_size
 
         self.state_num = temp
 
@@ -338,7 +316,7 @@ class DAE(Equations):
             eqn_size = self.g(eqn_name, *xys).shape[0]
             self.a[eqn_name] = [temp, temp + eqn_size - 1]
             temp = temp + eqn_size
-            self.size[eqn_name] = eqn_size
+            self.esize[eqn_name] = eqn_size
 
         self.algebra_num = temp - self.state_num
 
@@ -351,7 +329,7 @@ class DAE(Equations):
                     raise ValueError(f"DAE {self.name} has no variable {var_name}")
             temp = temp + xy.total_size
 
-        self.var_size: int = temp
+        self.vsize: int = temp
 
     def f(self, *xys) -> np.ndarray:
         """
