@@ -4,7 +4,7 @@ import numpy as np
 from numpy import abs, max, min, sum, sqrt
 
 from Solverz.equation.equations import AE
-from Solverz.num.num_interface import inv
+from Solverz.num.num_interface import inv, solve
 from Solverz.variable.variables import Vars
 
 
@@ -13,7 +13,7 @@ def nr_method(eqn: AE,
               tol: float = 1e-8):
     df = eqn.g(y)
     while max(abs(df)) > tol:
-        y = y - inv(eqn.j(y)) @ df
+        y = y - solve(eqn.j(y), df)
         df = eqn.g(y)
     return y
 
@@ -24,7 +24,7 @@ def continuous_nr(eqn: AE,
                   dt=1,
                   hmax=1.7):
     def f(y) -> np.ndarray:
-        return -inv(eqn.j(y)) @ eqn.g(y)
+        return -solve(eqn.j(y), eqn.g(y))
 
     Pow = 1 / 5
     # c2, c3, c4, c5 = 1 / 5, 3 / 10, 4 / 5, 8 / 9 for non-autonomous equations

@@ -6,7 +6,7 @@ from typing import Union, List, Dict, Tuple
 
 import numpy as np
 from sympy import symbols, Symbol
-
+from scipy.sparse import csc_array, lil_array
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.event import Event
 from Solverz.param import Param
@@ -158,7 +158,7 @@ class AE(Equations):
         for eqn in self.EQNs.values():
             eqn.derive_derivative()
 
-        self.j_cache = np.array([])
+        self.j_cache = csc_array((0, 0))
 
         # Check if some equation in self.eqn is Eqn.
         # If not, raise error
@@ -175,7 +175,7 @@ class AE(Equations):
             temp = temp + self.g(y, eqn_name).shape[0]
             self.esize[eqn_name] = self.g(y, eqn_name).shape[0]
         self.vsize = y.total_size
-        self.j_cache = np.zeros((self.eqn_size, y.total_size))
+        self.j_cache = csc_array((self.eqn_size, y.total_size))
 
     def g(self, y: Vars, eqn: str = None) -> np.ndarray:
         """
@@ -216,16 +216,18 @@ class AE(Equations):
                     if var_name == value.diff_var_name:  # f is viewed as f[k]
                         args = self.obtain_eqn_args(eqn_diffs[key], y)
                         var_idx = eqn_diffs[key].var_idx
-                        temp = np.array(self.eval_diffs(eqn_name, key, *args))
+                        temp = self.eval_diffs(eqn_name, key, *args)
+                        if not isinstance(temp, csc_array):
+                            temp = np.array(temp)
                         gy = [*gy, (eqn_name, var_name, var_idx, temp)]
         return gy
 
-    def j(self, y: Vars) -> np.ndarray:
+    def j(self, y: Vars) -> csc_array:
         if not self.eqn_size:
             self.assign_equation_address(y)
 
         gy = self.g_y(y)
-        self.j_cache[:, :] = 0
+        self.j_cache = lil_array((self.eqn_size, self.vsize))
         for gy_tuple in gy:
             eqn_name = gy_tuple[0]
             var_name = gy_tuple[1]
@@ -244,7 +246,7 @@ class AE(Equations):
             else:
                 raise TypeError(f"Unsupported variable index {var_idx} for equation {eqn_name}")
 
-            if isinstance(value, np.ndarray):
+            if isinstance(value, (np.ndarray, csc_array)):
                 # we use `+=` instead of `=` here because sometimes, Var_ `e` and IdxVar `e[0]` exists in the same equation
                 # in which case we have to add the jacobian element of Var_ `e` if it is not zero.
                 if value.ndim > 1:
@@ -253,9 +255,10 @@ class AE(Equations):
                     else:  # equation and variable lists constitute a address tuple for vector
                         self.j_cache[equation_address.tolist(), variable_address.tolist()] += value.reshape((-1,))
                 else:
-                    self.j_cache[equation_address.tolist(), variable_address.tolist()] += value
+                    # adding a nonzero scalar to a sparse matrix is not supported by lil_array structure
+                    self.j_cache[equation_address.tolist(), variable_address.tolist()] += np.array(value).reshape(-1,)
 
-        return self.j_cache
+        return self.j_cache.tocsc()
 
     def __repr__(self):
         if not self.eqn_size:

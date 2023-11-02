@@ -222,3 +222,7 @@ class Pde(Eqn):
     The class of partial differential equations
     """
     pass
+
+
+class HyperbolicPde(Pde):
+    pass

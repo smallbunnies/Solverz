@@ -92,11 +92,7 @@ It is easily implemented in Solverz as well:
        :format: doctest
        :include-source: True
 
-       >>> from Solverz.eqn import Ode, Eqn
-       >>> from Solverz.equations import DAE
-       >>> from Solverz.var import TimeVar
-       >>> from Solverz.variables import TimeVars
-       >>> from Solverz.solvers.daesolver import implicit_trapezoid
+       >>> from Solverz import Ode, Eqn, DAE, TimeVar, TimeVars, implicit_trapezoid
        >>> import matplotlib.pyplot as plt
        >>> import numpy as np
        >>> # Declare your equations using strings

@@ -4,6 +4,7 @@ from functools import reduce
 
 import numpy as np
 from numpy import linalg
+from scipy.sparse import linalg as splinalg
 
 numerical_interface = {}
 
@@ -93,3 +94,7 @@ def linspace(start, end) -> np.ndarray:
 
 def inv(mat: np.ndarray):
     return linalg.inv(mat)
+
+
+def solve(A, b):
+    return splinalg.spsolve(A, b)

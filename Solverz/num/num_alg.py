@@ -1,7 +1,8 @@
-from sympy import Symbol, Function, Mul, Expr, symbols, Number, S, Add, Integer
+from sympy import Symbol, Function, Mul, Expr, symbols, Number, S, Add, Integer, sin, cos
 from sympy import exp as spexp
 from sympy import Abs as spabs
 from sympy.core.function import ArgumentIndexError
+from scipy.sparse import csc_array
 import numpy as np
 from typing import Union
 from functools import reduce
@@ -86,11 +87,14 @@ class Param_(Symbol):
         obj = Symbol.__new__(cls, name)
         obj.name = name
         if value is not None:
-            temp_value = np.array(value)
-            if temp_value.ndim > 1:
-                obj.value = temp_value
+            if isinstance(value, csc_array):
+                obj.value = value
             else:
-                obj.value = temp_value.reshape((-1, 1))
+                temp_value = np.array(value)
+                if temp_value.ndim > 1:
+                    obj.value = temp_value
+                else:
+                    obj.value = temp_value.reshape((-1, 1))
         obj.dim = dim
 
         return obj
@@ -196,36 +200,19 @@ class Set(Symbol):
         pass
 
 
-class Sum_(Function):
-    # no repeat name of sympy built-in func.
+class Sum_(Function):     # no repeat name of sympy built-in func.
+    r"""
+    This function returns the summation.
 
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 3:
-            raise TypeError(f"Sum takes 3 positional arguments but {len(args)} were given!")
+    ``Sum_(f(k), (k, B, h))`` represents
 
-    def _eval_derivative(self, s):
-        # which should be the same as Add
-        a = self.args
-        return a[0].diff(s)
+    .. math::
 
-    def _numpycode(self, printer, **kwargs):
+        \sum_{k\in \mathbb{B}, k\neq h}f(k)
 
-        if len(self.args[1]) > 1:
-            loops = (
-                'for {i}, {j} in {SET}'.format(
-                    i=printer._print(self.args[1][0]),
-                    j=printer._print(self.args[1][1]),
-                    SET=printer._print(self.args[2])))
-            return '(builtins.sum({function} {loops}))'.format(
-                function=printer._print(self.args[0]),
-                loops=loops)
+    """
 
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+    pass
 
 
 class Sign(Function):

@@ -1,7 +1,7 @@
 from typing import Optional, Union
 
 import numpy as np
-
+from scipy.sparse import csc_array
 from typing import Callable
 
 from numbers import Number
@@ -37,8 +37,8 @@ class Param:
 
         if isinstance(value, np.ndarray):
             self.__v = np.array(value, dtype=self.dtype)
-        else:
-            self.__v = np.array(value, dtype=self.dtype)
+        elif isinstance(value, csc_array):
+            self.__v = value
         if self.v.ndim < 2 and self.dtype == int:
             # index param has only one dim
             self.__v = self.v.reshape((-1, ))
