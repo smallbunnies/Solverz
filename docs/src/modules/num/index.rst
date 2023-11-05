@@ -9,3 +9,4 @@ Contents
 
     numerical.rst
     algebra.rst
+    equation.rst

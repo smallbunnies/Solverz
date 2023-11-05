@@ -1,16 +1,16 @@
-from Solverz.num.num_alg import Var_, Param_, Const_, Abs, idx, Mat_Mul
+from Solverz.num.num_alg import Var, Param_, Const_, Abs, idx, Mat_Mul
 from Solverz.num.matrix_calculus import TensorExpr
 from Solverz.equation.eqn import Eqn
 
 mL = Const_('mL', dim=2)
 K = Const_(name='K')
-m = Var_(name='m')
+m = Var(name='m')
 V = Param_(name='V', dim=2)
-Ts = Var_(name='Ts')
+Ts = Var(name='Ts')
 Vp = Param_(name='Vp', dim=2)
-Touts = Var_(name='Touts')
+Touts = Var(name='Touts')
 li = idx(name='li')
-mq = Var_(name='mq')
+mq = Var(name='mq')
 rs = idx(name='rs')
 E8 = Eqn(name='E8', eqn=Mat_Mul(mL, (K * Abs(m) * m)))
 E5 = Eqn(name='E5', eqn=Mat_Mul(V[rs, :], m) - mq[rs])
@@ -19,10 +19,10 @@ TE8 = TensorExpr(E8.RHS)
 TE5 = TensorExpr(E5.RHS)
 TE9 = TensorExpr(E9.RHS)
 
-e = Var_(name='e', value=[1.06, 1, 1.00])
-f = Var_(name='f', value=[0, 0, 0])
-p = Var_(name='p')
-q = Var_(name='q')
+e = Var(name='e', value=[1.06, 1, 1.00])
+f = Var(name='f', value=[0, 0, 0])
+p = Var(name='p')
+q = Var(name='q')
 G = Param_(name='G', dim=2, value=[0])
 B = Param_(name='B', dim=2, value=[0])
 

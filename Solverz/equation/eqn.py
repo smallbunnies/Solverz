@@ -4,13 +4,13 @@ from typing import Union, List, Dict, Callable, Tuple
 
 import numpy as np
 import sympy
-from sympy import Symbol, preorder_traversal, Basic, Expr, latex, Derivative
+from sympy import Symbol, preorder_traversal, Basic, Expr, latex, Derivative, sympify, simplify
 from sympy import lambdify as splambdify
-from sympy.abc import t
+from sympy.abc import t, x
 
 from Solverz.num.num_alg import F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
     pre_lambdify, Mat_Mul
-from Solverz.num.num_alg import Param_, Var_, IdxVar, idx, IdxParam, Const_, IdxConst
+from Solverz.num.num_alg import Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst
 from Solverz.num.num_interface import numerical_interface
 from Solverz.num.matrix_calculus import MixedEquationDiff
 from Solverz.param import Param
@@ -41,8 +41,8 @@ class Eqn:
 
     def obtain_symbols(self) -> Dict[str, Symbol]:
         temp_dict = dict()
-        for symbol_ in list(self.RHS.free_symbols):
-            if isinstance(symbol_, (Var_, Param_, Const_)):
+        for symbol_ in list((self.LHS - self.RHS).free_symbols):
+            if isinstance(symbol_, (Var, Param_, Const_)):
                 temp_dict[symbol_.name] = symbol_
             elif isinstance(symbol_, (IdxVar, IdxParam, IdxConst)):
                 temp_dict[symbol_.symbol.name] = symbol_.symbol
@@ -75,7 +75,7 @@ class Eqn:
                                                          eqn=diff,
                                                          diff_var=symbol_,
                                                          var_idx=idx_.name if isinstance(idx_, idx) else idx_)
-            elif isinstance(symbol_, Var_):
+            elif isinstance(symbol_, Var):
                 if self.mixed_matrix_vector:
                     diff = MixedEquationDiff(self.RHS, symbol_)
                 else:
@@ -117,11 +117,18 @@ class EqnDiff(Eqn):
 
 
 class Ode(Eqn):
-    """
-    The class of ordinary differential equations
+    r"""
+    The class for ODE reading
+
+    .. math::
+
+         \frac{\mathrm{d}y}{\mathrm{d}t}=f(t,y)
+
+    where $y$ is the state vector.
+
     """
 
-    def __init__(self, name: str, eqn: Expr, diff_var: Var_):
+    def __init__(self, name: str, eqn: Expr, diff_var: Var):
         super().__init__(name, eqn)
         self.diff_var = diff_var
         self.LHS = Derivative(diff_var, t)
@@ -225,4 +232,107 @@ class Pde(Eqn):
 
 
 class HyperbolicPde(Pde):
-    pass
+    r"""
+    The class for hyperbolic PDE reading
+
+    .. math::
+
+         \frac{\partial{u}}{\partial{t}}+\frac{\partial{f(u)}}{\partial{x}}=S(u)
+
+    where $u$ is the state vector, $f(u)$ is the flux function and $S(u)$ is the source term.
+
+    Parameters
+    ==========
+
+    two_dim_var : Var or list of Var_
+
+        Specify the two-dimensional variables in the PDE. Some of the variables, for example, the mass flow $\dot{m}$ in
+        the heat transmission equation, are not two-dimensional variables.
+
+    """
+
+    def __init__(self, name: str,
+                 diff_var: Var,
+                 flux: Expr,
+                 source: Expr = 0,
+                 two_dim_var: Union[Var, List[Var]] = None):
+        if isinstance(source, (float, int)):
+            source = sympify(source)
+        super().__init__(name, source)
+        self.diff_var = diff_var
+        self.flux = flux
+        self.source = source
+        self.two_dim_var = [two_dim_var] if isinstance(two_dim_var, Var) else two_dim_var
+        self.LHS = Derivative(diff_var, t) + Derivative(flux, x)
+
+    def derive_derivative(self):
+        pass
+
+    def finite_difference(self, scheme=1):
+        r"""
+        Discretize hyperbolic PDE as AEs.
+
+        Parameters
+        ==========
+
+        scheme : int
+
+            1 - Central difference
+
+            .. math::
+
+                \frac{\partial{u}}{\partial{t}}\approx\frac{u_{i+1}^{j+1}-u_{i+1}^{j}+u_{i}^{j+1}-u_{i}^{j}}{2\Delta t}
+
+            .. math::
+
+                \frac{\partial{f(u)}}{\partial{x}}\approx\frac{f(u_{i+1}^{j+1})-f(u_{i}^{j+1})+f(u_{i+1}^{j})-f(u_{i}^{j})}{2\Delta x}
+
+            .. math::
+
+                S(u)\approx S\left(\frac{u_{i+1}^{j+1}+u_{i}^{j+1}+u_{i+1}^{j}+u_{i}^{j}}{4}\right)
+
+            2 - Characteristic line method
+
+        Returns
+        =======
+
+        AE : Eqn
+
+            Let's take central difference as an example, this function returns the algebraic equation
+
+            .. math::
+
+                \begin{aligned}
+                    0=&\Delta x(\tilde{u}[1:M]-\tilde{u}^0[1:M]+\tilde{u}[0:M-1]-\tilde{u}^0[0:M-1])+\\
+                      &\Delta t(f(\tilde{u}[1:M])-f(\tilde{u}[0:M-1])+f(\tilde{u}^0[1:M])-f(\tilde{u}^0[0:M-1]))+\\
+                      &2\Delta x\Delta t\cdot S\left(\frac{u_{i+1}^{j+1}+u_{i}^{j+1}+u_{i+1}^{j}+u_{i}^{j}}{4}\right)
+                \end{aligned}
+
+            where we denote by vector $\tilde{u}$ the discrete spatial distribution of state $u$, by $\tilde{u}^0$ the
+            initial value of $\tilde{u}$, and by $M$ the last index of $\tilde{u}$.
+
+        """
+        if scheme == 1:
+            dx = Const_('dx')
+            dt = Const_('dt')
+            M = idx('M')
+            u = self.diff_var
+            u0 = Param_(u.name + '0')
+
+            fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
+            fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
+            fui1j = self.flux.subs([(a, Param_(a.name + '0')[1:M]) for a in self.two_dim_var])
+            fuij = self.flux.subs([(a, Param_(a.name + '0')[0:M - 1]) for a in self.two_dim_var])
+
+            S = self.source.subs(
+                [(a, (a[1:M] + a[0:M - 1] + Param_(a.name + '0')[1:M] + Param_(a.name + '0')[0:M - 1]) / 4) for a in
+                 self.two_dim_var])
+
+            ae = dx * (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) \
+                 + simplify(dt * (fui1j1 - fuij1 + fui1j - fuij)) \
+                 + simplify(2 * dx * dt * S)
+
+            return Eqn('FDM of ' + self.name, ae)
+
+    def semi_discretize(self):
+        pass

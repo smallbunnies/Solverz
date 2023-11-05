@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 from functools import partial
 
-from Solverz import Eqn, AE, nr_method, Vars, Var_, Param, continuous_nr, Param_, Const_, idx, Abs, transpose, exp, \
-    as_Vars, Mat_Mul
+from Solverz import Eqn, AE, nr_method, as_Vars, Var, Param, continuous_nr, Param_, Const_, idx, Abs, transpose, exp, \
+    Mat_Mul
 
 # %% initialize variables and params
 sys_df = pd.read_excel('instances/4node3pipe_change_sign.xlsx',
@@ -93,13 +93,13 @@ Vm = Param_(name='Vm', dim=2, value=derive_v_minus(V.value))
 f = idx(name='f', value=f_node)  # intermediate nodes
 t = idx(name='t', value=t_node)  # load nodes
 
-m = Var_(name='m', value=np.asarray(sys_df['var']['m']))
-mq = Var_(name='mq', value=np.asarray(sys_df['var']['mq']))
-Ts = Var_(name='Ts', value=np.asarray(sys_df['var']['Ts']))
-Tr = Var_(name='Tr', value=np.asarray(sys_df['var']['Tr']))
-Touts = Var_(name='Touts', value=np.asarray(sys_df['var']['Touts']))
-Toutr = Var_(name='Toutr', value=np.asarray(sys_df['var']['Toutr']))
-phi = Var_(name='phi', value=np.asarray(sys_df['var']['phi']))
+m = Var(name='m', value=np.asarray(sys_df['var']['m']))
+mq = Var(name='mq', value=np.asarray(sys_df['var']['mq']))
+Ts = Var(name='Ts', value=np.asarray(sys_df['var']['Ts']))
+Tr = Var(name='Tr', value=np.asarray(sys_df['var']['Tr']))
+Touts = Var(name='Touts', value=np.asarray(sys_df['var']['Touts']))
+Toutr = Var(name='Toutr', value=np.asarray(sys_df['var']['Toutr']))
+phi = Var(name='phi', value=np.asarray(sys_df['var']['phi']))
 
 E1 = Eqn(name='E1', eqn=(Ts[f] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Touts)
 E3 = Eqn(name='E3', eqn=(Tr[t] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Toutr)

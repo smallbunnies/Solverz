@@ -31,13 +31,14 @@ class idx(Symbol):
             if value.ndim > 1:
                 raise TypeError('Only support 1-dim index value')
             obj.value = np.asarray(value, dtype=int).reshape((-1,))
+        obj.initialized = True if value is not None else False
         return obj
 
     def __array__(self):
         return self.value
 
 
-class Var_(Symbol):
+class Var(Symbol):
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
 
     def __new__(cls, name, value=None):
@@ -48,6 +49,7 @@ class Var_(Symbol):
         else:
             obj.value = None
         obj.dim = 1
+        obj.initialized = True if value is not None else False
         return obj
 
     def __getitem__(self, item):
@@ -91,16 +93,16 @@ class Param_(Symbol):
                 obj.value = value
             else:
                 temp_value = np.array(value)
-                if temp_value.ndim > 1:
-                    obj.value = temp_value
+                if temp_value.ndim > 1 and temp_value.size > 1:
+                    obj.value = csc_array(temp_value)
                 else:
                     obj.value = temp_value.reshape((-1, 1))
         obj.dim = dim
-
+        obj.initialized = True if value is not None else False
         return obj
 
     def __getitem__(self, item):
-        if isinstance(item, (idx, int)):
+        if isinstance(item, (idx, int, slice)):
             return IdxParam(self, item, self.dim)
         elif isinstance(item, tuple):
             if all([isinstance(item_, (idx, Integer, int, slice)) for item_ in list(item)]):
@@ -162,16 +164,16 @@ class Const_(Symbol):
         obj.name = name
         if value is not None:
             temp_value = np.array(value)
-            if temp_value.ndim > 1:
-                obj.value = temp_value
+            if temp_value.ndim > 1 and temp_value.size > 1:
+                obj.value = csc_array(temp_value)
             else:
                 obj.value = temp_value.reshape((-1, 1))
         obj.dim = dim
-
+        obj.initialized = True if value is not None else False
         return obj
 
     def __getitem__(self, item):
-        if isinstance(item, (idx, int)):
+        if isinstance(item, (idx, int, slice)):
             return IdxConst(self, item, self.dim)
         elif isinstance(item, tuple):
             if all([isinstance(item_, (idx, Integer, int, slice)) for item_ in list(item)]):
@@ -200,7 +202,7 @@ class Set(Symbol):
         pass
 
 
-class Sum_(Function):     # no repeat name of sympy built-in func.
+class Sum_(Function):  # no repeat name of sympy built-in func.
     r"""
     This function returns the summation.
 
@@ -428,17 +430,6 @@ class Diag(MatrixFunction):
         else:
             return _latex_str
 
-    def _numpycode(self, printer, **kwargs):
-
-        temp = printer._print(self.args[0])
-        return r'diagflat(' + temp + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
 
 class ElementwiseFunction(Function):
     pass
@@ -485,10 +476,10 @@ def traverse_for_mul(node: Expr):
     Examples
     ========
 
-    >>> from Solverz import Var_, Param_
+    >>> from Solverz import Var, Param_
     >>> from Solverz.num.num_alg import traverse_for_mul
-    >>> f = Var_('f')
-    >>> b = Var_('b')
+    >>> f = Var('f')
+    >>> b = Var('b')
     >>> A = Param_('A', dim=2)
     >>> B = Param_('B', dim=2)
     >>> traverse_for_mul(-A*f)

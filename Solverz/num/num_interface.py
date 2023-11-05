@@ -4,7 +4,7 @@ from functools import reduce
 
 import numpy as np
 from numpy import linalg
-from scipy.sparse import linalg as splinalg
+from scipy.sparse import diags, linalg as splinalg
 
 numerical_interface = {}
 
@@ -24,14 +24,17 @@ def _sign(arg):
     return np.sign(arg)
 
 
-@implements_nfunc('Diagonal')
-def diag(x: np.ndarray) -> np.ndarray:
+@implements_nfunc('Diag')
+def diag(x) -> np.ndarray:
     """
     Generate diagonal matrix of given vector X
     :PARAM X: vector
     :return: diagonal matrix
     """
-    return np.diag(x.reshape(-1, ))
+    if not isinstance(x, np.ndarray):
+        return diags(x.toarray().reshape(-1,), 0, format='csc')
+    else:
+        return np.diagflat(x)
 
 
 @implements_nfunc('dConv_s')

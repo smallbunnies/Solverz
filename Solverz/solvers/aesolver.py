@@ -4,7 +4,7 @@ import numpy as np
 from numpy import abs, max, min, sum, sqrt
 
 from Solverz.equation.equations import AE
-from Solverz.num.num_interface import inv, solve
+from Solverz.num.num_interface import solve
 from Solverz.variable.variables import Vars
 
 

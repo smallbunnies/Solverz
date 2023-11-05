@@ -8,7 +8,7 @@ import numpy as np
 import sympy as sp
 from sympy import Expr, Mul, Add, S, Number, Integer, sign, Symbol
 
-from Solverz.num.num_alg import Mat_Mul, IdxVar, IdxConst, IdxParam, Diag, transpose, Var_, Param_, Const_, Abs
+from Solverz.num.num_alg import Mat_Mul, IdxVar, IdxConst, IdxParam, Diag, transpose, Var, Param_, Const_, Abs
 
 
 class TMatrix:
@@ -238,7 +238,7 @@ def obtain_dim(expr) -> int:
 
     symbol_dict = dict()
     for symbol in list(expr.free_symbols):
-        if isinstance(symbol, (Var_, IdxVar)):
+        if isinstance(symbol, (Var, IdxVar)):
             symbol_dict[symbol] = np.ones((2, 1))
         elif isinstance(symbol, (Const_, Param_, IdxConst, IdxParam)):
             if symbol.dim == 2:
@@ -261,7 +261,7 @@ def obtain_TExpr(expr: Expr, index: TensorIndex):
         Texpr = TMul(expr, index)
     elif isinstance(expr, Abs):
         Texpr = TAbs(expr, index)
-    elif isinstance(expr, (Var_, IdxVar)):
+    elif isinstance(expr, (Var, IdxVar)):
         Texpr = TVector(expr, index)
     elif isinstance(expr, (Const_, Param_, IdxConst, IdxParam)):
         if expr.dim == 2:

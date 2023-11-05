@@ -10,7 +10,7 @@ from scipy.sparse import csc_array, lil_array
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.event import Event
 from Solverz.param import Param
-from Solverz.num.num_alg import Var_, Param_, Const_, idx
+from Solverz.num.num_alg import Var, Param_, Const_, idx
 from Solverz.variable.variables import Vars
 from Solverz.auxiliary import Address
 
@@ -121,7 +121,7 @@ class Equations:
             if symbol.name in self.PARAM:
                 if self.PARAM[symbol.name].triggerable:
                     for y in xys:
-                        if self.PARAM[symbol.name].trigger_var in y.v:
+                        if self.PARAM[symbol.name].trigger_var in y.var_list:
                             self.PARAM[symbol.name].v = self.PARAM[symbol.name].trigger_fun(
                                 y[self.PARAM[symbol.name].trigger_var])
                 args = [*args, self.PARAM[symbol.name].v]
@@ -131,7 +131,7 @@ class Equations:
                 value_obtained = True
             else:
                 for y in xys:
-                    if symbol.name in y.v:
+                    if symbol.name in y.var_list:
                         args = [*args, y[symbol.name]]
                         value_obtained = True
             if not value_obtained:
@@ -188,7 +188,9 @@ class AE(Equations):
             temp = np.array([])
             for eqn_name, eqn_ in self.EQNs.items():
                 args = self.obtain_eqn_args(eqn_, y)
-                temp = np.concatenate([temp, self.eval(eqn_name, *args).reshape(-1, )])
+                g_eqny = self.eval(eqn_name, *args)
+                g_eqny = g_eqny.toarray() if isinstance(g_eqny, csc_array) else g_eqny
+                temp = np.concatenate([temp, g_eqny.reshape(-1, )])
             return temp
         else:
             args = self.obtain_eqn_args(self.EQNs[eqn], y)
@@ -205,7 +207,7 @@ class AE(Equations):
         if not eqn:
             eqn = list(self.EQNs.keys())
         if not var:
-            var = list(y.v.keys())
+            var = list(y.var_list)
 
         gy: List[Tuple[str, str, np.ndarray]] = []
 
@@ -234,21 +236,21 @@ class AE(Equations):
             var_idx = gy_tuple[2]
             value = gy_tuple[3]
 
-            equation_address = self.a[eqn_name]
+            equation_address = self.a.v[eqn_name]
             if var_idx is None:
-                variable_address = y.a[var_name]
+                variable_address = y.a.v[var_name]
             elif isinstance(var_idx, (float, int)):
-                variable_address = y.a[var_name][var_idx: var_idx + 1]
+                variable_address = y.a.v[var_name][var_idx: var_idx + 1]
             elif isinstance(var_idx, str):
-                variable_address = y.a[var_name][np.ix_(self.PARAM[var_idx].v)]
+                variable_address = y.a.v[var_name][np.ix_(self.PARAM[var_idx].v)]
             elif isinstance(var_idx, (slice, list)):
-                variable_address = y.a[var_name][var_idx]
+                variable_address = y.a.v[var_name][var_idx]
             else:
                 raise TypeError(f"Unsupported variable index {var_idx} for equation {eqn_name}")
 
             if isinstance(value, (np.ndarray, csc_array)):
-                # we use `+=` instead of `=` here because sometimes, Var_ `e` and IdxVar `e[0]` exists in the same equation
-                # in which case we have to add the jacobian element of Var_ `e` if it is not zero.
+                # we use `+=` instead of `=` here because sometimes, Var `e` and IdxVar `e[0]` exists in the same equation
+                # in which case we have to add the jacobian element of Var `e` if it is not zero.
                 if value.ndim > 1:
                     if value.shape[1] > 1:  # np.ix_() creates a mesh for matrix
                         self.j_cache[np.ix_(equation_address, variable_address)] += value

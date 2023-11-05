@@ -1,15 +1,13 @@
-from Solverz import Eqn, AE, nr_method, Var, Vars, Var_
+from Solverz import Eqn, AE, nr_method, as_Vars, Var
 
-X = Var_(name='X')
+x = Var(name='x', value=2)
 
-e = Eqn(name='e', eqn=X**2-1)
+e = Eqn(name='e', eqn=x ** 2 - 1)
 f = AE(name='F',
        eqn=e)
-x = Var(name='X')
-x.v = [2]
-x = Vars([x])
-x = nr_method(f, x)
+y = as_Vars(x)
+y = nr_method(f, y)
 
 
 def test_nr_method():
-    assert abs(x['X'] - 1) <= 1e-8
+    assert abs(y['x'] - 1) <= 1e-8
