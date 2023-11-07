@@ -9,8 +9,7 @@ from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
 from Solverz.num.num_alg import F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
-    pre_lambdify, Mat_Mul
-from Solverz.num.num_alg import Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst
+    pre_lambdify, Mat_Mul, Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst
 from Solverz.num.num_interface import numerical_interface
 from Solverz.num.matrix_calculus import MixedEquationDiff
 from Solverz.param import Param
@@ -42,7 +41,7 @@ class Eqn:
     def obtain_symbols(self) -> Dict[str, Symbol]:
         temp_dict = dict()
         for symbol_ in list((self.LHS - self.RHS).free_symbols):
-            if isinstance(symbol_, (Var, Param_, Const_)):
+            if isinstance(symbol_, (Var, Param_, Const_, idx)):
                 temp_dict[symbol_.name] = symbol_
             elif isinstance(symbol_, (IdxVar, IdxParam, IdxConst)):
                 temp_dict[symbol_.symbol.name] = symbol_.symbol
@@ -52,6 +51,8 @@ class Eqn:
                     for idx_ in symbol_.index:
                         if isinstance(idx_, idx):
                             temp_dict[idx_.name] = idx_
+                elif isinstance(symbol_.index, (slice, Expr)):
+                    temp_dict.update(symbol_.symbol_in_index)
 
         return temp_dict
 
@@ -112,7 +113,20 @@ class EqnDiff(Eqn):
         super().__init__(name, eqn)
         self.diff_var = diff_var
         self.diff_var_name = diff_var.symbol.name if isinstance(diff_var, IdxVar) else diff_var.name
-        self.var_idx: str = var_idx  # df/dPi[i] then var_idx=i
+        self.var_idx = var_idx  # df/dPi[i] then var_idx=i
+        if self.var_idx is not None:
+            if isinstance(self.var_idx, slice):
+                temp = [self.var_idx.start, self.var_idx.stop, self.var_idx.step]
+                self.var_idx_func = [None, None, None]
+                for i in range(3):
+                    if temp[i] is not None:
+                        if isinstance(temp[i], Expr):
+                            self.var_idx_func[i] = Eqn('To evaluate var_idx of variable'+self.diff_var.name+f'{i}',
+                                                       temp[i])
+                        else:
+                            self.var_idx_func[i] = temp[i]
+            elif isinstance(self.var_idx, Expr):
+                self.var_idx_func = Eqn('To evaluate var_idx of variable'+self.diff_var.name, self.var_idx)
         self.LHS = Derivative(sympy.Function('g'), diff_var)
 
 
@@ -314,7 +328,7 @@ class HyperbolicPde(Pde):
         """
         if scheme == 1:
             dx = Const_('dx')
-            dt = Const_('dt')
+            dt = Param_('dt')
             M = idx('M')
             u = self.diff_var
             u0 = Param_(u.name + '0')

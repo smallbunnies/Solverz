@@ -5,9 +5,9 @@ from numbers import Number
 from typing import Union, List, Dict, Tuple
 
 import numpy as np
-from sympy import symbols, Symbol
+from sympy import symbols, Symbol, Expr
 from scipy.sparse import csc_array, lil_array
-from Solverz.equation.eqn import Eqn, Ode
+from Solverz.equation.eqn import Eqn, Ode, EqnDiff
 from Solverz.event import Event
 from Solverz.param import Param
 from Solverz.num.num_alg import Var, Param_, Const_, idx
@@ -39,11 +39,11 @@ class Equations:
 
         for symbol_ in self.SYMBOLS.values():
             if isinstance(symbol_, Param_):
-                self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value)
+                self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
             elif isinstance(symbol_, idx):
                 self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dtype=int)
             elif isinstance(symbol_, Const_):
-                self.CONST[symbol_.name] = Param(symbol_.name, value=symbol_.value)
+                self.CONST[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
 
     def add_eqn(self, eqn: Eqn):
         self.EQNs.update({eqn.name: eqn})
@@ -83,15 +83,18 @@ class Equations:
             param: str = args[0]
             value: Union[np.ndarray, list, Number] = args[1]
             try:
-                self.PARAM[param].v = value
+                if param in self.PARAM:
+                    self.PARAM[param].v = value
+                else:
+                    self.CONST[param].v = value
             except KeyError:
-                warnings.warn(f'Equations have no parameter: {param}')
+                warnings.warn(f'Equations have no parameter/constant: {param}')
         elif isinstance(args[0], Vars):
             # Update params with Vars. For example, to update x0 in trapezoid rules.
             vars_: Vars = args[0]
             for param_name in self.PARAM.keys():
-                if param_name in vars_.v.keys():
-                    self.PARAM[param_name].v = vars_.v[param_name]
+                if param_name in vars_.var_list:
+                    self.PARAM[param_name].v = vars_[param_name]
         elif isinstance(args[0], Event):
             # Update params with Event object
             event = args[0]
@@ -196,7 +199,7 @@ class AE(Equations):
             args = self.obtain_eqn_args(self.EQNs[eqn], y)
             return self.eval(eqn, *args)
 
-    def g_y(self, y: Vars, eqn: List[str] = None, var: List[str] = None) -> List[Tuple[str, str, np.ndarray]]:
+    def g_y(self, y: Vars, eqn: List[str] = None, var: List[str] = None) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         """
         generate Jacobian matrices of Eqn object with respect to var object
         :param y:
@@ -209,19 +212,18 @@ class AE(Equations):
         if not var:
             var = list(y.var_list)
 
-        gy: List[Tuple[str, str, np.ndarray]] = []
+        gy: List[Tuple[str, str, EqnDiff, np.ndarray]] = []
 
         for eqn_name in eqn:
-            eqn_diffs = self.EQNs[eqn_name].derivatives
+            eqn_diffs: Dict[str, EqnDiff] = self.EQNs[eqn_name].derivatives
             for var_name in var:
                 for key, value in eqn_diffs.items():
                     if var_name == value.diff_var_name:  # f is viewed as f[k]
                         args = self.obtain_eqn_args(eqn_diffs[key], y)
-                        var_idx = eqn_diffs[key].var_idx
                         temp = self.eval_diffs(eqn_name, key, *args)
                         if not isinstance(temp, csc_array):
                             temp = np.array(temp)
-                        gy = [*gy, (eqn_name, var_name, var_idx, temp)]
+                        gy = [*gy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gy
 
     def j(self, y: Vars) -> csc_array:
@@ -233,7 +235,7 @@ class AE(Equations):
         for gy_tuple in gy:
             eqn_name = gy_tuple[0]
             var_name = gy_tuple[1]
-            var_idx = gy_tuple[2]
+            var_idx = gy_tuple[2].var_idx
             value = gy_tuple[3]
 
             equation_address = self.a.v[eqn_name]
@@ -243,7 +245,18 @@ class AE(Equations):
                 variable_address = y.a.v[var_name][var_idx: var_idx + 1]
             elif isinstance(var_idx, str):
                 variable_address = y.a.v[var_name][np.ix_(self.PARAM[var_idx].v)]
-            elif isinstance(var_idx, (slice, list)):
+            elif isinstance(var_idx, slice):
+                temp = [None, None, None]
+                for i in range(3):
+                    if isinstance(gy_tuple[2].var_idx_func[i], Eqn):
+                        temp[i] = (gy_tuple[2].var_idx_func[i].NUM_EQN(*self.obtain_eqn_args(gy_tuple[2].var_idx_func[i], y)))
+                    else:
+                        temp[i] = gy_tuple[2].var_idx_func[i]
+                variable_address = y.a.v[var_name][slice(*temp)]
+            elif isinstance(var_idx, Expr):
+                args = self.obtain_eqn_args(gy_tuple[2].var_idx_func, y)
+                variable_address = y.a.v[var_name][gy_tuple[2].var_idx_func.NUM_EQN(args)]
+            elif isinstance(var_idx, list):
                 variable_address = y.a.v[var_name][var_idx]
             else:
                 raise TypeError(f"Unsupported variable index {var_idx} for equation {eqn_name}")
@@ -258,7 +271,7 @@ class AE(Equations):
                         self.j_cache[equation_address.tolist(), variable_address.tolist()] += value.reshape((-1,))
                 else:
                     # adding a nonzero scalar to a sparse matrix is not supported by lil_array structure
-                    self.j_cache[equation_address.tolist(), variable_address.tolist()] += np.array(value).reshape(-1,)
+                    self.j_cache[equation_address.tolist(), variable_address.tolist()] += np.array(value).reshape(-1, )
 
         return self.j_cache.tocsc()
 

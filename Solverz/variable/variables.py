@@ -61,7 +61,7 @@ class Vars(VarsBasic):
                  array: np.ndarray):
         super().__init__()
         self.a = a
-        array = array.reshape(-1, 1)
+        array = array.reshape(-1, 1).copy()
         if array.shape[0] != self.a.total_size:
             raise ValueError("Unequal address size and array size!")
         else:
@@ -177,14 +177,8 @@ class Vars(VarsBasic):
                 return new_vars
 
     def derive_alias(self, suffix: str):
-        """
-        Derive a new Vars object with names of variables altered
-        :return:
-        """
-        var_ = []
-        for var_name in self.var_size.keys():
-            var_ = [*var_, Var(var_name + suffix, value=self.v[var_name])]
-        return Vars(var_)
+
+        return Vars(self.a.derive_alias(suffix), self.array)
 
 
 class TimeVars(VarsBasic):
@@ -198,7 +192,7 @@ class TimeVars(VarsBasic):
         self.len = length
         self.a = Vars_.a
 
-        self.array = np.zeros((self.len, self.total_size))
+        self.array = np.zeros((self.len+1, self.total_size))
         self.array[0, :] = Vars_.array[:].reshape(-1, )
 
     def __getitem__(self, item):

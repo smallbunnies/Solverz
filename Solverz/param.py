@@ -17,6 +17,7 @@ class Param:
                  triggerable: bool = False,
                  trigger_var: str = None,
                  trigger_fun: Callable = None,
+                 dim=1,
                  dtype=float
                  ):
         self.name = name
@@ -26,7 +27,8 @@ class Param:
         self.trigger_var = trigger_var
         self.trigger_fun = trigger_fun
         self.dtype = dtype
-        self.v = value
+        self.dim = dim
+        self.__v = value
 
     @property
     def v(self):
@@ -35,19 +37,10 @@ class Param:
     @v.setter
     def v(self, value: Union[np.ndarray, list, Number]):
 
-        if isinstance(value, np.ndarray):
+        if self.dim == 1:
             self.__v = np.array(value, dtype=self.dtype)
-        elif isinstance(value, csc_array):
-            self.__v = value
-        if self.v.ndim < 2 and self.dtype == int:
-            # index param has only one dim
-            self.__v = self.v.reshape((-1, ))
-        elif self.v.ndim == 2:
-            # matrix-like param
-            pass
         else:
-            # vector-like param
-            self.__v = self.v.reshape((-1, 1))
+            self.__v = csc_array(value)
 
     def __repr__(self):
         return f"Param: {self.name} value: {self.v}"

@@ -26,11 +26,13 @@ class idx(Symbol):
         obj.is_Integer = True
         obj.name = f'{name}'
         if value is not None:
-            if isinstance(value, list):
+            if isinstance(value, (list, int)):
                 value = np.array(value, dtype=int)
             if value.ndim > 1:
                 raise TypeError('Only support 1-dim index value')
             obj.value = np.asarray(value, dtype=int).reshape((-1,))
+        else:
+            obj.value = None
         obj.initialized = True if value is not None else False
         return obj
 
@@ -59,13 +61,34 @@ class Var(Symbol):
 class IdxVar(Symbol):
 
     def __new__(cls, symbol, index):
-        if not isinstance(index, (idx, int, slice, list)):
+        if not isinstance(index, (idx, int, slice, list, Expr)):
             raise TypeError(f"Unsupported idx type {type(index)}")
         obj = Symbol.__new__(cls, f'{symbol.name}[{index}]')
         obj.symbol = symbol
         obj.index = index
         obj.symbol_name = symbol.name
         obj.name = f'{symbol.name}[{index}]'
+
+        # in case the index is Expression
+        obj.symbol_in_index = dict()  # Dict[str, Symbol]
+        if isinstance(index, idx):
+            obj.symbol_in_index[index.name] = index
+        elif isinstance(index, slice):
+            # in case start/stop of the slice index is not Number but expression, for example in PDE we have variable
+            # like x[1:M-1] where
+            if isinstance(index.start, (Expr, Symbol)):
+                for symbol_ in list(index.start.free_symbols):
+                    obj.symbol_in_index[symbol_.name] = symbol_
+            if isinstance(index.stop, (Expr, Symbol)):
+                for symbol_ in list(index.stop.free_symbols):
+                    obj.symbol_in_index[symbol_.name] = symbol_
+            if isinstance(index.step, (Expr, Symbol)):
+                for symbol_ in list(index.step.free_symbols):
+                    obj.symbol_in_index[symbol_.name] = symbol_
+        elif isinstance(index, Expr):
+            for symbol_ in list(index.free_symbols):
+                obj.symbol_in_index[symbol_.name] = symbol_
+
         return obj
 
     def _numpycode(self, printer, **kwargs):
@@ -73,7 +96,11 @@ class IdxVar(Symbol):
             temp = self.symbol.name + '[ix_({i})]'.format(i=printer._print(self.index))
             return temp
         else:
-            return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
+            if isinstance(self.index, slice):
+                return self.symbol.name + '[{i}]'.format(
+                    i=printer._print(slice(self.index.start, self.index.stop+1, self.index.step)))
+            else:
+                return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
@@ -97,6 +124,8 @@ class Param_(Symbol):
                     obj.value = csc_array(temp_value)
                 else:
                     obj.value = temp_value.reshape((-1, 1))
+        else:
+            obj.value = None
         obj.dim = dim
         obj.initialized = True if value is not None else False
         return obj
@@ -140,12 +169,31 @@ class IdxConst(Symbol):
         obj.symbol_name = symbol.name
         obj.dim = dim
 
+        # in case the index is Expression, for example in PDE we have variable
+        # like x[1:M-1] where
+        obj.symbol_in_index = dict()  # Dict[str, Symbol]
+        if isinstance(index, idx):
+            obj.symbol_in_index[index.name] = index
+        elif isinstance(index, slice):
+            if isinstance(index.start, (Expr, Symbol)):
+                for symbol_ in list(index.start.free_symbols):
+                    obj.symbol_in_index[symbol_.name] = symbol_
+            if isinstance(index.stop, (Expr, Symbol)):
+                for symbol_ in list(index.stop.free_symbols):
+                    obj.symbol_in_index[symbol_.name] = symbol_
+            if isinstance(index.step, (Expr, Symbol)):
+                for symbol_ in list(index.step.free_symbols):
+                    obj.symbol_in_index[symbol_.name] = symbol_
+        elif isinstance(index, Expr):
+            for symbol_ in list(index.free_symbols):
+                obj.symbol_in_index[symbol_.name] = symbol_
+
         return obj
 
     def _numpycode(self, printer, **kwargs):
-        if isinstance(self.index, idx):
-            temp = self.symbol.name + '[ix_({i})]'.format(i=printer._print(self.index))
-            return temp
+        if isinstance(self.index, slice):
+            return self.symbol.name + '[{i}]'.format(
+                i=printer._print(slice(self.index.start, self.index.stop + 1, self.index.step)))
         else:
             return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
 
@@ -168,6 +216,8 @@ class Const_(Symbol):
                 obj.value = csc_array(temp_value)
             else:
                 obj.value = temp_value.reshape((-1, 1))
+        else:
+            obj.value = None
         obj.dim = dim
         obj.initialized = True if value is not None else False
         return obj
