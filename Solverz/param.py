@@ -38,7 +38,7 @@ class Param:
     def v(self, value: Union[np.ndarray, list, Number]):
 
         if self.dim == 1:
-            self.__v = np.array(value, dtype=self.dtype)
+            self.__v = np.array(value, dtype=self.dtype).reshape((-1, 1))
         else:
             self.__v = csc_array(value)
 

@@ -19,6 +19,16 @@ def implements_nfunc(nfunc_name: str):
     return decorator
 
 
+@implements_nfunc('slice_')
+def slice_(*args):
+    return slice(*[int(arg_) if isinstance(arg_, np.ndarray) else arg_ for arg_ in args])
+
+
+@implements_nfunc('ix_')
+def ix_(arg: np.ndarray):
+    return np.ix_(arg.reshape((-1,)))
+
+
 @implements_nfunc('Sign')
 def _sign(arg):
     return np.sign(arg)
@@ -32,7 +42,7 @@ def diag(x) -> np.ndarray:
     :return: diagonal matrix
     """
     if not isinstance(x, np.ndarray):
-        return diags(x.toarray().reshape(-1,), 0, format='csc')
+        return diags(x.toarray().reshape(-1, ), 0, format='csc')
     else:
         return np.diagflat(x)
 

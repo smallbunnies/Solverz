@@ -121,14 +121,16 @@ E.param_initializer('Vp', param=Param('Vp',
                                       value=Vp.value,
                                       triggerable=True,
                                       trigger_var='m',
-                                      trigger_fun=partial(v_p_reverse_pipe, V.value, m.value)
+                                      trigger_fun=partial(v_p_reverse_pipe, V.value, m.value),
+                                      dim=2
                                       ))
 
 E.param_initializer('Vm', param=Param('Vm',
                                       value=Vm.value,
                                       triggerable=True,
                                       trigger_var='m',
-                                      trigger_fun=partial(v_m_reverse_pipe, V.value, m.value)
+                                      trigger_fun=partial(v_m_reverse_pipe, V.value, m.value),
+                                      dim=2
                                       ))
 
 E.param_initializer('f', param=Param('f',

@@ -127,10 +127,16 @@ class Equations:
                         if self.PARAM[symbol.name].trigger_var in y.var_list:
                             self.PARAM[symbol.name].v = self.PARAM[symbol.name].trigger_fun(
                                 y[self.PARAM[symbol.name].trigger_var])
-                args = [*args, self.PARAM[symbol.name].v]
+                temp = self.PARAM[symbol.name].v
+                if temp is None:
+                    raise TypeError(f'Parameter {symbol.name} uninitialized')
+                args = [*args, temp]
                 value_obtained = True
             elif symbol.name in self.CONST:
-                args = [*args, self.CONST[symbol.name].v]
+                temp = self.CONST[symbol.name].v
+                if temp is None:
+                    raise TypeError(f'Constant {symbol.name} uninitialized')
+                args = [*args, temp]
                 value_obtained = True
             else:
                 for y in xys:
@@ -244,14 +250,16 @@ class AE(Equations):
             elif isinstance(var_idx, (float, int)):
                 variable_address = y.a.v[var_name][var_idx: var_idx + 1]
             elif isinstance(var_idx, str):
-                variable_address = y.a.v[var_name][np.ix_(self.PARAM[var_idx].v)]
+                variable_address = y.a.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
             elif isinstance(var_idx, slice):
                 temp = [None, None, None]
                 for i in range(3):
                     if isinstance(gy_tuple[2].var_idx_func[i], Eqn):
-                        temp[i] = (gy_tuple[2].var_idx_func[i].NUM_EQN(*self.obtain_eqn_args(gy_tuple[2].var_idx_func[i], y)))
+                        temp[i] = int(gy_tuple[2].var_idx_func[i].NUM_EQN(*self.obtain_eqn_args(gy_tuple[2].var_idx_func[i], y)))
                     else:
                         temp[i] = gy_tuple[2].var_idx_func[i]
+                if temp[1] is not None:
+                    temp[1] = temp[1] + 1
                 variable_address = y.a.v[var_name][slice(*temp)]
             elif isinstance(var_idx, Expr):
                 args = self.obtain_eqn_args(gy_tuple[2].var_idx_func, y)

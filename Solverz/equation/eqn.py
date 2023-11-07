@@ -121,12 +121,12 @@ class EqnDiff(Eqn):
                 for i in range(3):
                     if temp[i] is not None:
                         if isinstance(temp[i], Expr):
-                            self.var_idx_func[i] = Eqn('To evaluate var_idx of variable'+self.diff_var.name+f'{i}',
+                            self.var_idx_func[i] = Eqn('To evaluate var_idx of variable' + self.diff_var.name + f'{i}',
                                                        temp[i])
                         else:
                             self.var_idx_func[i] = temp[i]
             elif isinstance(self.var_idx, Expr):
-                self.var_idx_func = Eqn('To evaluate var_idx of variable'+self.diff_var.name, self.var_idx)
+                self.var_idx_func = Eqn('To evaluate var_idx of variable' + self.diff_var.name, self.var_idx)
         self.LHS = Derivative(sympy.Function('g'), diff_var)
 
 

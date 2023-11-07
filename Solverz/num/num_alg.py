@@ -97,8 +97,8 @@ class IdxVar(Symbol):
             return temp
         else:
             if isinstance(self.index, slice):
-                return self.symbol.name + '[{i}]'.format(
-                    i=printer._print(slice(self.index.start, self.index.stop+1, self.index.step)))
+                return self.symbol.name + '[slice_{i}]'.format(
+                    i=printer._print((self.index.start, self.index.stop+1, self.index.step)))
             else:
                 return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
 
@@ -192,8 +192,8 @@ class IdxConst(Symbol):
 
     def _numpycode(self, printer, **kwargs):
         if isinstance(self.index, slice):
-            return self.symbol.name + '[{i}]'.format(
-                i=printer._print(slice(self.index.start, self.index.stop + 1, self.index.step)))
+            return self.symbol.name + '[slice_{i}]'.format(
+                i=printer._print((self.index.start, self.index.stop+1, self.index.step)))
         else:
             return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
 

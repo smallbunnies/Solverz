@@ -12,7 +12,9 @@ def nr_method(eqn: AE,
               y: Vars,
               tol: float = 1e-8):
     df = eqn.g(y)
+    ite = 0
     while max(abs(df)) > tol:
+        ite = ite + 1
         y = y - solve(eqn.j(y), df)
         df = eqn.g(y)
     return y
