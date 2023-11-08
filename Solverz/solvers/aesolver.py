@@ -66,7 +66,7 @@ def continuous_nr(eqn: AE,
             # error control
             # error estimation
             err = dt * np.linalg.norm(
-                kE / np.maximum(np.maximum(abs(y.array), abs(ynew.array)).reshape(-1, ), threshold), np.Inf)
+                kE.reshape(-1, ) / np.maximum(np.maximum(abs(y.array), abs(ynew.array)).reshape(-1, ), threshold), np.Inf)
             if err > rtol:  # failed step
                 if dt <= hmin:
                     raise ValueError(f'IntegrationTolNotMet step size: {dt} hmin: {hmin}')
