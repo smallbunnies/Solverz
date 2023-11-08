@@ -6,7 +6,9 @@ from typing import Union, List, Dict, Tuple
 
 import numpy as np
 from sympy import symbols, Symbol, Expr
-from scipy.sparse import csc_array, lil_array
+from scipy.sparse import csc_array, coo_array
+from cvxopt import spmatrix, matrix
+
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
 from Solverz.event import Event
 from Solverz.param import Param
@@ -232,12 +234,13 @@ class AE(Equations):
                         gy = [*gy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gy
 
-    def j(self, y: Vars) -> csc_array:
+    def j(self, y: Vars, ) -> spmatrix:
         if not self.eqn_size:
             self.assign_equation_address(y)
 
         gy = self.g_y(y)
-        self.j_cache = lil_array((self.eqn_size, self.vsize))
+        self.j_cache = spmatrix([], [], [], (self.eqn_size, self.vsize))
+
         for gy_tuple in gy:
             eqn_name = gy_tuple[0]
             var_name = gy_tuple[1]
@@ -255,7 +258,8 @@ class AE(Equations):
                 temp = [None, None, None]
                 for i in range(3):
                     if isinstance(gy_tuple[2].var_idx_func[i], Eqn):
-                        temp[i] = int(gy_tuple[2].var_idx_func[i].NUM_EQN(*self.obtain_eqn_args(gy_tuple[2].var_idx_func[i], y)))
+                        temp[i] = int(
+                            gy_tuple[2].var_idx_func[i].NUM_EQN(*self.obtain_eqn_args(gy_tuple[2].var_idx_func[i], y)))
                     else:
                         temp[i] = gy_tuple[2].var_idx_func[i]
                 if temp[1] is not None:
@@ -272,16 +276,26 @@ class AE(Equations):
             if isinstance(value, (np.ndarray, csc_array)):
                 # we use `+=` instead of `=` here because sometimes, Var `e` and IdxVar `e[0]` exists in the same equation
                 # in which case we have to add the jacobian element of Var `e` if it is not zero.
+
+                ## cvxopt.spmatrix
                 if value.ndim > 1:
                     if value.shape[1] > 1:  # np.ix_() creates a mesh for matrix
-                        self.j_cache[np.ix_(equation_address, variable_address)] += value
+                        if not isinstance(value, np.ndarray):
+                            value1 = value.tocoo()
+                        else:
+                            value1 = coo_array(value)
+                        I = matrix(equation_address)
+                        J = matrix(variable_address)
+                        self.j_cache[I, J] = \
+                            self.j_cache[I, J] + spmatrix(value1.data, value1.row, value1.col, value1.shape, 'd')
                     else:  # equation and variable lists constitute a address tuple for vector
-                        self.j_cache[equation_address.tolist(), variable_address.tolist()] += value.reshape((-1,))
+                        I = (equation_address + variable_address * self.vsize).tolist()
+                        self.j_cache[I] = self.j_cache[I] + matrix(value)
                 else:
-                    # adding a nonzero scalar to a sparse matrix is not supported by lil_array structure
-                    self.j_cache[equation_address.tolist(), variable_address.tolist()] += np.array(value).reshape(-1, )
+                    I = (equation_address + variable_address * self.vsize).tolist()
+                    self.j_cache[I] = self.j_cache[I] + matrix(value.tolist())
 
-        return self.j_cache.tocsc()
+        return self.j_cache
 
     def __repr__(self):
         if not self.eqn_size:

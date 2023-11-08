@@ -342,9 +342,15 @@ class HyperbolicPde(Pde):
                 [(a, (a[1:M] + a[0:M - 1] + Param_(a.name + '0')[1:M] + Param_(a.name + '0')[0:M - 1]) / 4) for a in
                  self.two_dim_var])
 
-            ae = dx * (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) \
-                 + simplify(dt * (fui1j1 - fuij1 + fui1j - fuij)) \
-                 + simplify(2 * dx * dt * S)
+            # ae = dx * (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) \
+            #      + simplify(dt * (fui1j1 - fuij1 + fui1j - fuij)) \
+            #      - simplify(2 * dx * dt * S)
+
+            ae = (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) / dt \
+                 + simplify((fui1j1 - fuij1 + fui1j - fuij))/dx\
+                 - simplify(2 * S)
+
+            # ae = -simplify(2 * S)+1
 
             return Eqn('FDM of ' + self.name, ae)
 

@@ -229,7 +229,7 @@ class TimeVars(VarsBasic):
             if key > self.len:
                 raise ValueError(f'Exceed the maximum index, which is {self.len}')
             else:
-                self.array[key, 0:] = value.array[:]
+                self.array[key:key+1, :] = value.array[:].T
         else:
             raise NotImplementedError(f'Unsupported indices')
 

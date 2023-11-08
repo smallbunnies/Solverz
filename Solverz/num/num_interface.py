@@ -5,6 +5,8 @@ from functools import reduce
 import numpy as np
 from numpy import linalg
 from scipy.sparse import diags, linalg as splinalg
+from cvxopt.umfpack import linsolve
+from cvxopt import matrix
 
 numerical_interface = {}
 
@@ -110,4 +112,7 @@ def inv(mat: np.ndarray):
 
 
 def solve(A, b):
-    return splinalg.spsolve(A, b)
+    # return splinalg.spsolve(A, b)
+    c = matrix(b)
+    linsolve(A, c)
+    return np.array(c)

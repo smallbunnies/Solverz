@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from numpy import abs, max, min, sum, sqrt
+from cvxopt import matrix
 
 from Solverz.equation.equations import AE
 from Solverz.num.num_interface import solve
