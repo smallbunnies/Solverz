@@ -36,6 +36,11 @@ def _sign(arg):
     return np.sign(arg)
 
 
+@implements_nfunc('minmod')
+def minmod(*args):
+    pass
+
+
 @implements_nfunc('Diag')
 def diag(x) -> np.ndarray:
     """

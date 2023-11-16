@@ -9,7 +9,7 @@ from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
 from Solverz.num.num_alg import F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
-    pre_lambdify, Mat_Mul, Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst
+    pre_lambdify, Mat_Mul, Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst, minmod
 from Solverz.num.num_interface import numerical_interface
 from Solverz.num.matrix_calculus import MixedEquationDiff
 from Solverz.param import Param
@@ -142,8 +142,10 @@ class Ode(Eqn):
 
     """
 
-    def __init__(self, name: str, eqn: Expr, diff_var: Var):
-        super().__init__(name, eqn)
+    def __init__(self, name: str,
+                 f: Expr,
+                 diff_var: Var):
+        super().__init__(name, f)
         self.diff_var = diff_var
         self.LHS = Derivative(diff_var, t)
 
@@ -258,7 +260,7 @@ class HyperbolicPde(Pde):
     Parameters
     ==========
 
-    two_dim_var : Var or list of Var_
+    two_dim_var : Var or list of Var
 
         Specify the two-dimensional variables in the PDE. Some of the variables, for example, the mass flow $\dot{m}$ in
         the heat transmission equation, are not two-dimensional variables.
@@ -342,17 +344,188 @@ class HyperbolicPde(Pde):
                 [(a, (a[1:M] + a[0:M - 1] + Param_(a.name + '0')[1:M] + Param_(a.name + '0')[0:M - 1]) / 4) for a in
                  self.two_dim_var])
 
-            # ae = dx * (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) \
-            #      + simplify(dt * (fui1j1 - fuij1 + fui1j - fuij)) \
-            #      - simplify(2 * dx * dt * S)
+            ae = dx * (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) \
+                 + simplify(dt * (fui1j1 - fuij1 + fui1j - fuij)) \
+                 - simplify(2 * dx * dt * S)
 
-            ae = (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) / dt \
-                 + simplify((fui1j1 - fuij1 + fui1j - fuij))/dx\
-                 - simplify(2 * S)
-
-            # ae = -simplify(2 * S)+1
+            # ae = (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) / dt \
+            #      + simplify((fui1j1 - fuij1 + fui1j - fuij))/dx\
+            #      - simplify(2 * S)
 
             return Eqn('FDM of ' + self.name, ae)
 
-    def semi_discretize(self):
-        pass
+    def semi_discretize(self, a):
+        r"""
+        Semi-discretize the hyperbolic PDE of nonlinear conservation law as ODEs using the Kurganov-Tadmor scheme
+        (see [Kurganov2000]_). The difference stencil is as follows, with $x_{j+1}-x_{j}=\Delta x$.
+
+            .. image:: ../../pics/difference_stencil.png
+               :height: 100
+
+        Parameters
+        ==========
+
+        a : List[Expr]
+
+            Maximum local speed $a=[a_{j+1/2}, a_{j-1/2}]$, with formula
+
+            .. math::
+
+                a_{j+1/2}=\max\qty{\rho\qty(\pdv{f}{u}\qty(u^+_{j+1/2})),\rho\qty(\pdv{f}{u}\qty(u^-_{j+1/2}))},
+
+            .. math::
+
+                a_{j-1/2}=\max\qty{\rho\qty(\pdv{f}{u}\qty(u^+_{j-1/2})),\rho\qty(\pdv{f}{u}\qty(u^-_{j-1/2}))},
+
+            where
+
+            .. math::
+
+                \rho(A)=\max_i|\lambda_i(A)|
+
+        Returns
+        =======
+
+        ODE : List[Union[Ode, Eqn]]
+
+            This function returns the for $2\leq j\leq M-2$
+
+            .. math::
+
+                \dv{t}u_j=-\frac{H_{j+1/2}-H_{j-1/2}}{\Delta x}+S(u_j)
+
+            and for $j=1,M-1$
+
+            .. math::
+
+                \dv{t}u_j=-\frac{f(u_{j+1})-f(u_{j-1})}{2\Delta x}+\frac{a_{j+1/2}(u_{j+1}-u_j)-a_{j-1/2}(u_j-u_{j-1})}{2\Delta x}+S(u_j),
+
+            where
+
+            .. math::
+
+                H_{j+1/2}=\frac{f(u^+_{j+1/2})+f(u^-_{j+1/2})}{2}-\frac{a_{j+1/2}}{2}\qty[u^+_{j+1/2}-u^-_{j+1/2}],
+
+            .. math::
+
+                H_{j-1/2}=\frac{f(u^+_{j-1/2})+f(u^-_{j-1/2})}{2}-\frac{a_{j-1/2}}{2}\qty[u^+_{j-1/2}-u^-_{j-1/2}],
+
+            .. math::
+
+                u^+_{j+1/2}=u_{j+1}-\frac{\Delta x}{2}(u_x)_{j+1},\quad u^-_{j+1/2}=u_j+\frac{\Delta x}{2}(u_x)_j,
+
+            .. math::
+
+                u^+_{j-1/2}=u_{j}-\frac{\Delta x}{2}(u_x)_{j},\quad u^-_{j-1/2}=u_{j-1}+\frac{\Delta x}{2}(u_x)_{j-1},
+
+            .. math::
+
+                (u_x)_j=\operatorname{minmod}\qty(\theta\frac{u_j-u_{j-1}}{\Delta x},\frac{u_{j+1}-u_{j-1}}{2\Delta x},\theta\frac{u_{j+1}-u_{j}}{\Delta x}),\quad \theta\in[1,2],
+
+            and by linear extrapolation
+
+            .. math::
+
+                u_0=2u_\text{L}-u_1,\quad u_M=2u_\text{R}-u_{M-1}.
+
+
+        .. [Kurganov2000] Alexander Kurganov, Eitan Tadmor, New High-Resolution Central Schemes for Nonlinear Conservation Laws and Convection–Diffusion Equations, Journal of Computational Physics, Volume 160, Issue 1, 2000, Pages 241-282, `<https://doi.org/10.1006/jcph.2000.6459>`_
+
+        """
+
+        if not isinstance(a, list):
+            raise TypeError("a should be a list of maximum local speed for a_{j+1/2} and a_{j-1/2}!")
+
+        dx = Const_('dx')
+        M = idx('M')
+
+        u = self.diff_var
+
+        # j=1
+        # f(u[2])
+        fu2 = self.flux.subs([(var, var[2]) for var in self.two_dim_var])
+        # f(u[0])=f(2*uL-u[1])
+        fu0 = self.flux.subs([(var, 2 * Var(var.name + 'L') - var[1]) for var in self.two_dim_var])
+        # S(u[1])
+        Su1 = self.source.subs([(var, var[1]) for var in self.two_dim_var])
+        ode_rhs1 = -simplify((fu2 - fu0) / (2 * dx)) \
+                   + simplify((a[0] * (u[2] - u[1]) - a[1] * (u[1] - u[0])) / (2 * dx)) \
+                   + simplify(Su1)
+
+        # j=M-1
+        # f(u[M])=f(2*uR-u[M-1])
+        fum = self.flux.subs([(var, 2 * Var(var.name + 'R') - var[M - 1]) for var in self.two_dim_var])
+        # f(u[M-2])
+        fum2 = self.flux.subs([(var, var[M - 2]) for var in self.two_dim_var])
+        # S(u[M-1])
+        SuM1 = self.source.subs([(var, var[M]) for var in self.two_dim_var])
+        ode_rhs3 = -simplify((fum - fum2) / (2 * dx)) \
+                   + simplify((a[0] * (u[M] - u[M - 1]) - a[1] * (u[M - 1] - u[M - 2])) / (2 * dx)) \
+                   + simplify(SuM1)
+
+        # 2<=j<=M-2
+        def ujprime(U: IdxVar, v: int):
+            # for given u_j,
+            # returns
+            # u^+_{j+1/2} case v==0,
+            # u^-_{j+1/2} case 1,
+            # u^+_{j-1/2} case 2,
+            # u^-_{j-1/2} case 3
+            if not isinstance(U.index, slice):
+                raise TypeError("Index of IdxVar must be slice object")
+            start = U.index.start
+            stop = U.index.stop
+            step = U.index.step
+            var_name = U.symbol.name
+            U = Var(var_name)
+            Ux = Var(var_name+'x')
+
+            # u_j
+            Uj = U[start:stop:step]
+            # (u_x)_j
+            Uxj = Ux[start:stop:step]
+            # u_{j+1}
+            Ujp1 = U[start + 1:stop + 1:step]
+            # (u_x)_{j+1}
+            Uxjp1 = Ux[start + 1:stop + 1:step]
+            # u_{j-1}
+            Ujm1 = U[start - 1:stop - 1:step]
+            # (u_x)_{j-1}
+            Uxjm1 = Ux[start - 1:stop - 1:step]
+
+            if v == 0:
+                return Ujp1 - dx / 2 * Uxjp1
+            elif v == 1:
+                return Uj + dx/2*Uxj
+            elif v == 2:
+                return Uj - dx/2*Uxj
+            elif v == 3:
+                return Ujm1 + dx/2*Uxjm1
+            else:
+                raise ValueError("v=0 or 1 or 2 or 3!")
+
+        # j\in [2:M-2]
+        Suj = self.source.subs([(var, var[2:M - 2]) for var in self.two_dim_var])
+        Hp = (self.flux.subs([(var, ujprime(var[2:M - 2], 0)) for var in self.two_dim_var]) +
+              self.flux.subs([(var, ujprime(var[2:M - 2], 1)) for var in self.two_dim_var])) / 2 \
+             - a[0] / 2 * (ujprime(u[2:M - 2], 0) - ujprime(u[2:M - 2], 1))
+        Hm = (self.flux.subs([(var, ujprime(var[2:M - 2], 2)) for var in self.two_dim_var]) +
+              self.flux.subs([(var, ujprime(var[2:M - 2], 3)) for var in self.two_dim_var])) / 2 \
+             - a[1] / 2 * (ujprime(u[2:M - 2], 2) - ujprime(u[2:M - 2], 3))
+        ode_rhs2 = -simplify(Hp-Hm)/dx + Suj
+
+        theta = Const_('theta')
+        ux = Var(u.name + 'x')
+        minmod_rhs = ux[1:M-1] \
+                     - minmod(theta * (u[1:M-1]-u[0:M-2]) / dx,
+                              (u[2:M] - u[0:M-2]) / (2 * dx),
+                              theta * (u[2:M] - u[1:M-1]) / dx)
+
+        return [Ode('SDM of' + self.name + '1', ode_rhs1, u[1]),
+                Ode('SDM of' + self.name + '2', ode_rhs2, u[2:M-2]),
+                Ode('SDM of' + self.name + '3', ode_rhs3, u[M - 1]),
+                Eqn('SDM of' + self.name + '4', u[M]-2 * Var(u.name + 'R') + u[M - 1]),
+                Eqn('SDM of' + self.name + '5', u[0]-2 * Var(u.name + 'L') + u[1]),
+                Eqn('minmod limiter 1', minmod_rhs),
+                Eqn('minmod limiter 2', ux[0]),
+                Eqn('minmod limiter 3', ux[M])]

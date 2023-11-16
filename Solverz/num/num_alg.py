@@ -67,7 +67,10 @@ class IdxVar(Symbol):
         obj.symbol = symbol
         obj.index = index
         obj.symbol_name = symbol.name
-        obj.name = f'{symbol.name}[{index}]'
+        if isinstance(index, slice):
+            obj.name = f'{symbol.name}[{print_slice(index)}]'
+        else:
+            obj.name = f'{symbol.name}[{index}]'
 
         # in case the index is Expression
         obj.symbol_in_index = dict()  # Dict[str, Symbol]
@@ -98,7 +101,7 @@ class IdxVar(Symbol):
         else:
             if isinstance(self.index, slice):
                 return self.symbol.name + '[slice_{i}]'.format(
-                    i=printer._print((self.index.start, self.index.stop+1, self.index.step)))
+                    i=printer._print((self.index.start, self.index.stop + 1, self.index.step)))
             else:
                 return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
 
@@ -193,7 +196,7 @@ class IdxConst(Symbol):
     def _numpycode(self, printer, **kwargs):
         if isinstance(self.index, slice):
             return self.symbol.name + '[slice_{i}]'.format(
-                i=printer._print((self.index.start, self.index.stop+1, self.index.step)))
+                i=printer._print((self.index.start, self.index.stop + 1, self.index.step)))
         else:
             return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
 
@@ -511,6 +514,21 @@ class exp(Function):
 
 class sign(ElementwiseFunction):
     pass
+
+
+class minmod(ElementwiseFunction):
+    """
+
+
+    """
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 3:
+            raise TypeError(f"Diagonal takes 1 positional arguments but {len(args)} were given!")
+
+    @classmethod
+    def fdiff(self, argindex=1):
+        pass
 
 
 def traverse_for_mul(node: Expr):

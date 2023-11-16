@@ -102,7 +102,11 @@ class Equations:
             event = args[0]
             t = args[1]
             for param_name in event.var_value.keys():
-                self.PARAM[param_name].v[event.index[param_name]] = event.interpolate(param_name, t)
+                temp = event.index[param_name]
+                if temp is not None:
+                    self.PARAM[param_name].v[temp] = event.interpolate(param_name, t)
+                else:
+                    self.PARAM[param_name].v = event.interpolate(param_name, t)
 
     def eval(self, eqn_name: str, *args: Union[np.ndarray]) -> np.ndarray:
         """

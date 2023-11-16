@@ -49,7 +49,9 @@ mathjax3_config = {
     "tex": {
         "inlineMath": [['\\(', '\\)']],
         "displayMath": [["\\[", "\\]"]],
-    }
+        'packages': {'[+]': ['physics']}
+    },
+    'loader': {'load': ['[tex]/physics']},
 }
 
 # -- Options for HTML output -------------------------------------------------

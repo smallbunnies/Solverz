@@ -23,7 +23,7 @@ class Event:
     def add_var(self,
                 var: str,
                 v,
-                index):
+                index=None):
         v = np.asarray(v, dtype=np.float64)
         self.var_value[var] = v
         self.index[var] = index
