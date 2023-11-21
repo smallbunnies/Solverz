@@ -521,14 +521,30 @@ class minmod(ElementwiseFunction):
 
 
     """
+
     @classmethod
     def eval(cls, *args):
         if len(args) != 3:
             raise TypeError(f"Diagonal takes 1 positional arguments but {len(args)} were given!")
 
+    def _eval_derivative(self, s):
+
+        return switch(*[arg.diff(s) for arg in self.args], 0, minmod_flag(*self.args))
+
+
+class minmod_flag(Function):
+    """
+    Different from `minmod`, minmod function outputs the position of args instead of the values of args.
+    """
+
     @classmethod
-    def fdiff(self, argindex=1):
-        pass
+    def eval(cls, *args):
+        if len(args) != 3:
+            raise TypeError(f"Diagonal takes 1 positional arguments but {len(args)} were given!")
+
+
+class switch(Function):
+    pass
 
 
 def traverse_for_mul(node: Expr):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 from numbers import Number
 from typing import Union, List, Dict, Tuple
+from copy import deepcopy
 
 import numpy as np
 from sympy import symbols, Symbol, Expr
@@ -14,21 +15,26 @@ from Solverz.event import Event
 from Solverz.param import Param
 from Solverz.num.num_alg import Var, Param_, Const_, idx
 from Solverz.variable.variables import Vars
-from Solverz.auxiliary import Address
+from Solverz.auxiliary import Address, combine_Address
 
 
 class Equations:
 
     def __init__(self,
                  eqn: Union[List[Eqn], Eqn],
-                 name: str = None):
+                 name: str = None,
+                 matrix_container='scipy'):
         self.name = name
 
         self.EQNs: Dict[str, Eqn] = dict()
         self.SYMBOLS: Dict[str, Symbol] = dict()
         self.a = Address()  # equation address
+        self.var_address = Address()  # variable address
         self.esize: Dict[str, int] = dict()  # size of each equation
         self.vsize: int = 0  # size of variables
+        self.f_list = []
+        self.g_list = []
+        self.matrix_container = matrix_container
 
         if isinstance(eqn, Eqn):
             eqn = [eqn]
@@ -47,10 +53,17 @@ class Equations:
             elif isinstance(symbol_, Const_):
                 self.CONST[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
 
+        for eqn in self.EQNs.values():
+            eqn.derive_derivative()
+
     def add_eqn(self, eqn: Eqn):
         self.EQNs.update({eqn.name: eqn})
         self.SYMBOLS.update(eqn.SYMBOLS)
         self.a.add(eqn.name)
+        if isinstance(eqn, Eqn) and not isinstance(eqn, Ode):
+            self.g_list = self.g_list + [eqn.name]
+        elif isinstance(eqn, Ode):
+            self.f_list = self.f_list + [eqn.name]
 
     @property
     def eqn_size(self):
@@ -163,34 +176,150 @@ class Equations:
         """
         return self.EQNs[eqn_name].derivatives[var_name].NUM_EQN(*args)
 
+    def parse_address(self, eqn_name, var_name, eqndiff, *xys):
+        var_idx = eqndiff.var_idx
+        var_idx_func = eqndiff.var_idx_func
+
+        equation_address = self.a.v[eqn_name]
+        if var_idx is None:
+            variable_address = self.var_address.v[var_name]
+        elif isinstance(var_idx, (float, int)):
+            variable_address = self.var_address.v[var_name][var_idx: var_idx + 1]
+        elif isinstance(var_idx, str):
+            variable_address = self.var_address.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
+        elif isinstance(var_idx, slice):
+            temp = [None, None, None]
+            for i in range(3):
+                if isinstance(var_idx_func[i], Eqn):
+                    temp[i] = int(
+                        var_idx_func[i].NUM_EQN(*self.obtain_eqn_args(var_idx_func[i], *xys)))
+                else:
+                    temp[i] = var_idx_func[i]
+            if temp[1] is not None:
+                temp[1] = temp[1] + 1
+            variable_address = self.var_address.v[var_name][slice(*temp)]
+        elif isinstance(var_idx, Expr):
+            args = self.obtain_eqn_args(var_idx_func, *xys)
+            variable_address = self.var_address.v[var_name][var_idx_func.NUM_EQN(args)]
+        elif isinstance(var_idx, list):
+            variable_address = self.var_address.v[var_name][var_idx]
+        else:
+            raise TypeError(f"Unsupported variable index {var_idx} for equation {eqn_name}")
+
+        return equation_address, variable_address
+
+    def form_jac(self, gy, *xys):
+
+        if self.matrix_container == 'cvxopt':
+
+            jac = spmatrix([], [], [], (self.eqn_size, self.vsize))
+
+            for gy_tuple in gy:
+                eqn_name = gy_tuple[0]
+                var_name = gy_tuple[1]
+                eqndiff = gy_tuple[2]
+                value = gy_tuple[3]
+                equation_address, variable_address = self.parse_address(eqn_name,
+                                                                        var_name,
+                                                                        eqndiff,
+                                                                        *xys)
+
+                if isinstance(value, (np.ndarray, csc_array)):
+                    # we use `+=` instead of `=` here because sometimes, Var `e` and IdxVar `e[0]` exists in the same equation
+                    # in which case we have to add the jacobian element of Var `e` if it is not zero.
+
+                    ## cvxopt.spmatrix
+                    if value.ndim > 1:
+                        if value.shape[1] > 1:  # np.ix_() creates a mesh for matrix
+                            if not isinstance(value, np.ndarray):
+                                value1 = value.tocoo()
+                            else:
+                                value1 = coo_array(value)
+                            I = matrix(equation_address)
+                            J = matrix(variable_address)
+                            jac[I, J] = \
+                                jac[I, J] + spmatrix(value1.data, value1.row, value1.col, value1.shape, 'd')
+                        else:  # equation and variable lists constitute a address tuple for vector
+                            I = (equation_address + variable_address * self.vsize).tolist()
+                            jac[I] = jac[I] + matrix(value)
+                    else:
+                        I = (equation_address + variable_address * self.vsize).tolist()
+                        jac[I] = jac[I] + matrix(value.tolist())
+            return jac
+        elif self.matrix_container == 'scipy':
+
+            row = []
+            col = []
+            data = []
+
+            for gy_tuple in gy:
+                eqn_name = gy_tuple[0]
+                var_name = gy_tuple[1]
+                eqndiff = gy_tuple[2]
+                value = gy_tuple[3]
+                equation_address, variable_address = self.parse_address(eqn_name,
+                                                                        var_name,
+                                                                        eqndiff,
+                                                                        *xys)
+
+                if isinstance(value, (np.ndarray, csc_array)):
+                    # we use `+=` instead of `=` here because sometimes, Var `e` and IdxVar `e[0]` exists in the same equation
+                    # in which case we have to add the jacobian element of Var `e` if it is not zero.
+
+                    if value.ndim > 1:
+                        if value.shape[1] > 1:
+                            # matrix
+                            if isinstance(value, csc_array):
+                                coo_ = value.tocoo()
+                            else:
+                                coo_ = coo_array(value)
+                            data.extend(coo_.data.tolist())
+                            # map local addresses of coo_ to equation_address and variable address
+                            row.extend(equation_address[coo_.row].tolist())
+                            col.extend(variable_address[coo_.col].tolist())
+                        else:
+                            # vector
+
+                            if value.shape[0] < len(equation_address):
+                                # two dimensional scalar as vector todo: this should be avoided
+                                data.extend(value.reshape(-1).tolist() * len(equation_address))
+                            else:  # vector
+                                data.extend(value.reshape(-1).tolist())
+                            row.extend(equation_address.tolist())
+                            col.extend(variable_address.tolist())
+                    else:
+                        # scalar
+                        data.extend([value.tolist()] * len(equation_address))
+                        row.extend(equation_address.tolist())
+                        col.extend(variable_address.tolist())
+            return coo_array((data, (row, col)), (self.eqn_size, self.vsize)).tocsc()
+
 
 class AE(Equations):
 
     def __init__(self,
                  eqn: Union[List[Eqn], Eqn],
-                 name: str = None):
-        super().__init__(eqn, name)
-        for eqn in self.EQNs.values():
-            eqn.derive_derivative()
-
-        self.j_cache = csc_array((0, 0))
+                 name: str = None,
+                 matrix_container='scipy'):
+        super().__init__(eqn, name, matrix_container)
 
         # Check if some equation in self.eqn is Eqn.
         # If not, raise error
-        if any([isinstance(eqn_, Ode) for eqn_ in self.EQNs.values()]):
+        if len(self.f_list) > 0:
             raise ValueError(f'Ode found. This object should be DAE!')
 
-    def assign_equation_address(self, y: Vars):
+    def assign_eqn_var_address(self, y: Vars):
         """
         ASSIGN ADDRESSES TO EQUATIONS
         """
         temp = 0
         for eqn_name in self.EQNs.keys():
-            self.a.update(eqn_name, temp, temp + self.g(y, eqn_name).shape[0] - 1)
-            temp = temp + self.g(y, eqn_name).shape[0]
-            self.esize[eqn_name] = self.g(y, eqn_name).shape[0]
+            eqn_size = self.g(y, eqn_name).shape[0]
+            self.a.update(eqn_name, temp, temp + eqn_size - 1)
+            temp = temp + eqn_size
+            self.esize[eqn_name] = eqn_size
+        self.var_address = y.a
         self.vsize = y.total_size
-        self.j_cache = csc_array((self.eqn_size, y.total_size))
 
     def g(self, y: Vars, eqn: str = None) -> np.ndarray:
         """
@@ -238,68 +367,13 @@ class AE(Equations):
                         gy = [*gy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gy
 
-    def j(self, y: Vars, ) -> spmatrix:
+    def j(self, y: Vars) -> spmatrix:
         if not self.eqn_size:
-            self.assign_equation_address(y)
+            self.assign_eqn_var_address(y)
 
         gy = self.g_y(y)
-        self.j_cache = spmatrix([], [], [], (self.eqn_size, self.vsize))
 
-        for gy_tuple in gy:
-            eqn_name = gy_tuple[0]
-            var_name = gy_tuple[1]
-            var_idx = gy_tuple[2].var_idx
-            value = gy_tuple[3]
-
-            equation_address = self.a.v[eqn_name]
-            if var_idx is None:
-                variable_address = y.a.v[var_name]
-            elif isinstance(var_idx, (float, int)):
-                variable_address = y.a.v[var_name][var_idx: var_idx + 1]
-            elif isinstance(var_idx, str):
-                variable_address = y.a.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
-            elif isinstance(var_idx, slice):
-                temp = [None, None, None]
-                for i in range(3):
-                    if isinstance(gy_tuple[2].var_idx_func[i], Eqn):
-                        temp[i] = int(
-                            gy_tuple[2].var_idx_func[i].NUM_EQN(*self.obtain_eqn_args(gy_tuple[2].var_idx_func[i], y)))
-                    else:
-                        temp[i] = gy_tuple[2].var_idx_func[i]
-                if temp[1] is not None:
-                    temp[1] = temp[1] + 1
-                variable_address = y.a.v[var_name][slice(*temp)]
-            elif isinstance(var_idx, Expr):
-                args = self.obtain_eqn_args(gy_tuple[2].var_idx_func, y)
-                variable_address = y.a.v[var_name][gy_tuple[2].var_idx_func.NUM_EQN(args)]
-            elif isinstance(var_idx, list):
-                variable_address = y.a.v[var_name][var_idx]
-            else:
-                raise TypeError(f"Unsupported variable index {var_idx} for equation {eqn_name}")
-
-            if isinstance(value, (np.ndarray, csc_array)):
-                # we use `+=` instead of `=` here because sometimes, Var `e` and IdxVar `e[0]` exists in the same equation
-                # in which case we have to add the jacobian element of Var `e` if it is not zero.
-
-                ## cvxopt.spmatrix
-                if value.ndim > 1:
-                    if value.shape[1] > 1:  # np.ix_() creates a mesh for matrix
-                        if not isinstance(value, np.ndarray):
-                            value1 = value.tocoo()
-                        else:
-                            value1 = coo_array(value)
-                        I = matrix(equation_address)
-                        J = matrix(variable_address)
-                        self.j_cache[I, J] = \
-                            self.j_cache[I, J] + spmatrix(value1.data, value1.row, value1.col, value1.shape, 'd')
-                    else:  # equation and variable lists constitute a address tuple for vector
-                        I = (equation_address + variable_address * self.vsize).tolist()
-                        self.j_cache[I] = self.j_cache[I] + matrix(value)
-                else:
-                    I = (equation_address + variable_address * self.vsize).tolist()
-                    self.j_cache[I] = self.j_cache[I] + matrix(value.tolist())
-
-        return self.j_cache
+        return self.form_jac(gy, y)
 
     def __repr__(self):
         if not self.eqn_size:
@@ -312,35 +386,19 @@ class DAE(Equations):
 
     def __init__(self,
                  eqn: Union[List[Eqn], Eqn],
-                 name: str = None
+                 name: str = None,
+                 matrix_container='scipy'
                  ):
 
-        self.f_dict: Dict[str, Ode] = dict()  # dict of state equations
-        self.g_dict: Dict[str, Eqn] = dict()  # dict of algebraic equations
-        self.var_address: Dict[str, List[int]] = dict()
-
-        super().__init__(eqn, name)
+        super().__init__(eqn, name, matrix_container)
 
         self.state_num: int = 0  # number of state variables
         self.algebra_num: int = 0  # number of algebraic variables
 
         # Check if some equation in self.eqn is Ode.
         # If not, raise error
-        if not self.f_dict:
+        if len(self.f_list) == 0:
             raise ValueError(f'No ODE found. You should initialise AE instead!')
-
-    def add_eqn(self, eqn: Union[Eqn, Ode]):
-        self.EQNs[eqn.name] = eqn
-        for symbol_ in self.EQNs[eqn.name].SYMBOLS.values():
-            # generate bare symbols without assumptions
-            self.SYMBOLS[symbol_.name] = symbols(symbol_.name)
-        self.a[eqn.name] = []
-        if isinstance(eqn, Ode):
-            self.f_dict[eqn.name] = eqn
-        elif isinstance(eqn, Eqn):
-            self.g_dict[eqn.name] = eqn
-        else:
-            raise ValueError(f'Undefined equation: {eqn.__class__.__name__}')
 
     def assign_eqn_var_address(self, *xys: Vars):
         """
@@ -348,37 +406,57 @@ class DAE(Equations):
         """
 
         temp = 0
-        for eqn_name in self.f_dict.keys():
+        for eqn_name in self.f_list:
             eqn_size = self.f(eqn_name, *xys).shape[0]
-            self.a[eqn_name] = [temp, temp + eqn_size - 1]
+            self.a.update(eqn_name, temp, temp + eqn_size - 1)
             temp = temp + eqn_size
             self.esize[eqn_name] = eqn_size
 
         self.state_num = temp
 
-        for eqn_name in self.g_dict.keys():
+        for eqn_name in self.g_list:
             eqn_size = self.g(eqn_name, *xys).shape[0]
-            self.a[eqn_name] = [temp, temp + eqn_size - 1]
+            self.a.update(eqn_name, temp, temp + eqn_size - 1)
             temp = temp + eqn_size
             self.esize[eqn_name] = eqn_size
 
         self.algebra_num = temp - self.state_num
 
-        temp = 0
-        for xy in xys:
-            for var_name, a in xy.a.items():
-                if var_name in self.SYMBOLS:
-                    self.var_address[var_name] = [temp + xy.a[var_name][0], xy.a[var_name][-1] + temp]
-                else:
-                    raise ValueError(f"DAE {self.name} has no variable {var_name}")
-            temp = temp + xy.total_size
+        if len(xys) == 1:
+            self.var_address.v = xys[0].a.v
+            self.vsize = self.var_address.total_size
+        elif len(xys) == 2:
+            x = xys[0]
+            y = xys[1]
+            if x.total_size != self.state_num:
+                raise ValueError("Length of input state variable not compatible with state equations!")
+            if y.total_size != self.algebra_num:
+                raise ValueError("Length of input algebraic variable not compatible with algebraic equations!")
+            self.var_address = combine_Address(x.a, y.a)
 
-        self.vsize: int = temp
+            for var_name in self.var_address.v.keys():
+                if not var_name in self.SYMBOLS:
+                    raise ValueError(f"DAE {self.name} has no variable {var_name}")
+
+            self.vsize: int = self.var_address.total_size
+        elif len(xys) > 2:
+            raise ValueError("Accept at most two positional arguments!")
+
+    def F(self, *xys) -> np.ndarray:
+        """
+        Return [f(x,y), g(x,y)]
+        :param xys:
+        :return:
+        """
+        if len(self.g_list) > 0:
+            return np.concatenate([self.f(*xys), self.g(*xys)])
+        else:
+            return self.f(*xys)
 
     def f(self, *xys) -> np.ndarray:
         """
 
-        `args` is either:
+        `xys` is either:
           - two arguments, e.g. state vars x, and numerical equation y
           - one argument, e.g. state vars x.
         """
@@ -389,14 +467,14 @@ class DAE(Equations):
 
         temp = np.array([])
         if eqn:
-            if eqn in self.f_dict.keys():
-                args = self.obtain_eqn_args(self.f_dict[eqn], *xys)
+            if eqn in self.f_list:
+                args = self.obtain_eqn_args(self.EQNs[eqn], *xys)
                 temp = np.concatenate([temp, self.eval(eqn, *args).reshape(-1, )])
                 return temp
         else:
-            for eqn_name, eqn_ in self.f_dict.items():
-                args = self.obtain_eqn_args(eqn_, *xys)
-                temp = np.concatenate([temp, self.eval(eqn_name, *args).reshape(-1, )])
+            for eqn in self.f_list:
+                args = self.obtain_eqn_args(self.EQNs[eqn], *xys)
+                temp = np.concatenate([temp, self.eval(eqn, *args).reshape(-1, )])
             return temp
 
     def g(self, *xys) -> np.ndarray:
@@ -408,7 +486,7 @@ class DAE(Equations):
 
         """
 
-        if not self.g_dict:
+        if len(self.g_list) == 0:
             raise ValueError(f'No AE found in {self.name}!')
 
         eqn = None
@@ -418,102 +496,79 @@ class DAE(Equations):
 
         temp = np.array([])
         if eqn:
-            if eqn in self.g_dict.keys():
-                args = self.obtain_eqn_args(self.g_dict[eqn], *xys)
+            if eqn in self.g_list:
+                args = self.obtain_eqn_args(self.EQNs[eqn], *xys)
                 temp = np.concatenate([temp, self.eval(eqn, *args).reshape(-1, )])
                 return temp
         else:
-            for eqn_name, eqn_ in self.g_dict.items():
-                args = self.obtain_eqn_args(eqn_, *xys)
-                temp = np.concatenate([temp, self.eval(eqn_name, *args).reshape(-1, )])
+            for eqn in self.g_list:
+                args = self.obtain_eqn_args(self.EQNs[eqn], *xys)
+                temp = np.concatenate([temp, self.eval(eqn, *args).reshape(-1, )])
         return temp
 
-    def f_xy(self, *xys: Vars) -> List[Tuple[str, str, np.ndarray]]:
+    def f_xy(self, *xys: Vars) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         """
         generate partial derivatives of f w.r.t. vars in xys
         :return: List[Tuple[Equation_name, var_name, np.ndarray]]
         """
 
-        fx: List[Tuple[str, str, np.ndarray]] = []
+        fxy: List[Tuple[str, str, EqnDiff, np.ndarray]] = []
 
         var: List[str] = list()
         for xy in xys:
-            var = var + list(xy.v.keys())
+            var = var + xy.var_list
 
-        for eqn_name in self.f_dict:
+        for eqn_name in self.f_list:
+            eqn_diffs: Dict[str, EqnDiff] = self.EQNs[eqn_name].derivatives
             for var_name in var:
-                for xy in xys:
-                    if var_name in list(xy.v):
-                        if var_name in self.eqn_diffs[eqn_name]:
-                            args = self.obtain_eqn_args(self.eqn_diffs[eqn_name][var_name], *xys)
-                            temp = np.array(self.eval_diffs(eqn_name, var_name, *args))
-                            if temp.ndim > 1:
-                                #  matrix or row vector
-                                fx = [*fx, (eqn_name, var_name, temp)]
-                            elif temp.ndim == 1 and temp.shape[0] > 1:
-                                # column vector
-                                fx = [*fx, (eqn_name, var_name, np.diag(temp))]
-                            else:
-                                # [number]
-                                fx = [*fx, (eqn_name, var_name, temp * np.identity(xy.var_size[var_name]))]
-        return fx
+                for key, value in eqn_diffs.items():
+                    if var_name == value.diff_var_name:
+                        args = self.obtain_eqn_args(eqn_diffs[key], *xys)
+                        temp = self.eval_diffs(eqn_name, key, *args)
+                        if not isinstance(temp, csc_array):
+                            temp = np.array(temp)
+                        fxy = [*fxy, (eqn_name, var_name, eqn_diffs[key], temp)]
+        return fxy
 
-    def g_xy(self, *xys: Vars) -> List[Tuple[str, str, np.ndarray]]:
+    def g_xy(self, *xys: Vars) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         """
         generate partial derivatives of f w.r.t. vars in xys
         :return: List[Tuple[Equation_name, var_name, np.ndarray]]
         """
 
-        if not self.g_dict:
+        if len(self.g_list) == 0:
             raise ValueError(f'No AE found in {self.name}!')
 
-        gy: List[Tuple[str, str, np.ndarray]] = []
+        gxy: List[Tuple[str, str, EqnDiff, np.ndarray]] = []
 
         var: List[str] = list()
         for xy in xys:
-            var = var + list(xy.v.keys())
+            var = var + xy.var_list
 
-        for eqn_name in self.g_dict:
+        for eqn_name in self.g_list:
+            eqn_diffs: Dict[str, EqnDiff] = self.EQNs[eqn_name].derivatives
             for var_name in var:
-                for xy in xys:
-                    if var_name in list(xy.v):
-                        if var_name in self.eqn_diffs[eqn_name]:
-                            args = self.obtain_eqn_args(self.eqn_diffs[eqn_name][var_name], *xys)
-                            temp = np.array(self.eval_diffs(eqn_name, var_name, *args))
-                            if temp.ndim > 1:
-                                #  matrix or row vector
-                                gy = [*gy, (eqn_name, var_name, temp)]
-                            elif temp.ndim == 1 and temp.shape[0] > 1:
-                                # column vector
-                                gy = [*gy, (eqn_name, var_name, np.diag(temp))]
-                            else:
-                                # [number]
-                                gy = [*gy, (eqn_name, var_name, temp * np.identity(xy.var_size[var_name]))]
-        return gy
+                for key, value in eqn_diffs.items():
+                    if var_name == value.diff_var_name:
+                        args = self.obtain_eqn_args(eqn_diffs[key], *xys)
+                        temp = self.eval_diffs(eqn_name, key, *args)
+                        if not isinstance(temp, csc_array):
+                            temp = np.array(temp)
+                        gxy = [*gxy, (eqn_name, var_name, eqn_diffs[key], temp)]
+        return gxy
 
-    def j(self, *xys: Vars) -> np.ndarray:
+    def j(self, *xys: Vars, matrix_container='scipy'):
         """
-        Derive full or partial Jacobian matrices
-        :param xys:
-        :return:
+        Derive Jacobian matrices of the RHS side
         """
         if not self.eqn_size:
             self.assign_eqn_var_address(*xys)
 
-        j = np.zeros((self.eqn_size, self.var_size))
+        fg_xy = self.f_xy(*xys)
+        if len(self.g_list) > 0:
+            fg_xy = fg_xy + self.g_xy(*xys)
 
-        fxy = self.f_xy(*xys)
-        for fxy_tuple in fxy:
-            j[self.a[fxy_tuple[0]][0]:(self.a[fxy_tuple[0]][-1] + 1),
-            self.var_address[fxy_tuple[1]][0]:(self.var_address[fxy_tuple[1]][-1] + 1)] = fxy_tuple[2]
-
-        if self.g_dict:
-            gxy = self.g_xy(*xys)
-            for gxy_tuple in gxy:
-                j[self.a[gxy_tuple[0]][0]:(self.a[gxy_tuple[0]][-1] + 1),
-                self.var_address[gxy_tuple[1]][0]:(self.var_address[gxy_tuple[1]][-1] + 1)] = gxy_tuple[2]
-
-        return j
+        return self.form_jac(fg_xy, *xys, matrix_container)
 
     def discretize(self, scheme) -> AE:
         eqns = []

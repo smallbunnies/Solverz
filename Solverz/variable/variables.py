@@ -7,7 +7,7 @@ import warnings
 import numpy as np
 
 from Solverz.num.num_alg import Var
-from Solverz.auxiliary import Address
+from Solverz.auxiliary import Address, combine_Address
 
 
 def as_Vars(var: Union[Var, List[Var]]):
@@ -52,6 +52,12 @@ class VarsBasic:
     @property
     def var_list(self):
         return list(self.a.v.keys())
+
+
+def combine_Vars(vars1: Vars, vars2: Vars):
+    a = combine_Address(vars1.a, vars2.a)
+    array = np.concatenate([vars1.array, vars2.array], axis=0)
+    return Vars(a, array)
 
 
 class Vars(VarsBasic):
@@ -185,14 +191,14 @@ class TimeVars(VarsBasic):
 
     def __init__(self,
                  Vars_: Vars,
-                 length: int = 100
+                 length: int = 101
                  ):
 
         super().__init__()
-        self.len = length
+
         self.a = Vars_.a
 
-        self.array = np.zeros((self.len+1, self.total_size))
+        self.array = np.zeros((length, self.total_size))
         self.array[0, :] = Vars_.array[:].reshape(-1, )
 
     def __getitem__(self, item):
@@ -229,7 +235,7 @@ class TimeVars(VarsBasic):
             if key > self.len:
                 raise ValueError(f'Exceed the maximum index, which is {self.len}')
             else:
-                self.array[key:key+1, :] = value.array[:].T
+                self.array[key:key + 1, :] = value.array[:].T
         else:
             raise NotImplementedError(f'Unsupported indices')
 
@@ -240,6 +246,10 @@ class TimeVars(VarsBasic):
         :return:
         """
         return self.array.T
+
+    @property
+    def len(self):
+        return self.array.shape[0]
 
     def __repr__(self):
         return f'Time-series (size {self.len}×{self.total_size}) {list(self.var_list)}'

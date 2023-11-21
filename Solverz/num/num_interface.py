@@ -4,9 +4,9 @@ from functools import reduce
 
 import numpy as np
 from numpy import linalg
-from scipy.sparse import diags, linalg as splinalg
+from scipy.sparse import diags, csc_array, linalg as sla
 from cvxopt.umfpack import linsolve
-from cvxopt import matrix
+from cvxopt import matrix, spmatrix
 
 numerical_interface = {}
 
@@ -38,7 +38,63 @@ def _sign(arg):
 
 @implements_nfunc('minmod')
 def minmod(*args):
-    pass
+    if len(args) != 3:
+        raise ValueError("Input arg length must be 3")
+
+    shapes = [arg.shape[0] for arg in args]
+
+    a, b, c = args
+    stacked_array = np.hstack((a, b, c))
+    if all(x == shapes[0] for x in shapes):
+        cd1 = (a > 0) & (b > 0) & (c > 0)
+        cd2 = (a < 0) & (b < 0) & (c < 0)
+        conditions = [cd1,
+                      cd2]
+        choice_list = [np.min(stacked_array, axis=1).reshape((-1, 1)),
+                       np.max(stacked_array, axis=1).reshape((-1, 1))]
+    else:
+        raise ValueError(f"Length of Input array not consistent {shapes}")
+    return np.select(conditions, choice_list, 0)
+
+
+@implements_nfunc('minmod_flag')
+def minmod_flag(*args):
+    if len(args) != 3:
+        raise ValueError("Input arg length must be 3")
+
+    shapes = [arg.shape[0] for arg in args]
+
+    a, b, c = args
+    stacked_array = np.hstack((a, b, c))
+    if all(x == shapes[0] for x in shapes):
+        cd1 = (a > 0) & (b > 0) & (c > 0)
+        cd2 = (a < 0) & (b < 0) & (c < 0)
+        conditions = [cd1,
+                      cd2]
+        choice_list = [np.argmin(stacked_array, axis=1).reshape((-1, 1)),
+                       np.argmax(stacked_array, axis=1).reshape((-1, 1))]
+    else:
+        raise ValueError(f"Length of Input array not consistent {shapes}")
+    return np.select(conditions, choice_list, 3)
+
+
+@implements_nfunc('switch')
+def switch(*args):
+    flag = args[-1]
+    flag_shape = args[-1].shape
+    v_list = list(args[0:len(args) - 1])
+
+    for i in range(len(v_list)):
+        v = v_list[i]
+        if isinstance(v, (int, float)):
+            v_list[i] = v * np.ones(flag_shape)
+    shapes = [v.shape[0] for v in v_list]
+    if all(x.shape[0] == v_list[0].shape[0] for x in v_list):
+        conditions = [flag == i for i in range(len(args) - 1)]
+        choice_list = v_list
+    else:
+        raise ValueError(f"Length of Input array not consistent {shapes}")
+    return np.select(conditions, choice_list, 0)
 
 
 @implements_nfunc('Diag')
@@ -117,7 +173,10 @@ def inv(mat: np.ndarray):
 
 
 def solve(A, b):
-    # return splinalg.spsolve(A, b)
-    c = matrix(b)
-    linsolve(A, c)
-    return np.array(c)
+    if isinstance(A, spmatrix):
+        # return splinalg.spsolve(A, b)
+        c = matrix(b)
+        linsolve(A, c)
+        return np.array(c)
+    elif isinstance(A, csc_array):
+        return sla.spsolve(A, b)

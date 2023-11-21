@@ -28,7 +28,7 @@ def fde_solver(fde: AE,
     fde.update_param('M', L/dx)
     u0 = u1.derive_alias('0')  # x_{i}
 
-    for i in range(int(T_end/dt)+1):
+    for i in range(int(T_end/dt)):
 
         # if event:
         #     fde.update_param(event, t)

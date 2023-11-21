@@ -1,4 +1,18 @@
+from __future__ import annotations
+
 import numpy as np
+from typing import Dict
+from copy import deepcopy
+
+
+def combine_Address(a1: Address, a2: Address) -> Address:
+    a = Address()
+    a.v = deepcopy(a1.v)
+    var_len = a.total_size
+    a.v.update(a2.v)
+    for name in a2.v.keys():
+        a.v[name] = a.v[name] + var_len
+    return a
 
 
 class Address:
@@ -7,7 +21,7 @@ class Address:
     """
 
     def __init__(self):
-        self.v = dict()
+        self.v: Dict[str, np.ndarray] = dict()
 
     def add(self, name: str, start: int = 0, end: int = 0):
         self.v[name] = np.arange(start, end + 1, dtype=int)

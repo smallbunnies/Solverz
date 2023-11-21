@@ -114,6 +114,7 @@ class EqnDiff(Eqn):
         self.diff_var = diff_var
         self.diff_var_name = diff_var.symbol.name if isinstance(diff_var, IdxVar) else diff_var.name
         self.var_idx = var_idx  # df/dPi[i] then var_idx=i
+        self.var_idx_func = None
         if self.var_idx is not None:
             if isinstance(self.var_idx, slice):
                 temp = [self.var_idx.start, self.var_idx.stop, self.var_idx.step]

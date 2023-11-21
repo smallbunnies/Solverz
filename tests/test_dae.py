@@ -1,41 +1,27 @@
-# from Solverz.num.num_alg import AliasVar, ComputeParam, F, X, Y
-# from Solverz.equation.eqn import Ode, Eqn
-# from Solverz.equation.equations import DAE
-# from Solverz.param import Param
-# from Solverz.variable.var import TimeVar
-# from Solverz.variable.variables import TimeVars
-# from Solverz.solvers.daesolver import implicit_trapezoid
-# import matplotlib.pyplot as plt
-# import pandas as pd
-# import numpy as np
-#
-# X0 = AliasVar(X, '0')
-# Y0 = AliasVar(Y, '0')
-# X_1 = AliasVar(X, '_1')
-# Y_1 = AliasVar(Y, '_1')
-# t = ComputeParam('t')
-# t0 = ComputeParam('t0')
-# dt = ComputeParam('dt')
-#
-# scheme = X - X0 - dt / 2 * (F(X, Y, t) + F(X0, Y0, t0))
-# f = Ode(name='f', eqn='-x**3+0.5*y**2', diff_var='x')
-# g = Eqn(name='g', eqn='x**2+y**2-2')
-# dae = DAE([f, g])
-# x = TimeVar('x')
-# x.v0 = [1]
-# y = TimeVar('y')
-# y.v0 = [1]
-#
-# xy = implicit_trapezoid(dae, TimeVars([x, y], length=201), [0, 20], 0.1)
-# plt.plot(np.arange(0, 20.1, 0.1), xy.T)
-#
-# df = pd.read_excel('instances/dae_test.xlsx',
-#                    sheet_name=None,
-#                    engine='openpyxl',
-#                    header=None
-#                    )
-#
-#
+import pandas as pd
+import numpy as np
+
+from Solverz import Eqn, Ode, DAE, Var, as_Vars, Rodas, Opt
+
+x = Var('x', 1)
+y = Var('y', 1)
+
+f = Ode(name='f', f=-x ** 3 + 0.5 * y ** 2, diff_var=x)
+g = Eqn(name='g', eqn=x ** 2 + y ** 2 - 2)
+dae = DAE([f, g])
+
+df = pd.read_excel('instances/dae_test.xlsx',
+                   sheet_name=None,
+                   engine='openpyxl'
+                   )
+
+T, Y = Rodas(dae,
+             [0, 20],
+             as_Vars(x),
+             as_Vars(y),
+             opt=Opt(hinit=0.1))
+
+
 # def test_discretize():
 #     c = ComputeParam('c')
 #     Xk1 = AliasVar(X, 'k1')
@@ -62,9 +48,8 @@
 #     assert 'Dk1' in param2.keys()
 #     assert 'Pm' in param2.keys()
 #     assert eqn2.e_str == 'Pm - (D + 0.5*Dk1)*(omega + 0.5*omegak1)'
-#
-#
-# def test_dae():
-#     xy_bench = np.asarray(df['Sheet1'])
-#     assert max(abs((xy.array[0, :] - xy_bench[:, 0].reshape(1, -1))).reshape(-1, )) <= 0.0006665273280143102
-#     assert max(abs((xy.array[1, :] - xy_bench[:, 1].reshape(1, -1))).reshape(-1, )) <= 0.000569613549821657
+
+
+def test_dae():
+    xy_bench = np.asarray(df['rodas'])
+    assert np.max(np.abs(xy_bench - Y.array)) < 1e-8
