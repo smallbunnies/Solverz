@@ -21,6 +21,12 @@ T, Y = Rodas(dae,
              as_Vars(y),
              opt=Opt(hinit=0.1))
 
+T1, Y1 = Rodas(dae,
+               np.linspace(0, 20, 201),
+               as_Vars(x),
+               as_Vars(y),
+               opt=Opt(hinit=0.1))
+
 
 # def test_discretize():
 #     c = ComputeParam('c')
@@ -53,3 +59,5 @@ T, Y = Rodas(dae,
 def test_dae():
     xy_bench = np.asarray(df['rodas'])
     assert np.max(np.abs(xy_bench - Y.array)) < 1e-8
+    xy_bench1 = np.asarray(df['rodas_dense'])
+    assert np.max(np.abs(xy_bench1 - Y1.array)) < 1e-8

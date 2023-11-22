@@ -431,9 +431,8 @@ def Rodas(dae: DAE,
           y0: Vars,
           z0: Vars = None,
           opt: Opt = None,
-          event: Event = None,
-          scheme='rodas'):
-    s, pord, gamma, b, bd, alpha, gamma_tilde = Rodas_param(scheme)
+          event: Event = None):
+    s, pord, gamma, b, bd, alpha, gamma_tilde, ccont, dcont, econt = Rodas_param(opt.scheme)
 
     if opt is None:
         opt = Opt()
@@ -445,7 +444,7 @@ def Rodas(dae: DAE,
     tend = tspan[-1]
     t0 = tspan[0]
     if opt.hmax is None:
-        hmax = np.abs(tend-t0)
+        opt.hmax = np.abs(tend - t0)
     nt = 0
     t = 0
     hmin = 16 * np.spacing(t)
@@ -453,6 +452,13 @@ def Rodas(dae: DAE,
     T = np.zeros((10001,))
     T[nt] = t0
     y = TimeVars(y0, 10000)
+    dense_output = False
+    n_tspan = len(tspan)
+    told = t0
+    if n_tspan > 2:
+        dense_output = True
+        inext = 1
+        tnext = tspan[inext]
 
     # The initial step size
     if opt.hinit is None:
@@ -461,7 +467,7 @@ def Rodas(dae: DAE,
         dt = opt.hinit
 
     dt = np.maximum(dt, hmin)
-    dt = np.minimum(dt, hmax)
+    dt = np.minimum(dt, opt.hmax)
 
     dae.assign_eqn_var_address(y0)
     s_num = dae.state_num
@@ -517,8 +523,18 @@ def Rodas(dae: DAE,
             if event is not None:  # event
                 pass
 
-            if opt.dense_output:  # dense_output
-                pass
+            if dense_output:  # dense_output
+                while t >= tnext > told:
+                    tau = (tnext - told) / dt
+                    ynext = y0 + tau * dt * K @ (b + (tau - 1) * (ccont + tau * (dcont + tau * econt)))
+                    nt = nt + 1
+                    T[nt] = tnext
+                    y[nt] = ynext
+                    inext = inext + 1
+                    if inext <= n_tspan-1:
+                        tnext = tspan[inext]
+                    else:
+                        tnext = tend + dt
             else:
                 nt = nt + 1
                 T[nt] = t
@@ -528,7 +544,7 @@ def Rodas(dae: DAE,
                 done = True
             y0 = ynew
 
-        dt = np.min([hmax, np.max([hmin, dtnew])])
+        dt = np.min([opt.hmax, np.max([hmin, dtnew])])
 
     T = T[0:nt + 1]
     y = y[0:nt + 1]
@@ -560,13 +576,16 @@ def Rodas_param(scheme: str = 'rodas'):
         bd = np.zeros((6,))
         bd[0:4] = beta[4, 0:4]
         bd[4] = gamma
-        # c
-        # d
+        c = np.array([-4.786970949443344e+00, -6.966969867338157e-01, 4.491962205414260e+00,
+                      1.247990161586704e+00, -2.562844308238056e-01, 0])
+        d = np.array([1.274202171603216e+01, -1.894421984691950e+00, -1.113020959269748e+01,
+                      -1.365987420071593e+00, 1.648597281428871e+00, 0])
+        e = np.zeros((6,))
         gamma_tilde = beta - alpha
         gamma_tilde = gamma_tilde / gamma
         alpha = alpha.T
         gamma_tilde = gamma_tilde.T
-        return s, pord, gamma, b, bd, alpha, gamma_tilde
+        return s, pord, gamma, b, bd, alpha, gamma_tilde, c, d, e
     elif scheme == 'rodasp':
         s = 6
         pord = 4
@@ -609,7 +628,7 @@ class Opt:
                  facmax=6,
                  fac1=0.2,
                  fac2=6,
-                 dense_output=False,
+                 scheme='rodas',
                  hinit=None,
                  hmax=None):
         self.atol = atol
@@ -618,9 +637,9 @@ class Opt:
         self.facmax = facmax
         self.fac1 = fac1
         self.fac2 = fac2
-        self.dense_output = dense_output
         self.hinit = hinit
         self.hmax = hmax
+        self.scheme = scheme
 
 
 class Stats:

@@ -263,8 +263,9 @@ class Equations:
                                                                         *xys)
 
                 if isinstance(value, (np.ndarray, csc_array)):
-                    # we use `+=` instead of `=` here because sometimes, Var `e` and IdxVar `e[0]` exists in the same equation
-                    # in which case we have to add the jacobian element of Var `e` if it is not zero.
+                    # We use coo_array here because by default when converting to CSR or CSC format,
+                    # duplicate (i,j) entries will be summed together.
+                    # This facilitates efficient construction of finite element matrices and the like.
 
                     if value.ndim > 1:
                         if value.shape[1] > 1:
