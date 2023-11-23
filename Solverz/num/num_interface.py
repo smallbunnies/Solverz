@@ -23,7 +23,18 @@ def implements_nfunc(nfunc_name: str):
 
 @implements_nfunc('slice_')
 def slice_(*args):
+    """
+    This is used to convert the slice arguments to int
+    """
     return slice(*[int(arg_) if isinstance(arg_, np.ndarray) else arg_ for arg_ in args])
+
+
+@implements_nfunc('Slice')
+def Slice(*args):
+    """
+    This is used to evaluate the slice index of IdxVar/IdxParam/IdxConst
+    """
+    return slice_(*args)
 
 
 @implements_nfunc('ix_')
@@ -88,6 +99,9 @@ def switch(*args):
         v = v_list[i]
         if isinstance(v, (int, float)):
             v_list[i] = v * np.ones(flag_shape)
+        elif isinstance(v, np.ndarray):
+            if v.shape[0] == 1:
+                v_list[i] = v * np.ones(flag_shape)
     shapes = [v.shape[0] for v in v_list]
     if all(x.shape[0] == v_list[0].shape[0] for x in v_list):
         conditions = [flag == i for i in range(len(args) - 1)]

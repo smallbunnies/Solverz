@@ -9,7 +9,7 @@ from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
 from Solverz.num.num_alg import F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
-    pre_lambdify, Mat_Mul, Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst, minmod
+    pre_lambdify, Mat_Mul, Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst, minmod, Slice
 from Solverz.num.num_interface import numerical_interface
 from Solverz.num.matrix_calculus import MixedEquationDiff
 from Solverz.param import Param
@@ -52,6 +52,8 @@ class Eqn:
                         if isinstance(idx_, idx):
                             temp_dict[idx_.name] = idx_
                 elif isinstance(symbol_.index, (slice, Expr)):
+                    temp_dict.update(symbol_.symbol_in_index)
+                elif isinstance(symbol_.index, list):
                     temp_dict.update(symbol_.symbol_in_index)
 
         return temp_dict
@@ -117,15 +119,14 @@ class EqnDiff(Eqn):
         self.var_idx_func = None
         if self.var_idx is not None:
             if isinstance(self.var_idx, slice):
-                temp = [self.var_idx.start, self.var_idx.stop, self.var_idx.step]
-                self.var_idx_func = [None, None, None]
-                for i in range(3):
-                    if temp[i] is not None:
-                        if isinstance(temp[i], Expr):
-                            self.var_idx_func[i] = Eqn('To evaluate var_idx of variable' + self.diff_var.name + f'{i}',
-                                                       temp[i])
-                        else:
-                            self.var_idx_func[i] = temp[i]
+                temp = []
+                if var_idx.start is not None:
+                    temp.append(var_idx.start)
+                if var_idx.stop is not None:
+                    temp.append(var_idx.stop+1)
+                if var_idx.step is not None:
+                    temp.append(var_idx.step)
+                self.var_idx_func = Eqn('To evaluate var_idx of variable' + self.diff_var.name, Slice(*temp))
             elif isinstance(self.var_idx, Expr):
                 self.var_idx_func = Eqn('To evaluate var_idx of variable' + self.diff_var.name, self.var_idx)
         self.LHS = Derivative(sympy.Function('g'), diff_var)
@@ -145,7 +146,7 @@ class Ode(Eqn):
 
     def __init__(self, name: str,
                  f: Expr,
-                 diff_var: Var):
+                 diff_var: Union[Var, IdxVar]):
         super().__init__(name, f)
         self.diff_var = diff_var
         self.LHS = Derivative(diff_var, t)
@@ -355,7 +356,7 @@ class HyperbolicPde(Pde):
 
             return Eqn('FDM of ' + self.name, ae)
 
-    def semi_discretize(self, a):
+    def semi_discretize(self, a, scheme=1):
         r"""
         Semi-discretize the hyperbolic PDE of nonlinear conservation law as ODEs using the Kurganov-Tadmor scheme
         (see [Kurganov2000]_). The difference stencil is as follows, with $x_{j+1}-x_{j}=\Delta x$.
@@ -383,6 +384,10 @@ class HyperbolicPde(Pde):
             .. math::
 
                 \rho(A)=\max_i|\lambda_i(A)|
+
+        scheme : int
+
+
 
         Returns
         =======
@@ -439,94 +444,108 @@ class HyperbolicPde(Pde):
 
         dx = Const_('dx')
         M = idx('M')
-
         u = self.diff_var
 
-        # j=1
-        # f(u[2])
-        fu2 = self.flux.subs([(var, var[2]) for var in self.two_dim_var])
-        # f(u[0])=f(2*uL-u[1])
-        fu0 = self.flux.subs([(var, 2 * Var(var.name + 'L') - var[1]) for var in self.two_dim_var])
-        # S(u[1])
-        Su1 = self.source.subs([(var, var[1]) for var in self.two_dim_var])
-        ode_rhs1 = -simplify((fu2 - fu0) / (2 * dx)) \
-                   + simplify((a[0] * (u[2] - u[1]) - a[1] * (u[1] - u[0])) / (2 * dx)) \
-                   + simplify(Su1)
+        if scheme == 1:
+            # j=1
+            # f(u[2])
+            fu2 = self.flux.subs([(var, var[2]) for var in self.two_dim_var])
+            # f(u[0])=f(2*uL-u[1])
+            fu0 = self.flux.subs([(var, var[0]) for var in self.two_dim_var])
+            # S(u[1])
+            Su1 = self.source.subs([(var, var[1]) for var in self.two_dim_var])
+            ode_rhs1 = -simplify((fu2 - fu0) / (2 * dx)) \
+                       + simplify((a[0] * (u[2] - u[1]) - a[1] * (u[1] - u[0])) / (2 * dx)) \
+                       + simplify(Su1)
 
-        # j=M-1
-        # f(u[M])=f(2*uR-u[M-1])
-        fum = self.flux.subs([(var, 2 * Var(var.name + 'R') - var[M - 1]) for var in self.two_dim_var])
-        # f(u[M-2])
-        fum2 = self.flux.subs([(var, var[M - 2]) for var in self.two_dim_var])
-        # S(u[M-1])
-        SuM1 = self.source.subs([(var, var[M]) for var in self.two_dim_var])
-        ode_rhs3 = -simplify((fum - fum2) / (2 * dx)) \
-                   + simplify((a[0] * (u[M] - u[M - 1]) - a[1] * (u[M - 1] - u[M - 2])) / (2 * dx)) \
-                   + simplify(SuM1)
+            # j=M-1
+            # f(u[M])=f(2*uR-u[M-1])
+            fum = self.flux.subs([(var, var[M]) for var in self.two_dim_var])
+            # f(u[M-2])
+            fum2 = self.flux.subs([(var, var[M - 2]) for var in self.two_dim_var])
+            # S(u[M-1])
+            SuM1 = self.source.subs([(var, var[M-1]) for var in self.two_dim_var])
+            ode_rhs3 = -simplify((fum - fum2) / (2 * dx)) \
+                       + simplify((a[0] * (u[M] - u[M - 1]) - a[1] * (u[M - 1] - u[M - 2])) / (2 * dx)) \
+                       + simplify(SuM1)
 
-        # 2<=j<=M-2
-        def ujprime(U: IdxVar, v: int):
-            # for given u_j,
-            # returns
-            # u^+_{j+1/2} case v==0,
-            # u^-_{j+1/2} case 1,
-            # u^+_{j-1/2} case 2,
-            # u^-_{j-1/2} case 3
-            if not isinstance(U.index, slice):
-                raise TypeError("Index of IdxVar must be slice object")
-            start = U.index.start
-            stop = U.index.stop
-            step = U.index.step
-            var_name = U.symbol.name
-            U = Var(var_name)
-            Ux = Var(var_name+'x')
+            # 2<=j<=M-2
+            def ujprime(U: IdxVar, v: int):
+                # for given u_j,
+                # returns
+                # u^+_{j+1/2} case v==0,
+                # u^-_{j+1/2} case 1,
+                # u^+_{j-1/2} case 2,
+                # u^-_{j-1/2} case 3
+                if not isinstance(U.index, slice):
+                    raise TypeError("Index of IdxVar must be slice object")
+                start = U.index.start
+                stop = U.index.stop
+                step = U.index.step
+                var_name = U.symbol.name
+                U = Var(var_name)
+                Ux = Var(var_name + 'x')
 
-            # u_j
-            Uj = U[start:stop:step]
-            # (u_x)_j
-            Uxj = Ux[start:stop:step]
-            # u_{j+1}
-            Ujp1 = U[start + 1:stop + 1:step]
-            # (u_x)_{j+1}
-            Uxjp1 = Ux[start + 1:stop + 1:step]
-            # u_{j-1}
-            Ujm1 = U[start - 1:stop - 1:step]
-            # (u_x)_{j-1}
-            Uxjm1 = Ux[start - 1:stop - 1:step]
+                # u_j
+                Uj = U[start:stop:step]
+                # (u_x)_j
+                Uxj = Ux[start:stop:step]
+                # u_{j+1}
+                Ujp1 = U[start + 1:stop + 1:step]
+                # (u_x)_{j+1}
+                Uxjp1 = Ux[start + 1:stop + 1:step]
+                # u_{j-1}
+                Ujm1 = U[start - 1:stop - 1:step]
+                # (u_x)_{j-1}
+                Uxjm1 = Ux[start - 1:stop - 1:step]
 
-            if v == 0:
-                return Ujp1 - dx / 2 * Uxjp1
-            elif v == 1:
-                return Uj + dx/2*Uxj
-            elif v == 2:
-                return Uj - dx/2*Uxj
-            elif v == 3:
-                return Ujm1 + dx/2*Uxjm1
-            else:
-                raise ValueError("v=0 or 1 or 2 or 3!")
+                if v == 0:
+                    return Ujp1 - dx / 2 * Uxjp1
+                elif v == 1:
+                    return Uj + dx / 2 * Uxj
+                elif v == 2:
+                    return Uj - dx / 2 * Uxj
+                elif v == 3:
+                    return Ujm1 + dx / 2 * Uxjm1
+                else:
+                    raise ValueError("v=0 or 1 or 2 or 3!")
 
-        # j\in [2:M-2]
-        Suj = self.source.subs([(var, var[2:M - 2]) for var in self.two_dim_var])
-        Hp = (self.flux.subs([(var, ujprime(var[2:M - 2], 0)) for var in self.two_dim_var]) +
-              self.flux.subs([(var, ujprime(var[2:M - 2], 1)) for var in self.two_dim_var])) / 2 \
-             - a[0] / 2 * (ujprime(u[2:M - 2], 0) - ujprime(u[2:M - 2], 1))
-        Hm = (self.flux.subs([(var, ujprime(var[2:M - 2], 2)) for var in self.two_dim_var]) +
-              self.flux.subs([(var, ujprime(var[2:M - 2], 3)) for var in self.two_dim_var])) / 2 \
-             - a[1] / 2 * (ujprime(u[2:M - 2], 2) - ujprime(u[2:M - 2], 3))
-        ode_rhs2 = -simplify(Hp-Hm)/dx + Suj
+            # j\in [2:M-2]
+            Suj = self.source.subs([(var, var[2:M - 2]) for var in self.two_dim_var])
+            Hp = (self.flux.subs([(var, ujprime(var[2:M - 2], 0)) for var in self.two_dim_var]) +
+                  self.flux.subs([(var, ujprime(var[2:M - 2], 1)) for var in self.two_dim_var])) / 2 \
+                 - a[0] / 2 * (ujprime(u[2:M - 2], 0) - ujprime(u[2:M - 2], 1))
+            Hm = (self.flux.subs([(var, ujprime(var[2:M - 2], 2)) for var in self.two_dim_var]) +
+                  self.flux.subs([(var, ujprime(var[2:M - 2], 3)) for var in self.two_dim_var])) / 2 \
+                 - a[1] / 2 * (ujprime(u[2:M - 2], 2) - ujprime(u[2:M - 2], 3))
+            ode_rhs2 = -simplify(Hp - Hm) / dx + Suj
 
-        theta = Const_('theta')
-        ux = Var(u.name + 'x')
-        minmod_rhs = ux[1:M-1] \
-                     - minmod(theta * (u[1:M-1]-u[0:M-2]) / dx,
-                              (u[2:M] - u[0:M-2]) / (2 * dx),
-                              theta * (u[2:M] - u[1:M-1]) / dx)
+            theta = Const_('theta')
+            ux = Var(u.name + 'x')
+            minmod_rhs = ux[1:M - 1] - minmod(theta * (u[1:M - 1] - u[0:M - 2]) / dx,
+                                              (u[2:M] - u[0:M - 2]) / (2 * dx),
+                                              theta * (u[2:M] - u[1:M - 1]) / dx)
 
-        return [Ode('SDM of' + self.name + '1', ode_rhs1, u[1]),
-                Ode('SDM of' + self.name + '2', ode_rhs2, u[2:M-2]),
-                Ode('SDM of' + self.name + '3', ode_rhs3, u[M - 1]),
-                Eqn('SDM of' + self.name + '4', u[M]-2 * Var(u.name + 'R') + u[M - 1]),
-                Eqn('SDM of' + self.name + '5', u[0]-2 * Var(u.name + 'L') + u[1]),
-                Eqn('minmod limiter 1', minmod_rhs),
-                Eqn('minmod limiter 2', ux[0]),
-                Eqn('minmod limiter 3', ux[M])]
+            return [Ode('SDM of ' + self.name + ' 1', ode_rhs1, u[1]),
+                    Ode('SDM of ' + self.name + ' 2', ode_rhs2, u[2:M - 2]),
+                    Ode('SDM of ' + self.name + ' 3', ode_rhs3, u[M - 1]),
+                    Eqn('SDM of ' + self.name + ' 4', u[M] - 2 * Var(u.name + 'R') + u[M - 1]),
+                    Eqn('SDM of ' + self.name + ' 5', u[0] - 2 * Var(u.name + 'L') + u[1]),
+                    Eqn('minmod limiter 1 of ' + u.name, minmod_rhs),
+                    Eqn('minmod limiter 2 of ' + u.name, ux[0]),
+                    Eqn('minmod limiter 3 of ' + u.name, ux[M])]
+        elif scheme == 2:
+            # 1<=j<=M-1
+            # f(u[j+1])
+            fu1 = self.flux.subs([(var, var[2:M]) for var in self.two_dim_var])
+            # f(u[j-1])
+            fu2 = self.flux.subs([(var, var[0:M - 2]) for var in self.two_dim_var])
+            # S(u[j])
+            Su = self.source.subs([(var, var[1:M - 1]) for var in self.two_dim_var])
+            ode_rhs = -simplify((fu1 - fu2) / (2 * dx)) \
+                      + simplify((a[0] * (u[2:M] - u[1:M - 1]) - a[1] * (u[1:M - 1] - u[0:M - 2])) / (2 * dx)) \
+                      + simplify(Su)
+
+            return [Ode('SDM of ' + self.name + ' 1', ode_rhs, u[1:M - 1]),
+                    Eqn('SDM of ' + self.name + ' 2', u[M] - 2 * Var(u.name + 'R') + u[M - 1]),
+                    Eqn('SDM of ' + self.name + ' 3', u[0] - 2 * Var(u.name + 'L') + u[1])]

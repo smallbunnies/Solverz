@@ -91,6 +91,11 @@ class IdxVar(Symbol):
         elif isinstance(index, Expr):
             for symbol_ in list(index.free_symbols):
                 obj.symbol_in_index[symbol_.name] = symbol_
+        elif isinstance(index, list):
+            for ele in index:
+                if isinstance(ele, (Expr, Symbol)):
+                    for symbol_ in list(ele.free_symbols):
+                        obj.symbol_in_index[symbol_.name] = symbol_
 
         return obj
 
@@ -190,6 +195,11 @@ class IdxConst(Symbol):
         elif isinstance(index, Expr):
             for symbol_ in list(index.free_symbols):
                 obj.symbol_in_index[symbol_.name] = symbol_
+        elif isinstance(index, list):
+            for ele in index:
+                if isinstance(ele, (Expr, Symbol)):
+                    for symbol_ in list(ele.free_symbols):
+                        obj.symbol_in_index[symbol_.name] = symbol_
 
         return obj
 
@@ -525,10 +535,9 @@ class minmod(ElementwiseFunction):
     @classmethod
     def eval(cls, *args):
         if len(args) != 3:
-            raise TypeError(f"Diagonal takes 1 positional arguments but {len(args)} were given!")
+            raise TypeError(f"minmod takes 3 positional arguments but {len(args)} were given!")
 
     def _eval_derivative(self, s):
-
         return switch(*[arg.diff(s) for arg in self.args], 0, minmod_flag(*self.args))
 
 
@@ -540,7 +549,15 @@ class minmod_flag(Function):
     @classmethod
     def eval(cls, *args):
         if len(args) != 3:
-            raise TypeError(f"Diagonal takes 1 positional arguments but {len(args)} were given!")
+            raise TypeError(f"minmod takes 3 positional arguments but {len(args)} were given!")
+
+
+class Slice(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) > 3:
+            raise TypeError(f"minmod takes at most 3 positional arguments but {len(args)} were given!")
 
 
 class switch(Function):

@@ -432,10 +432,10 @@ def Rodas(dae: DAE,
           z0: Vars = None,
           opt: Opt = None,
           event: Event = None):
-    s, pord, gamma, b, bd, alpha, gamma_tilde, ccont, dcont, econt = Rodas_param(opt.scheme)
-
     if opt is None:
         opt = Opt()
+
+    s, pord, gamma, b, bd, alpha, gamma_tilde, ccont, dcont, econt = Rodas_param(opt.scheme)
 
     if z0 is not None:
         y0 = combine_Vars(y0, z0)
@@ -473,8 +473,7 @@ def Rodas(dae: DAE,
     s_num = dae.state_num
     a_num = dae.algebra_num
 
-    M = csc_array((np.ones((s_num,)), (np.arange(s_num), np.arange(s_num))),
-                  (dae.eqn_size, dae.vsize))
+    M = dae.M
 
     done = False
     while not done:

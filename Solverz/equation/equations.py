@@ -13,7 +13,7 @@ from cvxopt import spmatrix, matrix
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
 from Solverz.event import Event
 from Solverz.param import Param
-from Solverz.num.num_alg import Var, Param_, Const_, idx
+from Solverz.num.num_alg import Var, Param_, Const_, idx, IdxVar, Slice
 from Solverz.variable.variables import Vars
 from Solverz.auxiliary import Address, combine_Address
 
@@ -35,6 +35,8 @@ class Equations:
         self.f_list = []
         self.g_list = []
         self.matrix_container = matrix_container
+        self.PARAM: Dict[str, Param] = dict()
+        self.CONST: Dict[str, Param] = dict()
 
         if isinstance(eqn, Eqn):
             eqn = [eqn]
@@ -42,21 +44,9 @@ class Equations:
         for eqn_ in eqn:
             self.add_eqn(eqn_)
 
-        self.PARAM: Dict[str, Param] = dict()
-        self.CONST: Dict[str, Param] = dict()
-
-        for symbol_ in self.SYMBOLS.values():
-            if isinstance(symbol_, Param_):
-                self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
-            elif isinstance(symbol_, idx):
-                self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dtype=int)
-            elif isinstance(symbol_, Const_):
-                self.CONST[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
-
-        for eqn in self.EQNs.values():
-            eqn.derive_derivative()
-
     def add_eqn(self, eqn: Eqn):
+        if eqn.name in self.EQNs.keys():
+            raise ValueError(f"Equation {eqn.name} already defined!")
         self.EQNs.update({eqn.name: eqn})
         self.SYMBOLS.update(eqn.SYMBOLS)
         self.a.add(eqn.name)
@@ -64,6 +54,16 @@ class Equations:
             self.g_list = self.g_list + [eqn.name]
         elif isinstance(eqn, Ode):
             self.f_list = self.f_list + [eqn.name]
+
+        for symbol_ in eqn.SYMBOLS.values():
+            if isinstance(symbol_, Param_):
+                self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
+            elif isinstance(symbol_, idx):
+                self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dtype=int)
+            elif isinstance(symbol_, Const_):
+                self.CONST[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
+
+        self.EQNs[eqn.name].derive_derivative()
 
     @property
     def eqn_size(self):
@@ -188,19 +188,10 @@ class Equations:
         elif isinstance(var_idx, str):
             variable_address = self.var_address.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
         elif isinstance(var_idx, slice):
-            temp = [None, None, None]
-            for i in range(3):
-                if isinstance(var_idx_func[i], Eqn):
-                    temp[i] = int(
-                        var_idx_func[i].NUM_EQN(*self.obtain_eqn_args(var_idx_func[i], *xys)))
-                else:
-                    temp[i] = var_idx_func[i]
-            if temp[1] is not None:
-                temp[1] = temp[1] + 1
-            variable_address = self.var_address.v[var_name][slice(*temp)]
+            variable_address = self.var_address.v[var_name][var_idx_func.NUM_EQN(*self.obtain_eqn_args(var_idx_func, *xys))]
         elif isinstance(var_idx, Expr):
             args = self.obtain_eqn_args(var_idx_func, *xys)
-            variable_address = self.var_address.v[var_name][var_idx_func.NUM_EQN(args)]
+            variable_address = self.var_address.v[var_name][var_idx_func.NUM_EQN(*args).reshape(-1, )]
         elif isinstance(var_idx, list):
             variable_address = self.var_address.v[var_name][var_idx]
         else:
@@ -329,14 +320,14 @@ class AE(Equations):
         :param eqn:
         :return:
         """
+        temp = []
         if not eqn:
-            temp = np.array([])
             for eqn_name, eqn_ in self.EQNs.items():
                 args = self.obtain_eqn_args(eqn_, y)
                 g_eqny = self.eval(eqn_name, *args)
                 g_eqny = g_eqny.toarray() if isinstance(g_eqny, csc_array) else g_eqny
-                temp = np.concatenate([temp, g_eqny.reshape(-1, )])
-            return temp
+                temp.append(g_eqny.reshape(-1, ))
+            return np.hstack(temp)
         else:
             args = self.obtain_eqn_args(self.EQNs[eqn], y)
             return self.eval(eqn, *args)
@@ -368,7 +359,7 @@ class AE(Equations):
                         gy = [*gy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gy
 
-    def j(self, y: Vars) -> spmatrix:
+    def j(self, y: Vars):
         if not self.eqn_size:
             self.assign_eqn_var_address(y)
 
@@ -466,17 +457,17 @@ class DAE(Equations):
             eqn = xys[0]
             xys = xys[1:]
 
-        temp = np.array([])
+        temp = []
         if eqn:
             if eqn in self.f_list:
                 args = self.obtain_eqn_args(self.EQNs[eqn], *xys)
-                temp = np.concatenate([temp, self.eval(eqn, *args).reshape(-1, )])
-                return temp
+                temp.append(self.eval(eqn, *args).reshape(-1, ))
         else:
             for eqn in self.f_list:
                 args = self.obtain_eqn_args(self.EQNs[eqn], *xys)
-                temp = np.concatenate([temp, self.eval(eqn, *args).reshape(-1, )])
-            return temp
+                temp.append(self.eval(eqn, *args).reshape(-1, ))
+
+        return np.hstack(temp)
 
     def g(self, *xys) -> np.ndarray:
         """
@@ -495,17 +486,17 @@ class DAE(Equations):
             eqn = xys[0]
             xys = xys[1:]
 
-        temp = np.array([])
+        temp = []
         if eqn:
             if eqn in self.g_list:
                 args = self.obtain_eqn_args(self.EQNs[eqn], *xys)
-                temp = np.concatenate([temp, self.eval(eqn, *args).reshape(-1, )])
-                return temp
+                temp.append(self.eval(eqn, *args).reshape(-1, ))
         else:
             for eqn in self.g_list:
                 args = self.obtain_eqn_args(self.EQNs[eqn], *xys)
-                temp = np.concatenate([temp, self.eval(eqn, *args).reshape(-1, )])
-        return temp
+                temp.append(self.eval(eqn, *args).reshape(-1, ))
+
+        return np.hstack(temp)
 
     def f_xy(self, *xys: Vars) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         """
@@ -558,7 +549,7 @@ class DAE(Equations):
                         gxy = [*gxy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gxy
 
-    def j(self, *xys: Vars, matrix_container='scipy'):
+    def j(self, *xys: Vars):
         """
         Derive Jacobian matrices of the RHS side
         """
@@ -569,7 +560,65 @@ class DAE(Equations):
         if len(self.g_list) > 0:
             fg_xy = fg_xy + self.g_xy(*xys)
 
-        return self.form_jac(fg_xy, *xys, matrix_container)
+        return self.form_jac(fg_xy, *xys)
+
+    @property
+    def M(self):
+        """
+        return the singular mass matrix, M, of dae
+        Row of 1 in M corresponds to the differential equation
+        Col of 1 in M corresponds to the state variable
+        """
+        if self.state_num == 0:
+            raise ValueError("DAE address uninitialized!")
+
+        row = []
+        col = []
+        for eqn_name in self.f_list:
+            eqn = self.EQNs[eqn_name]
+            equation_address = self.a.v[eqn_name]
+            if isinstance(eqn, Ode):
+                diff_var = eqn.diff_var
+                if isinstance(diff_var, Var):
+                    variable_address = self.var_address.v[diff_var.name]
+                elif isinstance(diff_var, IdxVar):
+                    var_idx = diff_var.index
+                    var_name = diff_var.symbol_name
+                    if isinstance(var_idx, (float, int)):
+                        variable_address = self.var_address.v[var_name][var_idx: var_idx + 1]
+                    elif isinstance(var_idx, str):
+                        variable_address = self.var_address.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
+                    elif isinstance(var_idx, slice):
+                        temp = []
+                        if var_idx.start is not None:
+                            temp.append(var_idx.start)
+                        if var_idx.stop is not None:
+                            temp.append(var_idx.stop + 1)
+                        if var_idx.step is not None:
+                            temp.append(var_idx.step)
+                        temp_func = Eqn('To evaluate var_idx of variable' + diff_var.name, Slice(*temp))
+                        variable_address = self.var_address.v[var_name][temp_func.NUM_EQN(*self.obtain_eqn_args(temp_func))]
+                    elif isinstance(var_idx, Expr):
+                        temp_func = Eqn('To evaluate var_idx of variable' + diff_var.name, var_idx)
+                        args = self.obtain_eqn_args(temp_func)
+                        variable_address = self.var_address.v[var_name][temp_func.NUM_EQN(*args).reshape(-1, )]
+                    elif isinstance(var_idx, list):
+                        variable_address = self.var_address.v[var_name][var_idx]
+                    else:
+                        raise TypeError(f"Unsupported variable index {var_idx} for equation {eqn_name}")
+                else:
+                    raise NotImplementedError
+                row.extend(equation_address.tolist())
+                col.extend(variable_address.tolist())
+            else:
+                raise ValueError("Equation in f_list is non-Ode.")
+
+        if self.matrix_container == 'scipy':
+            return csc_array((np.ones((self.state_num,)), (row, col)), (self.eqn_size, self.vsize))
+        elif self.matrix_container == 'cvxopt':
+            raise NotImplementedError("Not implemented!")
+        else:
+            raise ValueError(f"Unsupported matrix container {self.matrix_container}")
 
     def discretize(self, scheme) -> AE:
         eqns = []
