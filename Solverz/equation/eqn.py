@@ -123,7 +123,7 @@ class EqnDiff(Eqn):
                 if var_idx.start is not None:
                     temp.append(var_idx.start)
                 if var_idx.stop is not None:
-                    temp.append(var_idx.stop+1)
+                    temp.append(var_idx.stop + 1)
                 if var_idx.step is not None:
                     temp.append(var_idx.step)
                 self.var_idx_func = Eqn('To evaluate var_idx of variable' + self.diff_var.name, Slice(*temp))
@@ -286,7 +286,7 @@ class HyperbolicPde(Pde):
     def derive_derivative(self):
         pass
 
-    def finite_difference(self, scheme=1):
+    def finite_difference(self, scheme=1, direction=None):
         r"""
         Discretize hyperbolic PDE as AEs.
 
@@ -309,7 +309,39 @@ class HyperbolicPde(Pde):
 
                 S(u)\approx S\left(\frac{u_{i+1}^{j+1}+u_{i}^{j+1}+u_{i+1}^{j}+u_{i}^{j}}{4}\right)
 
-            2 - Characteristic line method
+            2 - Backward Time Backward/Forward Space
+
+            If direction equals 1, then do backward space difference, which derives
+
+            .. math::
+
+                \frac{\partial{u}}{\partial{t}}\approx\frac{u_{i+1}^{j+1}-u_{i+1}^{j}}{\Delta t}
+
+            .. math::
+
+                \frac{\partial{f(u)}}{\partial{x}}\approx\frac{f(u_{i+1}^{j+1})-f(u_{i}^{j+1})}{\Delta x}
+
+            .. math::
+
+                S(u)\approx S\left(u_{i+1}^{j+1}\right)
+
+            If direction equals -1, then do forward space difference, which derives
+
+            .. math::
+
+                \frac{\partial{u}}{\partial{t}}\approx\frac{u_{i}^{j+1}-u_{i}^{j}}{\Delta t}
+
+            .. math::
+
+                \frac{\partial{f(u)}}{\partial{x}}\approx\frac{f(u_{i+1}^{j+1})-f(u_{i}^{j+1})}{\Delta x}
+
+            .. math::
+
+                S(u)\approx S\left(u_{i}^{j+1}\right)
+
+        direction : int
+
+            To tell which side of boundary conditions is given in scheme 2.
 
         Returns
         =======
@@ -356,6 +388,39 @@ class HyperbolicPde(Pde):
 
             return Eqn('FDM of ' + self.name, ae)
 
+        elif scheme == 2:
+            if direction == 1:
+                dx = Const_('dx')
+                dt = Param_('dt')
+                M = idx('M')
+                u = self.diff_var
+                u0 = Param_(u.name + '0')
+
+                fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
+                fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
+                S = self.source.subs([(a, a[1:M]) for a in self.two_dim_var])
+                ae = dx * (u[1:M] - u0[1:M]) + simplify(dt * (fui1j1 - fuij1)) - simplify(dx * dt * S)
+
+                return Eqn('FDM of ' + self.name, ae)
+
+            elif direction == -1:
+
+                dx = Const_('dx')
+                dt = Param_('dt')
+                M = idx('M')
+                u = self.diff_var
+                u0 = Param_(u.name + '0')
+
+                fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
+                fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
+                S = self.source.subs([(a, a[0:M-1]) for a in self.two_dim_var])
+                ae = dx * (u[0:M - 1] - u0[0:M - 1]) + simplify(dt * (fui1j1 - fuij1)) - simplify(dx * dt * S)
+
+                return Eqn('FDM of ' + self.name, ae)
+
+            else:
+                raise ValueError(f"Unimplemented direction {direction}!")
+
     def semi_discretize(self, a, scheme=1):
         r"""
         Semi-discretize the hyperbolic PDE of nonlinear conservation law as ODEs using the Kurganov-Tadmor scheme
@@ -387,7 +452,7 @@ class HyperbolicPde(Pde):
 
         scheme : int
 
-
+            If scheme==1, 2nd scheme else, else, use 1st scheme.
 
         Returns
         =======
@@ -464,7 +529,7 @@ class HyperbolicPde(Pde):
             # f(u[M-2])
             fum2 = self.flux.subs([(var, var[M - 2]) for var in self.two_dim_var])
             # S(u[M-1])
-            SuM1 = self.source.subs([(var, var[M-1]) for var in self.two_dim_var])
+            SuM1 = self.source.subs([(var, var[M - 1]) for var in self.two_dim_var])
             ode_rhs3 = -simplify((fum - fum2) / (2 * dx)) \
                        + simplify((a[0] * (u[M] - u[M - 1]) - a[1] * (u[M - 1] - u[M - 2])) / (2 * dx)) \
                        + simplify(SuM1)

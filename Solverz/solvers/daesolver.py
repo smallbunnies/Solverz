@@ -470,8 +470,6 @@ def Rodas(dae: DAE,
     dt = np.minimum(dt, opt.hmax)
 
     dae.assign_eqn_var_address(y0)
-    s_num = dae.state_num
-    a_num = dae.algebra_num
 
     M = dae.M
 
@@ -480,16 +478,28 @@ def Rodas(dae: DAE,
         # step size too small
         # pass
 
+        if np.abs(dt) < uround:
+            print(f"Error exit of RODAS at time = {t}: step size too small h = {dt}.\n")
+
         # Stretch the step if within 10% of T-t.
         if t + dt >= tend:
             dt = tend - t
         else:
             dt = np.minimum(dt, 0.5 * (tend - t))
 
+        if event is not None:  # event
+            # detect event time stamp and change the step
+            t_next_stamp = float(event.time[np.argwhere(event.time > t)[0]])
+            dt = np.minimum(dt, t_next_stamp - t)
+
         J = dae.j(y0)
         if done:
             break
         K = np.zeros((dae.vsize, s))
+        if event is not None:
+            # If there is simulation events, i.e. time-varying coefficients,
+            # the solution of RODAS can be viewed as solution of non-autonomous DAEs.
+            dae.update_param(event, t)
         rhs = dae.F(y0)
 
         lu = sla.splu(M - dt * gamma * J)
@@ -499,6 +509,8 @@ def Rodas(dae: DAE,
             sum_1 = K @ alpha[:, j]
             sum_2 = K @ gamma_tilde[:, j]
             y1 = y0 + dt * sum_1
+            if event is not None:
+                dae.update_param(event, t + dt * np.sum(alpha[:, j]))
             rhs = dae.F(y1) + M @ sum_2
             sol = lu.solve(rhs)
             K[:, j] = sol - sum_2
@@ -509,6 +521,9 @@ def Rodas(dae: DAE,
 
         SK = (opt.atol + opt.rtol * abs(ynew)).reshape((-1,))
         err = np.max(np.abs((sum_1 - sum_2) / SK))
+        if np.any(np.isinf(ynew)) or np.any(np.isnan(ynew)):
+            err = 1.0e6
+            print('Warning Rodas: NaN or Inf occurs.')
         err = np.maximum(err, 1.0e-6)
         fac = opt.f_savety / (err ** (1 / pord))
         fac = np.minimum(opt.facmax, np.maximum(opt.fac1, fac))
@@ -519,9 +534,6 @@ def Rodas(dae: DAE,
             told = t
             t = t + dt
 
-            if event is not None:  # event
-                pass
-
             if dense_output:  # dense_output
                 while t >= tnext > told:
                     tau = (tnext - told) / dt
@@ -530,7 +542,7 @@ def Rodas(dae: DAE,
                     T[nt] = tnext
                     y[nt] = ynext
                     inext = inext + 1
-                    if inext <= n_tspan-1:
+                    if inext <= n_tspan - 1:
                         tnext = tspan[inext]
                     else:
                         tnext = tend + dt

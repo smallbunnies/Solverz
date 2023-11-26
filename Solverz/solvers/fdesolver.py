@@ -37,7 +37,7 @@ def fde_solver(fde: AE,
         # fde.update_param('t', t + dt)
         # fde.update_param('t0', t)
         if event:
-            fde.update_param(event, i*dt)
+            fde.update_param(event, (i+1)*dt)
         u1 = nr_method(fde, u1, tol=tol)
         u[i + 1] = u1
         # if pbar:

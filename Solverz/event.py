@@ -10,7 +10,9 @@ class Event:
                  name: str = None,
                  time: Union[List[Number], np.ndarray] = None):
         self.name = name
-        self.time = time
+        self.time = np.array(time).reshape(-1, )
+        if not np.all(np.diff(self.time) > 0):
+            raise ValueError("Event time stamp should be strictly monotonically increasing!")
         self.index: Dict[str, Tuple[int]] = dict()
         self.var_value: Dict[str, np.ndarray] = dict()
 
