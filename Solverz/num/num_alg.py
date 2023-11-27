@@ -120,9 +120,10 @@ class IdxVar(Symbol):
 class Param_(Symbol):
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
 
-    def __new__(cls, name, value=None, dim=1, trigger=False):
+    def __new__(cls, name, value=None, dim=1, triggerable=False):
         obj = Symbol.__new__(cls, name)
         obj.name = name
+        obj.triggerable = triggerable
         if value is not None:
             if isinstance(value, csc_array):
                 obj.value = value
@@ -561,7 +562,8 @@ class Slice(Function):
 
 
 class switch(Function):
-    pass
+    def _eval_derivative(self, s):
+        return switch(*[arg.diff(s) for arg in self.args[0:len(self.args) - 1]], self.args[-1])
 
 
 def traverse_for_mul(node: Expr):

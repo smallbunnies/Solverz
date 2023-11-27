@@ -452,6 +452,10 @@ def Rodas(dae: DAE,
     T = np.zeros((10001,))
     T[nt] = t0
     y = TimeVars(y0, 10000)
+
+    y0_alias = y0.derive_alias('0')
+    dae.update_param(y0_alias)
+
     dense_output = False
     n_tspan = len(tspan)
     told = t0
@@ -517,17 +521,21 @@ def Rodas(dae: DAE,
 
         sum_1 = K @ (dt * b)
         ynew = y0 + sum_1
-        sum_2 = K @ (dt * bd)
+        if not opt.fix_h:
+            sum_2 = K @ (dt * bd)
 
-        SK = (opt.atol + opt.rtol * abs(ynew)).reshape((-1,))
-        err = np.max(np.abs((sum_1 - sum_2) / SK))
-        if np.any(np.isinf(ynew)) or np.any(np.isnan(ynew)):
-            err = 1.0e6
-            print('Warning Rodas: NaN or Inf occurs.')
-        err = np.maximum(err, 1.0e-6)
-        fac = opt.f_savety / (err ** (1 / pord))
-        fac = np.minimum(opt.facmax, np.maximum(opt.fac1, fac))
-        dtnew = dt * fac
+            SK = (opt.atol + opt.rtol * abs(ynew)).reshape((-1,))
+            err = np.max(np.abs((sum_1 - sum_2) / SK))
+            if np.any(np.isinf(ynew)) or np.any(np.isnan(ynew)):
+                err = 1.0e6
+                print('Warning Rodas: NaN or Inf occurs.')
+            err = np.maximum(err, 1.0e-6)
+            fac = opt.f_savety / (err ** (1 / pord))
+            fac = np.minimum(opt.facmax, np.maximum(opt.fac1, fac))
+            dtnew = dt * fac
+        else:
+            err = 1.0
+            dtnew = dt
 
         if err <= 1.0:
 
@@ -554,6 +562,9 @@ def Rodas(dae: DAE,
             if np.abs(tend - t) < uround:
                 done = True
             y0 = ynew
+
+            y0_alias.array[:] = y0.array[:]
+            dae.update_param(y0_alias)
 
         dt = np.min([opt.hmax, np.max([hmin, dtnew])])
 
@@ -640,6 +651,7 @@ class Opt:
                  fac1=0.2,
                  fac2=6,
                  scheme='rodas',
+                 fix_h: bool = False,
                  hinit=None,
                  hmax=None):
         self.atol = atol
@@ -648,6 +660,7 @@ class Opt:
         self.facmax = facmax
         self.fac1 = fac1
         self.fac2 = fac2
+        self.fix_h = fix_h
         self.hinit = hinit
         self.hmax = hmax
         self.scheme = scheme

@@ -9,7 +9,7 @@ from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
 from Solverz.num.num_alg import F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
-    pre_lambdify, Mat_Mul, Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst, minmod, Slice
+    pre_lambdify, Mat_Mul, Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst, Slice, switch
 from Solverz.num.num_interface import numerical_interface
 from Solverz.num.matrix_calculus import MixedEquationDiff
 from Solverz.param import Param
@@ -413,7 +413,7 @@ class HyperbolicPde(Pde):
 
                 fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
                 fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
-                S = self.source.subs([(a, a[0:M-1]) for a in self.two_dim_var])
+                S = self.source.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
                 ae = dx * (u[0:M - 1] - u0[0:M - 1]) + simplify(dt * (fui1j1 - fuij1)) - simplify(dx * dt * S)
 
                 return Eqn('FDM of ' + self.name, ae)
@@ -587,9 +587,12 @@ class HyperbolicPde(Pde):
 
             theta = Const_('theta')
             ux = Var(u.name + 'x')
-            minmod_rhs = ux[1:M - 1] - minmod(theta * (u[1:M - 1] - u[0:M - 2]) / dx,
+            minmod_flag = Param_('minmod_flag_of_' + ux.name)
+            minmod_rhs = ux[1:M - 1] - switch(theta * (u[1:M - 1] - u[0:M - 2]) / dx,
                                               (u[2:M] - u[0:M - 2]) / (2 * dx),
-                                              theta * (u[2:M] - u[1:M - 1]) / dx)
+                                              theta * (u[2:M] - u[1:M - 1]) / dx,
+                                              0,
+                                              minmod_flag)
 
             return [Ode('SDM of ' + self.name + ' 1', ode_rhs1, u[1]),
                     Ode('SDM of ' + self.name + ' 2', ode_rhs2, u[2:M - 2]),

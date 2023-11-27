@@ -37,6 +37,8 @@ class Equations:
         self.matrix_container = matrix_container
         self.PARAM: Dict[str, Param] = dict()
         self.CONST: Dict[str, Param] = dict()
+        self.triggerable_quantity: Dict[str, str] = dict()  # {triggable variable: its trigger variable}
+        self.trigger_quantity_cache: Dict[str, Dict[str, np.ndarray]] = dict()  # {trigger variable: its cached value}
 
         if isinstance(eqn, Eqn):
             eqn = [eqn]
@@ -57,6 +59,7 @@ class Equations:
 
         for symbol_ in eqn.SYMBOLS.values():
             if isinstance(symbol_, Param_):
+                # this is not fully initialize of Parameters, please use param_initializer
                 self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
             elif isinstance(symbol_, idx):
                 self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dtype=int)
@@ -82,12 +85,15 @@ class Equations:
 
     def param_initializer(self, name, param: Param):
         if not self.is_param_defined(name):
-            raise ValueError(f'Parameter {name} not defined in equations!')
+            warnings.warn(f'Parameter {name} not defined in equations!')
         if isinstance(param, Param):
-            if name in self.PARAM:
-                self.PARAM[name] = param
-            elif name in self.CONST:
+            if name in self.CONST:
                 self.CONST[name] = param
+            else:
+                self.PARAM[name] = param
+                if param.triggerable:
+                    self.triggerable_quantity[param.name] = param.trigger_var
+                    self.trigger_quantity_cache[param.name] = dict()
         else:
             raise TypeError(f"Unsupported parameter type {type(param)}")
 
@@ -130,6 +136,38 @@ class Equations:
         """
         return self.EQNs[eqn_name].NUM_EQN(*args)
 
+    def trigger_param_updater(self, eqn: Eqn, *xys):
+        # taq -- triggerable_quantity that is being triggered by parameters or variables
+        # tq -- trigger_quantity that is triggering parameters
+        for taq, tq in self.triggerable_quantity.items():
+            if taq in eqn.SYMBOLS.keys():
+                if tq in self.PARAM.keys():
+                    if tq not in self.trigger_quantity_cache[taq]:
+                        # tq value is None then initialize cache
+                        self.PARAM[taq].v = self.PARAM[taq].trigger_fun(self.PARAM[tq].v)
+                        self.trigger_quantity_cache[taq][tq] = np.copy(self.PARAM[tq].v)
+                    else:
+                        # If tq value is not None, then compare current value with cache.
+                        if not np.allclose(self.trigger_quantity_cache[taq][tq],
+                                           self.PARAM[tq].v,
+                                           rtol=1e-8):
+                            self.PARAM[taq].v = self.PARAM[taq].trigger_fun(self.PARAM[tq].v)
+                            self.trigger_quantity_cache[taq][tq] = np.copy(self.PARAM[tq].v)
+                else:
+                    for y in xys:
+                        if tq in y.var_list:
+                            if tq not in self.trigger_quantity_cache[taq]:
+                                # tq value is None then initialize cache
+                                self.PARAM[taq].v = self.PARAM[taq].trigger_fun(y[tq])
+                                self.trigger_quantity_cache[taq][tq] = np.copy(y[tq])
+                            else:
+                                # If tq value is not None, then compare current value with cache.
+                                if not np.allclose(self.trigger_quantity_cache[taq][tq],
+                                                   y[tq],
+                                                   rtol=1e-8):
+                                    self.PARAM[taq].v = self.PARAM[taq].trigger_fun(y[tq])
+                                    self.trigger_quantity_cache[taq][tq] = np.copy(y[tq])
+
     def obtain_eqn_args(self, eqn: Eqn, *xys: Vars) -> List[np.ndarray]:
         """
         Obtain the args of equations
@@ -137,15 +175,13 @@ class Equations:
         :param xys:
         :return:
         """
+
+        self.trigger_param_updater(eqn, *xys)
+
         args = []
         for symbol in eqn.SYMBOLS.values():
             value_obtained = False
             if symbol.name in self.PARAM:
-                if self.PARAM[symbol.name].triggerable:
-                    for y in xys:
-                        if self.PARAM[symbol.name].trigger_var in y.var_list:
-                            self.PARAM[symbol.name].v = self.PARAM[symbol.name].trigger_fun(
-                                y[self.PARAM[symbol.name].trigger_var])
                 temp = self.PARAM[symbol.name].v
                 if temp is None:
                     raise TypeError(f'Parameter {symbol.name} uninitialized')
@@ -399,7 +435,7 @@ class DAE(Equations):
 
         temp = 0
         for eqn_name in self.f_list:
-            eqn_size = self.f(eqn_name, *xys).shape[0]
+            eqn_size = self.f(*xys, eqn=eqn_name).shape[0]
             self.a.update(eqn_name, temp, temp + eqn_size - 1)
             temp = temp + eqn_size
             self.esize[eqn_name] = eqn_size
@@ -407,7 +443,7 @@ class DAE(Equations):
         self.state_num = temp
 
         for eqn_name in self.g_list:
-            eqn_size = self.g(eqn_name, *xys).shape[0]
+            eqn_size = self.g(*xys, eqn=eqn_name).shape[0]
             self.a.update(eqn_name, temp, temp + eqn_size - 1)
             temp = temp + eqn_size
             self.esize[eqn_name] = eqn_size
@@ -445,17 +481,7 @@ class DAE(Equations):
         else:
             return self.f(*xys)
 
-    def f(self, *xys) -> np.ndarray:
-        """
-
-        `xys` is either:
-          - two arguments, e.g. state vars x, and numerical equation y
-          - one argument, e.g. state vars x.
-        """
-        eqn = None
-        if isinstance(xys[0], str):
-            eqn = xys[0]
-            xys = xys[1:]
+    def f(self, *xys, eqn=None) -> np.ndarray:
 
         temp = []
         if eqn:
@@ -469,7 +495,7 @@ class DAE(Equations):
 
         return np.hstack(temp)
 
-    def g(self, *xys) -> np.ndarray:
+    def g(self, *xys, eqn=None) -> np.ndarray:
         """
 
         `xys` is either:
@@ -480,11 +506,6 @@ class DAE(Equations):
 
         if len(self.g_list) == 0:
             raise ValueError(f'No AE found in {self.name}!')
-
-        eqn = None
-        if isinstance(xys[0], str):
-            eqn = xys[0]
-            xys = xys[1:]
 
         temp = []
         if eqn:
