@@ -15,17 +15,17 @@ df = pd.read_excel('instances/dae_test.xlsx',
                    engine='openpyxl'
                    )
 
-T, Y = Rodas(dae,
-             [0, 20],
-             as_Vars(x),
-             as_Vars(y),
-             opt=Opt(hinit=0.1))
+T, Y, stats = Rodas(dae,
+                    [0, 20],
+                    as_Vars(x),
+                    as_Vars(y),
+                    opt=Opt(hinit=0.1))
 
-T1, Y1 = Rodas(dae,
-               np.linspace(0, 20, 201),
-               as_Vars(x),
-               as_Vars(y),
-               opt=Opt(hinit=0.1))
+T1, Y1, stats2 = Rodas(dae,
+                       np.linspace(0, 20, 201),
+                       as_Vars(x),
+                       as_Vars(y),
+                       opt=Opt(hinit=0.1))
 
 
 # def test_discretize():

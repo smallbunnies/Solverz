@@ -18,6 +18,9 @@ def nr_method(eqn: AE,
         ite = ite + 1
         y = y - solve(eqn.j(y), df)
         df = eqn.g(y)
+        if ite >= 100:
+            print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
+            break
     return y
 
 
@@ -66,7 +69,8 @@ def continuous_nr(eqn: AE,
             # error control
             # error estimation
             err = dt * np.linalg.norm(
-                kE.reshape(-1, ) / np.maximum(np.maximum(abs(y.array), abs(ynew.array)).reshape(-1, ), threshold), np.Inf)
+                kE.reshape(-1, ) / np.maximum(np.maximum(abs(y.array), abs(ynew.array)).reshape(-1, ), threshold),
+                np.Inf)
             if err > rtol:  # failed step
                 if dt <= hmin:
                     raise ValueError(f'IntegrationTolNotMet step size: {dt} hmin: {hmin}')

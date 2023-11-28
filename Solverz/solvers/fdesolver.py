@@ -25,7 +25,7 @@ def fde_solver(fde: AE,
     u1 = u[0]  # x_{i+1}
     fde.update_param('dt', dt)
     fde.update_param('dx', dx)
-    fde.update_param('M', L/dx)
+    fde.update_param('M', int(L/dx))
     u0 = u1.derive_alias('0')  # x_{i}
 
     for i in range(int(T_end/dt)):

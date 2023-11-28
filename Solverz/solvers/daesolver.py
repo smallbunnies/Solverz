@@ -434,6 +434,7 @@ def Rodas(dae: DAE,
           event: Event = None):
     if opt is None:
         opt = Opt()
+    stats = Stats(opt.scheme)
 
     s, pord, gamma, b, bd, alpha, gamma_tilde, ccont, dcont, econt = Rodas_param(opt.scheme)
 
@@ -496,6 +497,9 @@ def Rodas(dae: DAE,
             t_next_stamp = float(event.time[np.argwhere(event.time > t)[0]])
             dt = np.minimum(dt, t_next_stamp - t)
 
+        if opt.fix_h:
+            dt = opt.hinit
+
         J = dae.j(y0)
         if done:
             break
@@ -505,8 +509,10 @@ def Rodas(dae: DAE,
             # the solution of RODAS can be viewed as solution of non-autonomous DAEs.
             dae.update_param(event, t)
         rhs = dae.F(y0)
+        stats.nfeval = stats.nfeval + 1
 
         lu = sla.splu(M - dt * gamma * J)
+        stats.ndecomp = stats.ndecomp + 1
         K[:, 0] = lu.solve(rhs)
 
         for j in range(1, s):
@@ -516,6 +522,7 @@ def Rodas(dae: DAE,
             if event is not None:
                 dae.update_param(event, t + dt * np.sum(alpha[:, j]))
             rhs = dae.F(y1) + M @ sum_2
+            stats.nfeval = stats.nfeval + 1
             sol = lu.solve(rhs)
             K[:, j] = sol - sum_2
 
@@ -541,6 +548,7 @@ def Rodas(dae: DAE,
 
             told = t
             t = t + dt
+            stats.nstep = stats.nstep + 1
 
             if dense_output:  # dense_output
                 while t >= tnext > told:
@@ -566,11 +574,14 @@ def Rodas(dae: DAE,
             y0_alias.array[:] = y0.array[:]
             dae.update_param(y0_alias)
 
+        else:
+            stats.nreject = stats.nreject + 1
+
         dt = np.min([opt.hmax, np.max([hmin, dtnew])])
 
     T = T[0:nt + 1]
     y = y[0:nt + 1]
-    return T, y
+    return T, y, stats
 
 
 def Rodas_param(scheme: str = 'rodas'):
@@ -660,11 +671,20 @@ class Opt:
         self.facmax = facmax
         self.fac1 = fac1
         self.fac2 = fac2
-        self.fix_h = fix_h
+        self.fix_h = fix_h  # To force the step sizes to be invariant. This is not robust.
         self.hinit = hinit
         self.hmax = hmax
         self.scheme = scheme
 
 
 class Stats:
-    pass
+
+    def __init__(self, scheme):
+        self.scheme = scheme
+        self.nstep = 0
+        self.nfeval = 0
+        self.ndecomp = 0
+        self.nreject = 0
+
+    def __repr__(self):
+        return f"Scheme {self.scheme}, nstep: {self.nstep}, nfeval: {self.nfeval}, ndecomp: {self.ndecomp}, nreject: {self.nreject}."
