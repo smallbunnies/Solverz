@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from Solverz import idx, Var, Param_, as_Vars, Const_, HyperbolicPde, AE, fde_solver, Eqn
+from Solverz import idx, Var, Param_, as_Vars, Const_, HyperbolicPde, AE, fde_solver, Eqn, Param
 
 results = pd.read_excel('instances/dynamic_gas_flow_single_pipe.xlsx',
                         sheet_name=None,
@@ -38,7 +38,9 @@ gas_FDE = AE([ae1, ae2, ae3, ae4], name='gas FDE')
 u0 = as_Vars([p, q])
 
 T = 3600
-u = fde_solver(gas_FDE, u0, [0, 3600], 5, 300, L, tol=1e-3)
+gas_FDE.param_initializer('M', Param('M', value=np.array(10)))
+gas_FDE.param_initializer('dx', Param('dx', value=np.array(300)))
+u = fde_solver(gas_FDE, u0, [0, 3600], 5, tol=1e-3)
 
 
 def test_fde_solver():

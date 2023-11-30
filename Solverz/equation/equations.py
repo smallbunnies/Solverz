@@ -224,7 +224,8 @@ class Equations:
         elif isinstance(var_idx, str):
             variable_address = self.var_address.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
         elif isinstance(var_idx, slice):
-            variable_address = self.var_address.v[var_name][var_idx_func.NUM_EQN(*self.obtain_eqn_args(var_idx_func, *xys))]
+            variable_address = self.var_address.v[var_name][
+                var_idx_func.NUM_EQN(*self.obtain_eqn_args(var_idx_func, *xys))]
         elif isinstance(var_idx, Expr):
             args = self.obtain_eqn_args(var_idx_func, *xys)
             variable_address = self.var_address.v[var_name][var_idx_func.NUM_EQN(*args).reshape(-1, )]
@@ -307,7 +308,6 @@ class Equations:
                             col.extend(variable_address[coo_.col].tolist())
                         else:
                             # vector
-
                             if value.shape[0] < len(equation_address):
                                 # two dimensional scalar as vector todo: this should be avoided
                                 data.extend(value.reshape(-1).tolist() * len(equation_address))
@@ -317,6 +317,7 @@ class Equations:
                             col.extend(variable_address.tolist())
                     else:
                         # scalar
+                        value = np.squeeze(value)  # In inviscid burger test there is scalar like np.array([1])
                         data.extend([value.tolist()] * len(equation_address))
                         row.extend(equation_address.tolist())
                         col.extend(variable_address.tolist())
@@ -443,7 +444,10 @@ class DAE(Equations):
         self.state_num = temp
 
         for eqn_name in self.g_list:
-            eqn_size = self.g(*xys, eqn=eqn_name).shape[0]
+            temp_g = self.g(*xys, eqn=eqn_name)
+            if np.max(np.abs(temp_g)) > 1e-5:
+                warnings.warn(f'Inconsistent initial values for algebraic equation: {eqn_name}, with deviation {np.max(np.abs(temp_g))}!')
+            eqn_size = temp_g.shape[0]
             self.a.update(eqn_name, temp, temp + eqn_size - 1)
             temp = temp + eqn_size
             self.esize[eqn_name] = eqn_size
@@ -618,7 +622,8 @@ class DAE(Equations):
                         if var_idx.step is not None:
                             temp.append(var_idx.step)
                         temp_func = Eqn('To evaluate var_idx of variable' + diff_var.name, Slice(*temp))
-                        variable_address = self.var_address.v[var_name][temp_func.NUM_EQN(*self.obtain_eqn_args(temp_func))]
+                        variable_address = self.var_address.v[var_name][
+                            temp_func.NUM_EQN(*self.obtain_eqn_args(temp_func))]
                     elif isinstance(var_idx, Expr):
                         temp_func = Eqn('To evaluate var_idx of variable' + diff_var.name, var_idx)
                         args = self.obtain_eqn_args(temp_func)

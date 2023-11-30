@@ -271,13 +271,17 @@ class HyperbolicPde(Pde):
 
     def __init__(self, name: str,
                  diff_var: Var,
-                 flux: Expr,
+                 flux: Expr = 0,
                  source: Expr = 0,
                  two_dim_var: Union[Var, List[Var]] = None):
         if isinstance(source, (float, int)):
             source = sympify(source)
         super().__init__(name, source)
         self.diff_var = diff_var
+        if isinstance(flux, (float, int)):
+            flux = sympify(flux)
+        if isinstance(source, (float, int)):
+            flux = sympify(flux)
         self.flux = flux
         self.source = source
         self.two_dim_var = [two_dim_var] if isinstance(two_dim_var, Var) else two_dim_var
@@ -421,7 +425,7 @@ class HyperbolicPde(Pde):
             else:
                 raise ValueError(f"Unimplemented direction {direction}!")
 
-    def semi_discretize(self, a, scheme=1):
+    def semi_discretize(self, a0=None, a1=None, scheme=1):
         r"""
         Semi-discretize the hyperbolic PDE of nonlinear conservation law as ODEs using the Kurganov-Tadmor scheme
         (see [Kurganov2000]_). The difference stencil is as follows, with $x_{j+1}-x_{j}=\Delta x$.
@@ -432,23 +436,29 @@ class HyperbolicPde(Pde):
         Parameters
         ==========
 
-        a : List[Expr]
+        a0 : Expr
 
-            Maximum local speed $a=[a_{j+1/2}, a_{j-1/2}]$, with formula
+            Maximum local speed $a_{j+1/2}$, with formula
 
             .. math::
 
                 a_{j+1/2}=\max\qty{\rho\qty(\pdv{f}{u}\qty(u^+_{j+1/2})),\rho\qty(\pdv{f}{u}\qty(u^-_{j+1/2}))},
 
-            .. math::
-
-                a_{j-1/2}=\max\qty{\rho\qty(\pdv{f}{u}\qty(u^+_{j-1/2})),\rho\qty(\pdv{f}{u}\qty(u^-_{j-1/2}))},
-
             where
 
             .. math::
 
-                \rho(A)=\max_i|\lambda_i(A)|
+                \rho(A)=\max_i|\lambda_i(A)|.
+
+            If $a_0$ or $a_1$ is None, then they will be set as ``Param_`` ``ajp12`` and ``ajm12`` respectively.  
+
+        a1 : Expr
+
+            Maximum local speed $a_{j-1/2}$, with formula
+
+            .. math::
+
+                a_{j-1/2}=\max\qty{\rho\qty(\pdv{f}{u}\qty(u^+_{j-1/2})),\rho\qty(\pdv{f}{u}\qty(u^-_{j-1/2}))}.
 
         scheme : int
 
@@ -504,8 +514,10 @@ class HyperbolicPde(Pde):
 
         """
 
-        if not isinstance(a, list):
-            raise TypeError("a should be a list of maximum local speed for a_{j+1/2} and a_{j-1/2}!")
+        if a0 is None:
+            a0 = Param_('ajp12')
+        if a1 is None:
+            a1 = Param_('ajm12')
 
         dx = Const_('dx')
         M = idx('M')
@@ -520,7 +532,7 @@ class HyperbolicPde(Pde):
             # S(u[1])
             Su1 = self.source.subs([(var, var[1]) for var in self.two_dim_var])
             ode_rhs1 = -simplify((fu2 - fu0) / (2 * dx)) \
-                       + simplify((a[0] * (u[2] - u[1]) - a[1] * (u[1] - u[0])) / (2 * dx)) \
+                       + simplify((a0[0] * (u[2] - u[1]) - a1[0] * (u[1] - u[0])) / (2 * dx)) \
                        + simplify(Su1)
 
             # j=M-1
@@ -531,7 +543,7 @@ class HyperbolicPde(Pde):
             # S(u[M-1])
             SuM1 = self.source.subs([(var, var[M - 1]) for var in self.two_dim_var])
             ode_rhs3 = -simplify((fum - fum2) / (2 * dx)) \
-                       + simplify((a[0] * (u[M] - u[M - 1]) - a[1] * (u[M - 1] - u[M - 2])) / (2 * dx)) \
+                       + simplify((a0[-1] * (u[M] - u[M - 1]) - a1[-1] * (u[M - 1] - u[M - 2])) / (2 * dx)) \
                        + simplify(SuM1)
 
             # 2<=j<=M-2
@@ -579,10 +591,10 @@ class HyperbolicPde(Pde):
             Suj = self.source.subs([(var, var[2:M - 2]) for var in self.two_dim_var])
             Hp = (self.flux.subs([(var, ujprime(var[2:M - 2], 0)) for var in self.two_dim_var]) +
                   self.flux.subs([(var, ujprime(var[2:M - 2], 1)) for var in self.two_dim_var])) / 2 \
-                 - a[0] / 2 * (ujprime(u[2:M - 2], 0) - ujprime(u[2:M - 2], 1))
+                 - a0[2:M-2] / 2 * (ujprime(u[2:M - 2], 0) - ujprime(u[2:M - 2], 1))
             Hm = (self.flux.subs([(var, ujprime(var[2:M - 2], 2)) for var in self.two_dim_var]) +
                   self.flux.subs([(var, ujprime(var[2:M - 2], 3)) for var in self.two_dim_var])) / 2 \
-                 - a[1] / 2 * (ujprime(u[2:M - 2], 2) - ujprime(u[2:M - 2], 3))
+                 - a1[2:M-2] / 2 * (ujprime(u[2:M - 2], 2) - ujprime(u[2:M - 2], 3))
             ode_rhs2 = -simplify(Hp - Hm) / dx + Suj
 
             theta = Const_('theta')
@@ -611,7 +623,7 @@ class HyperbolicPde(Pde):
             # S(u[j])
             Su = self.source.subs([(var, var[1:M - 1]) for var in self.two_dim_var])
             ode_rhs = -simplify((fu1 - fu2) / (2 * dx)) \
-                      + simplify((a[0] * (u[2:M] - u[1:M - 1]) - a[1] * (u[1:M - 1] - u[0:M - 2])) / (2 * dx)) \
+                      + simplify((a0 * (u[2:M] - u[1:M - 1]) - a1 * (u[1:M - 1] - u[0:M - 2])) / (2 * dx)) \
                       + simplify(Su)
 
             return [Ode('SDM of ' + self.name + ' 1', ode_rhs, u[1:M - 1]),

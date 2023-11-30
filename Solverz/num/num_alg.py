@@ -140,7 +140,7 @@ class Param_(Symbol):
         return obj
 
     def __getitem__(self, item):
-        if isinstance(item, (idx, int, slice)):
+        if isinstance(item, (idx, int, slice, Expr)):
             return IdxParam(self, item, self.dim)
         elif isinstance(item, tuple):
             if all([isinstance(item_, (idx, Integer, int, slice)) for item_ in list(item)]):
@@ -150,11 +150,13 @@ class Param_(Symbol):
 class IdxConst(Symbol):
 
     def __new__(cls, symbol, index, dim):
-        if not isinstance(index, (idx, int, slice, tuple)):
+        if not isinstance(index, (idx, int, slice, tuple, Expr)):
             raise TypeError(f"Unsupported idx type {type(index)}")
         if isinstance(index, idx):
             name = f'{symbol.name}[{index.__str__()}]'
         elif isinstance(index, int):
+            name = f'{symbol.name}[{index}]'
+        elif isinstance(index, Expr):
             name = f'{symbol.name}[{index}]'
         elif isinstance(index, slice):
             name = f'{symbol.name}[{print_slice(index)}]'
