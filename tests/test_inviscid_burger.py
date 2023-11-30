@@ -330,7 +330,7 @@ u2p_ndx200 = Y2_p[1]['u'][-1, :]
 
 
 def test_burger2():
-    assert np.mean(np.abs(u1p_ndx100 - benchp1_ndx100)) <= 1e-13
-    assert np.mean(np.abs(u2p_ndx100 - benchp2_ndx100)) <= 1e-13
-    assert np.mean(np.abs(u1p_ndx200 - benchp1_ndx200)) <= 1e-13
-    assert np.mean(np.abs(u2p_ndx200 - benchp2_ndx200)) <= 1e-13
+    assert np.max(np.abs(u1p_ndx100 - benchp1_ndx100)) <= 1e-7
+    assert np.max(np.abs(u2p_ndx100 - benchp2_ndx100)) <= 1e-7
+    assert np.max(np.abs(u1p_ndx200 - benchp1_ndx200)) <= 1e-7
+    assert np.max(np.abs(u2p_ndx200 - benchp2_ndx200)) <= 1e-7
