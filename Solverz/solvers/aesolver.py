@@ -11,7 +11,8 @@ from Solverz.variable.variables import Vars
 
 def nr_method(eqn: AE,
               y: Vars,
-              tol: float = 1e-8):
+              tol: float = 1e-8,
+              stats=False):
     df = eqn.g(y)
     ite = 0
     while max(abs(df)) > tol:
@@ -21,7 +22,10 @@ def nr_method(eqn: AE,
         if ite >= 100:
             print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
             break
-    return y
+    if not stats:
+        return y
+    else:
+        return y, ite
 
 
 def continuous_nr(eqn: AE,

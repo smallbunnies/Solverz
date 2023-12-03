@@ -28,7 +28,10 @@ class Param:
         self.trigger_fun = trigger_fun
         self.dtype = dtype
         self.dim = dim
-        self.__v = value
+        if value is not None:
+            self.__v = np.copy(value)
+        else:
+            self.__v = value
 
     @property
     def v(self):

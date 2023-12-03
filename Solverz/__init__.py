@@ -5,6 +5,6 @@ from Solverz.num.num_alg import idx, Param_, Var, Sign, Set, Const_, Abs, transp
 from Solverz.num.num_interface import minmod_flag
 from Solverz.variable.variables import Vars, TimeVars, as_Vars
 from Solverz.solvers.aesolver import nr_method, continuous_nr
-from Solverz.solvers.daesolver import Rodas, Opt
+from Solverz.solvers.daesolver import Rodas, Opt, implicit_trapezoid
 from Solverz.solvers.fdesolver import fde_solver
 from Solverz.event import Event

@@ -39,7 +39,7 @@ def Slice(*args):
 
 @implements_nfunc('ix_')
 def ix_(arg: np.ndarray):
-    return np.ix_(arg.reshape((-1,)))
+    return arg.reshape(-1,)
 
 
 @implements_nfunc('Sign')

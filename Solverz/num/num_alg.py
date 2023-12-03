@@ -207,9 +207,20 @@ class IdxConst(Symbol):
         return obj
 
     def _numpycode(self, printer, **kwargs):
-        if isinstance(self.index, slice):
+        if isinstance(self.index, idx):
+            temp = self.symbol.name + '[ix_({i})]'.format(i=printer._print(self.index))
+            return temp
+        elif isinstance(self.index, slice):
             return self.symbol.name + '[slice_{i}]'.format(
                 i=printer._print((self.index.start, self.index.stop + 1, self.index.step)))
+        elif isinstance(self.index, tuple):
+            idx_list = []
+            for idx_ in self.index:
+                if isinstance(idx_, idx):
+                    idx_list.append('ix_({i})'.format(i=printer._print(idx_)))
+                elif isinstance(idx_, slice):
+                    idx_list.append('{i}'.format(i=printer._print((idx_))))
+            return self.symbol.name + '[' + idx_list[0] + ',' + idx_list[1] + ']'
         else:
             return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
 
@@ -295,59 +306,6 @@ class Sign(Function):
         if argindex == 1:
             return 0
         raise ArgumentIndexError(self, argindex)
-
-
-class StateVar(Symbol):
-
-    def __new__(cls, name):
-        return Symbol.__new__(cls, name)
-
-
-class AlgebraVar(Symbol):
-
-    def __new__(cls, name):
-        return Symbol.__new__(cls, name)
-
-
-X = StateVar('X')
-Y = AlgebraVar('Y')
-
-
-class AliasVar(Symbol):
-
-    def __new__(cls, sym: Union[StateVar, AlgebraVar], suffix: str):
-        obj = Symbol.__new__(cls, sym.name + suffix)
-        obj.alias_of = sym.name
-        obj.suffix = suffix
-        return obj
-
-
-class ComputeParam(Symbol):
-
-    def __new__(cls, name):
-        obj = Symbol.__new__(cls, name)
-        return obj
-
-
-class F(Function):
-
-    def __new__(cls, *args, **kwargs):
-        obj = Function.__new__(cls, *args, **kwargs)
-        return obj
-
-
-class G(Function):
-
-    def __new__(cls, *args, **kwargs):
-        obj = Function.__new__(cls, *args, **kwargs)
-        return obj
-
-
-def new_symbols(names, commutative: bool):
-    if commutative:
-        return symbols(names, real=True)
-    else:
-        return symbols(names, commutative=commutative)
 
 
 class MatrixFunction(Function):

@@ -8,8 +8,7 @@ from sympy import Symbol, preorder_traversal, Basic, Expr, latex, Derivative, sy
 from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
-from Solverz.num.num_alg import F, X, StateVar, AliasVar, AlgebraVar, ComputeParam, new_symbols, \
-    pre_lambdify, Mat_Mul, Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst, Slice, switch
+from Solverz.num.num_alg import pre_lambdify, Mat_Mul, Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst, Slice, switch
 from Solverz.num.num_interface import numerical_interface
 from Solverz.num.matrix_calculus import MixedEquationDiff
 from Solverz.param import Param
@@ -150,96 +149,6 @@ class Ode(Eqn):
         super().__init__(name, f)
         self.diff_var = diff_var
         self.LHS = Derivative(diff_var, t)
-
-    def discretize(self,
-                   scheme: Basic,
-                   param: Dict[str, Param] = None,
-                   extra_diff_var: List[str] = None):
-        """
-
-        :param extra_diff_var: diff_var from other Eqn
-        :param scheme:
-        :param param: list of parameters in the Ode
-        :return:
-        """
-
-        if not extra_diff_var:
-            extra_diff_var = []
-
-        if not param:
-            param = dict()
-
-        funcs: Dict[F, Basic] = dict()  # function set
-        alias: Dict[AliasVar, Symbol] = dict()
-        scheme_elements = preorder_traversal(scheme)
-        for arg in scheme_elements:
-            if isinstance(arg, F):
-                # generate subs dict of FunctionClass F
-                # arg is a Function
-                f_args = arg.args
-                # args of Functions
-                symbol_dict: Dict[Symbol, Basic] = dict()
-                for symbol in self.SYMBOLS:
-                    if symbol.name in [self.diff_var] + extra_diff_var:
-                        # State Variable
-                        symbol_dict[symbol] = self._subs_state_var_in_func_args(f_args[0], symbol)
-                    elif symbol.name == 't':
-                        # Time variable of non-autonomous equations
-                        if 't' not in param.keys():
-                            param['t'] = Param('t')
-                        symbol_dict[symbol] = self._subs_t_in_func_args(f_args[2])
-                    elif symbol.name not in param.keys():
-                        # Algebra Variable
-                        symbol_dict[symbol] = self._subs_algebra_var_in_func_args(f_args[1], symbol)
-                funcs[arg] = self.subs(symbol_dict)
-                scheme_elements.skip()
-                # skip the args of function class
-            elif isinstance(arg, AliasVar):
-                if arg.alias_of == 'X':
-                    alias[arg] = new_symbols(self.diff_var + arg.suffix, commutative=self.commutative)
-                elif arg.alias_of == 'Y':
-                    raise ValueError('Really? Schemes may be wrong.')
-
-        scheme = scheme.subs([(key, value) for key, value in funcs.items()])
-        scheme = scheme.subs([(key, value) for key, value in alias.items()])
-        scheme = scheme.subs([(X, new_symbols(self.diff_var, commutative=self.commutative))])
-
-        # Add new Param
-        for symbol in list(scheme.free_symbols):
-            if symbol not in self.SYMBOLS and symbol.name not in param and symbol.name != self.diff_var:
-                param[symbol.name] = Param(symbol.name)
-
-        return param, Eqn('d_' + self.name, eqn=scheme.__str__(), commutative=self.commutative)
-
-    def _subs_state_var_in_func_args(self, expr: Basic, symbol: Symbol):
-        subs_dict: Dict[Union[StateVar, AliasVar, ComputeParam], Symbol] = dict()
-        for symbol_ in list(expr.free_symbols):
-            if isinstance(symbol_, StateVar):
-                subs_dict[symbol_] = symbol
-            elif isinstance(symbol_, AliasVar):
-                subs_dict[symbol_] = new_symbols(symbol.name + symbol_.suffix, commutative=self.commutative)
-            elif isinstance(symbol_, ComputeParam):
-                subs_dict[symbol_] = new_symbols(symbol_.name, commutative=self.commutative)
-        return expr.subs(subs_dict)
-
-    def _subs_t_in_func_args(self, expr: Basic):
-        # symbol=t
-        subs_dict: Dict[Union[ComputeParam], Symbol] = dict()
-        for symbol_ in list(expr.free_symbols):
-            if isinstance(symbol_, ComputeParam):
-                subs_dict[symbol_] = new_symbols(symbol_.name, commutative=self.commutative)
-        return expr.subs(subs_dict)
-
-    def _subs_algebra_var_in_func_args(self, expr: Basic, symbol: Symbol):
-        subs_dict: Dict[Union[AlgebraVar, AliasVar, ComputeParam], Symbol] = dict()
-        for symbol_ in list(expr.free_symbols):
-            if isinstance(symbol_, AlgebraVar):
-                subs_dict[symbol_] = symbol
-            elif isinstance(symbol_, AliasVar):
-                subs_dict[symbol_] = new_symbols(symbol.name + symbol_.suffix, commutative=self.commutative)
-            elif isinstance(symbol_, ComputeParam):
-                subs_dict[symbol_] = new_symbols(symbol_.name, commutative=self.commutative)
-        return expr.subs(subs_dict)
 
 
 class Pde(Eqn):

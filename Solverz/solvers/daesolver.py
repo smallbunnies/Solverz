@@ -9,7 +9,6 @@ from scipy.sparse import csc_array, linalg as sla
 
 from Solverz.equation.equations import DAE
 from Solverz.event import Event
-from Solverz.num.num_alg import AliasVar, X, Y, ComputeParam, F, Var
 from Solverz.solvers.aesolver import nr_method
 from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
 
@@ -18,51 +17,52 @@ from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
 
 
 def implicit_trapezoid(dae: DAE,
-                       x: TimeVars,
+                       y0: Vars,
                        tspan: Union[List, np.ndarray],
                        dt,
                        event: Event = None,
                        pbar=False):
-    X0 = AliasVar(X, '0')
-    Y0 = AliasVar(Y, '0')
-    t = ComputeParam('t')
-    t0 = ComputeParam('t0')
-    Dt = ComputeParam('Dt')
-    scheme = X - X0 - Dt / 2 * (F(X, Y, t) + F(X0, Y0, t0))
-    ae = dae.discretize(scheme)
+    ae = dae.discretize(scheme=1)
+
+    stats = Stats(scheme='Trapezoidal')
 
     tspan = np.array(tspan)
     T_initial = tspan[0]
     T_end = tspan[-1]
-    i = 0
+    nt = 0
     t = T_initial
 
-    xi1 = x[0]  # x_{i+1}
-    xi0 = xi1.derive_alias('0')  # x_{i}
+    y = TimeVars(y0, 10000)
+    T = np.zeros((10000,))
+    y0_alias = y0.derive_alias('0')
 
     if pbar:
         bar = tqdm.tqdm(total=T_end)
 
     while abs(t - T_end) > abs(dt) / 10:
-        ae.update_param('Dt', dt)
 
+        ae.update_param('dt', dt)
+        ae.update_param(y0_alias)
         if event:
             ae.update_param(event, t)
 
-        ae.update_param(xi0)
-        ae.update_param('t', t + dt)
-        ae.update_param('t0', t)
+        y1, ite = nr_method(ae, y0, stats=True)
+        stats.ndecomp = stats.ndecomp + ite
+        stats.nfeval = stats.nfeval + ite
 
-        xi1 = nr_method(ae, xi1)
-        xi0.array[:] = xi1.array
+        y0_alias.array[:] = y1.array[:]
 
-        x[i + 1] = xi1
-        if pbar:
-            bar.update(dt)
         t = t + dt
-        i = i + 1
+        nt = nt + 1
+        y[nt] = y1
+        T[nt] = t
+        y0 = y1
 
-    return x
+    y = y[0:nt + 1]
+    T = T[0:nt + 1]
+    stats.nstep = nt
+
+    return T, y, stats
 
 
 def sirk_ode(ode: DAE,
@@ -436,7 +436,7 @@ def Rodas(dae: DAE,
         opt = Opt()
     stats = Stats(opt.scheme)
 
-    s, pord, gamma, b, bd, alpha, gamma_tilde, ccont, dcont, econt = Rodas_param(opt.scheme)
+    rparam = Rodas_param(opt.scheme)
 
     if z0 is not None:
         y0 = combine_Vars(y0, z0)
@@ -500,44 +500,46 @@ def Rodas(dae: DAE,
         if opt.fix_h:
             dt = opt.hinit
 
-        J = dae.j(y0)
         if done:
             break
-        K = np.zeros((dae.vsize, s))
+        K = np.zeros((dae.vsize, rparam.s))
         if event is not None:
             # If there is simulation events, i.e. time-varying coefficients,
             # the solution of RODAS can be viewed as solution of non-autonomous DAEs.
             dae.update_param(event, t)
-        rhs = dae.F(y0)
+        J = dae.j(y0)
+
+        dfdt0 = dt * dfdt(dae, event, t, y0)
+        rhs = dae.F(y0) + rparam.g[0] * dfdt0
         stats.nfeval = stats.nfeval + 1
 
-        lu = sla.splu(M - dt * gamma * J)
+        lu = sla.splu(M - dt * rparam.gamma * J)
         stats.ndecomp = stats.ndecomp + 1
         K[:, 0] = lu.solve(rhs)
 
-        for j in range(1, s):
-            sum_1 = K @ alpha[:, j]
-            sum_2 = K @ gamma_tilde[:, j]
+        for j in range(1, rparam.s):
+            sum_1 = K @ rparam.alpha[:, j]
+            sum_2 = K @ rparam.gamma_tilde[:, j]
             y1 = y0 + dt * sum_1
             if event is not None:
-                dae.update_param(event, t + dt * np.sum(alpha[:, j]))
-            rhs = dae.F(y1) + M @ sum_2
+                dae.update_param(event, t + dt * rparam.a[j])
+
+            rhs = dae.F(y1) + M @ sum_2 + rparam.g[j] * dfdt0
             stats.nfeval = stats.nfeval + 1
             sol = lu.solve(rhs)
             K[:, j] = sol - sum_2
 
-        sum_1 = K @ (dt * b)
+        sum_1 = K @ (dt * rparam.b)
         ynew = y0 + sum_1
         if not opt.fix_h:
-            sum_2 = K @ (dt * bd)
-
+            sum_2 = K @ (dt * rparam.bd)
             SK = (opt.atol + opt.rtol * abs(ynew)).reshape((-1,))
             err = np.max(np.abs((sum_1 - sum_2) / SK))
             if np.any(np.isinf(ynew)) or np.any(np.isnan(ynew)):
                 err = 1.0e6
                 print('Warning Rodas: NaN or Inf occurs.')
             err = np.maximum(err, 1.0e-6)
-            fac = opt.f_savety / (err ** (1 / pord))
+            fac = opt.f_savety / (err ** (1 / rparam.pord))
             fac = np.minimum(opt.facmax, np.maximum(opt.fac1, fac))
             dtnew = dt * fac
         else:
@@ -553,7 +555,7 @@ def Rodas(dae: DAE,
             if dense_output:  # dense_output
                 while t >= tnext > told:
                     tau = (tnext - told) / dt
-                    ynext = y0 + tau * dt * K @ (b + (tau - 1) * (ccont + tau * (dcont + tau * econt)))
+                    ynext = y0 + tau * dt * K @ (rparam.b + (tau - 1) * (rparam.c + tau * (rparam.d + tau * rparam.e)))
                     nt = nt + 1
                     T[nt] = tnext
                     y[nt] = ynext
@@ -570,13 +572,13 @@ def Rodas(dae: DAE,
             if np.abs(tend - t) < uround:
                 done = True
             y0 = ynew
-
+            opt.facmax = opt.fac2
             y0_alias.array[:] = y0.array[:]
             dae.update_param(y0_alias)
 
         else:
             stats.nreject = stats.nreject + 1
-
+            opt.facmax = 1
         dt = np.min([opt.hmax, np.max([hmin, dtnew])])
 
     T = T[0:nt + 1]
@@ -584,73 +586,85 @@ def Rodas(dae: DAE,
     return T, y, stats
 
 
-def Rodas_param(scheme: str = 'rodas'):
-    if scheme == 'rodas':
-        s = 6
-        pord = 4
-        alpha = np.zeros((s, s))
-        beta = np.zeros((s, s))
-        gamma = 0.25
-        alpha[1, 0] = 3.860000000000000e-01
-        alpha[2, 0:2] = [1.460747075254185e-01, 6.392529247458190e-02]
-        alpha[3, 0:3] = [-3.308115036677222e-01, 7.111510251682822e-01, 2.496604784994390e-01]
-        alpha[4, 0:4] = [-4.552557186318003e+00, 1.710181363241323e+00, 4.014347332103149e+00, -1.719715090264703e-01]
-        alpha[5, 0:5] = [2.428633765466977e+00, -3.827487337647808e-01, -1.855720330929572e+00, 5.598352992273752e-01,
-                         2.499999999999995e-01]
-        beta[1, 0] = 3.170000000000250e-02
-        beta[2, 0:2] = [1.247220225724355e-02, 5.102779774275723e-02]
-        beta[3, 0:3] = [1.196037669338736e+00, 1.774947364178279e-01, -1.029732405756564e+00]
-        beta[4, 0:4] = [2.428633765466977e+00, -3.827487337647810e-01, -1.855720330929572e+00, 5.598352992273752e-01]
-        beta[5, 0:5] = [3.484442712860512e-01, 2.130136219118989e-01, -1.541025326623184e-01, 4.713207793914960e-01,
-                        -1.286761399271284e-01]
-        b = np.zeros((6,))
-        b[0:5] = beta[5, 0:5]
-        b[5] = gamma
-        bd = np.zeros((6,))
-        bd[0:4] = beta[4, 0:4]
-        bd[4] = gamma
-        c = np.array([-4.786970949443344e+00, -6.966969867338157e-01, 4.491962205414260e+00,
-                      1.247990161586704e+00, -2.562844308238056e-01, 0])
-        d = np.array([1.274202171603216e+01, -1.894421984691950e+00, -1.113020959269748e+01,
-                      -1.365987420071593e+00, 1.648597281428871e+00, 0])
-        e = np.zeros((6,))
-        gamma_tilde = beta - alpha
-        gamma_tilde = gamma_tilde / gamma
-        alpha = alpha.T
-        gamma_tilde = gamma_tilde.T
-        return s, pord, gamma, b, bd, alpha, gamma_tilde, c, d, e
-    elif scheme == 'rodasp':
-        s = 6
-        pord = 4
-        alpha = np.zeros((s, s))
-        beta = np.zeros((s, s))
-        gamma = 0.25
-        alpha[1, 0] = 0.75
-        alpha[2, 0:2] = [0.0861204008141522, 0.123879599185848]
-        alpha[3, 0:3] = [0.774934535507324, 0.149265154950868, -0.294199690458192]
-        alpha[4, 0:4] = [5.30874668264614, 1.33089214003727, -5.37413781165556, -0.265501011027850]
-        alpha[5, 0:5] = [-1.76443764877448, -0.474756557206303, 2.36969184691580, 0.619502359064983, 0.250000000000000]
-        beta[1, 0] = 0.0
-        beta[2, 0:2] = [-0.0493920000000000, -0.0141120000000000]
-        beta[3, 0:3] = [-0.482049469387756, -0.100879555555556, 0.926729024943312]
-        beta[4, 0:4] = [-1.76443764877448, -0.474756557206303, 2.36969184691580, 0.619502359064983]
-        beta[5, 0:5] = [-0.0803683707891135, -0.0564906135924476, 0.488285630042799, 0.505716211481619,
-                        -0.107142857142857]
-        b = np.zeros((6,))
-        b[0:5] = beta[5, 0:5]
-        b[5] = gamma
-        bd = np.zeros((6,))
-        bd[0:4] = beta[4, 0:4]
-        bd[4] = gamma
-        # c
-        # d
-        gamma_tilde = beta - alpha
-        gamma_tilde = gamma_tilde / gamma
-        alpha = alpha.T
-        gamma_tilde = gamma_tilde.T
-        return s, pord, gamma, b, bd, alpha, gamma_tilde
-    else:
-        raise ValueError("Not implemented")
+class Rodas_param:
+
+    def __init__(self,
+                 scheme: str = 'rodas'):
+        if scheme == 'rodas':
+            self.scheme = 'rodas'
+            self.s = 6
+            self.pord = 4
+            self.alpha = np.zeros((self.s, self.s))
+            self.beta = np.zeros((self.s, self.s))
+            self.g = np.zeros((self.s, 1))
+            self.gamma = 0.25
+            self.alpha[1, 0] = 3.860000000000000e-01
+            self.alpha[2, 0:2] = [1.460747075254185e-01, 6.392529247458190e-02]
+            self.alpha[3, 0:3] = [-3.308115036677222e-01, 7.111510251682822e-01, 2.496604784994390e-01]
+            self.alpha[4, 0:4] = [-4.552557186318003e+00, 1.710181363241323e+00, 4.014347332103149e+00,
+                                  -1.719715090264703e-01]
+            self.alpha[5, 0:5] = [2.428633765466977e+00, -3.827487337647808e-01, -1.855720330929572e+00,
+                                  5.598352992273752e-01,
+                                  2.499999999999995e-01]
+            self.beta[1, 0] = 3.170000000000250e-02
+            self.beta[2, 0:2] = [1.247220225724355e-02, 5.102779774275723e-02]
+            self.beta[3, 0:3] = [1.196037669338736e+00, 1.774947364178279e-01, -1.029732405756564e+00]
+            self.beta[4, 0:4] = [2.428633765466977e+00, -3.827487337647810e-01, -1.855720330929572e+00,
+                                 5.598352992273752e-01]
+            self.beta[5, 0:5] = [3.484442712860512e-01, 2.130136219118989e-01, -1.541025326623184e-01,
+                                 4.713207793914960e-01,
+                                 -1.286761399271284e-01]
+            self.b = np.zeros((6,))
+            self.b[0:5] = self.beta[5, 0:5]
+            self.b[5] = self.gamma
+            self.bd = np.zeros((6,))
+            self.bd[0:4] = self.beta[4, 0:4]
+            self.bd[4] = self.gamma
+            self.c = np.array([-4.786970949443344e+00, -6.966969867338157e-01, 4.491962205414260e+00,
+                               1.247990161586704e+00, -2.562844308238056e-01, 0])
+            self.d = np.array([1.274202171603216e+01, -1.894421984691950e+00, -1.113020959269748e+01,
+                               -1.365987420071593e+00, 1.648597281428871e+00, 0])
+            self.e = np.zeros((6,))
+            self.gamma_tilde = self.beta - self.alpha
+            self.a = np.sum(self.alpha, axis=1)
+            self.g = np.sum(self.gamma_tilde, axis=1) + self.gamma
+            self.gamma_tilde = self.gamma_tilde / self.gamma
+            self.alpha = self.alpha.T
+            self.gamma_tilde = self.gamma_tilde.T
+
+        elif scheme == 'rodasp':
+            pass
+            # self.s = 6
+            # self.pord = 4
+            # self.alpha = np.zeros((s, s))
+            # beta = np.zeros((s, s))
+            # gamma = 0.25
+            # alpha[1, 0] = 0.75
+            # alpha[2, 0:2] = [0.0861204008141522, 0.123879599185848]
+            # alpha[3, 0:3] = [0.774934535507324, 0.149265154950868, -0.294199690458192]
+            # alpha[4, 0:4] = [5.30874668264614, 1.33089214003727, -5.37413781165556, -0.265501011027850]
+            # alpha[5, 0:5] = [-1.76443764877448, -0.474756557206303, 2.36969184691580, 0.619502359064983,
+            #                  0.250000000000000]
+            # beta[1, 0] = 0.0
+            # beta[2, 0:2] = [-0.0493920000000000, -0.0141120000000000]
+            # beta[3, 0:3] = [-0.482049469387756, -0.100879555555556, 0.926729024943312]
+            # beta[4, 0:4] = [-1.76443764877448, -0.474756557206303, 2.36969184691580, 0.619502359064983]
+            # beta[5, 0:5] = [-0.0803683707891135, -0.0564906135924476, 0.488285630042799, 0.505716211481619,
+            #                 -0.107142857142857]
+            # b = np.zeros((6,))
+            # b[0:5] = beta[5, 0:5]
+            # b[5] = gamma
+            # bd = np.zeros((6,))
+            # bd[0:4] = beta[4, 0:4]
+            # bd[4] = gamma
+            # # c
+            # # d
+            # gamma_tilde = beta - alpha
+            # gamma_tilde = gamma_tilde / gamma
+            # alpha = alpha.T
+            # gamma_tilde = gamma_tilde.T
+        else:
+            raise ValueError("Not implemented")
 
 
 class Opt:
@@ -675,6 +689,16 @@ class Opt:
         self.hinit = hinit
         self.hmax = hmax
         self.scheme = scheme
+
+
+def dfdt(dae, event, t, y):
+    tscale = np.maximum(0.1 * np.abs(t), 1e-8)
+    ddt = t + np.sqrt(np.spacing(1)) * tscale - t
+    f0 = dae.F(y)
+    dae.update_param(event, t + ddt)
+    f1 = dae.F(y)
+    dae.update_param(event, t)
+    return (f1 - f0) / ddt
 
 
 class Stats:

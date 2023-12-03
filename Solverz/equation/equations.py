@@ -646,16 +646,28 @@ class DAE(Equations):
         else:
             raise ValueError(f"Unsupported matrix container {self.matrix_container}")
 
-    def discretize(self, scheme) -> AE:
-        eqns = []
-        for eqn_ in self.EQNs.values():
-            if isinstance(eqn_, Ode):
-                self.PARAM, eqn_ = eqn_.discretize(scheme, self.PARAM)
-                eqns = eqns + [eqn_]
-            else:
-                eqns = eqns + [eqn_]
+    def discretize(self, scheme=1) -> AE:
+        if scheme == 1:
+            # trapezoidal method
+            trapezoidal_ae = AE(name='trapezoidal_ae', eqn=[self.EQNs[ae] for ae in self.g_list])
 
-        return AE(eqns, self.name, list(self.PARAM.values()))
+            dt = Param_('dt')
+            for ode in self.f_list:
+                var_list = []
+                for symbol_ in list(self.EQNs[ode].RHS.free_symbols):
+                    if isinstance(symbol_, Var):
+                        var_list.append((symbol_, Param_(symbol_.name+'0')))
+                    elif isinstance(symbol_, IdxVar):
+                        var_list.append((symbol_, Param_(symbol_.symbol.name+'0')[symbol_.index]))
+                diff_var = self.EQNs[ode].diff_var
+                ode_rhs1 = self.EQNs[ode].RHS
+                ode_rhs2 = self.EQNs[ode].RHS.subs(var_list)
+                trapezoidal_ae.add_eqn(Eqn(name=self.EQNs[ode].name,
+                                           eqn=diff_var-Param_(diff_var.name+'0')-1/2*dt*(ode_rhs1+ode_rhs2)
+                                           ))
+            trapezoidal_ae.PARAM.update(deepcopy(self.PARAM))
+            trapezoidal_ae.CONST.update(deepcopy(self.CONST))
+        return trapezoidal_ae
 
     @property
     def is_autonomous(self):
