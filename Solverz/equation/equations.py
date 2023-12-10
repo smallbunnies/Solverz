@@ -13,7 +13,7 @@ from cvxopt import spmatrix, matrix
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
 from Solverz.event import Event
 from Solverz.param import Param
-from Solverz.num.num_alg import Var, Param_, Const_, idx, IdxVar, Slice
+from Solverz.num.num_alg import Var, Para, idx, IdxVar, Slice
 from Solverz.variable.variables import Vars
 from Solverz.auxiliary import Address, combine_Address
 

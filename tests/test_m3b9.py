@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from Solverz import DAE, Eqn, Ode, Var, Param_, Const_, idx, sin, cos, Event, Rodas, as_Vars, Mat_Mul, \
+from Solverz import DAE, Eqn, Ode, Var, Para, Para, idx, sin, cos, Event, Rodas, as_Vars, Mat_Mul, \
     implicit_trapezoid, Opt
 
 omega = Var(name='omega')
@@ -14,17 +14,17 @@ Ixg = Var(name='Ixg')
 Iyg = Var(name='Iyg')
 g = idx('g', value=[0, 1, 2])
 ng = idx('ng', value=[3, 4, 5, 6, 7, 8])
-Pm = Param_(name='Pm')
-G = Param_(name='G', dim=2)
-B = Param_(name='B', dim=2)
-D = Const_(name='D')
-Tj = Const_(name='Tj')
-ra = Const_(name='ra')
-omega_b = Const_(name='omega_b')
-Edp = Const_(name='Edp')
-Eqp = Const_(name='Eqp')
-Xdp = Const_(name='Xdp')
-Xqp = Const_(name='Xqp')
+Pm = Para(name='Pm')
+G = Para(name='G', dim=2)
+B = Para(name='B', dim=2)
+D = Para(name='D')
+Tj = Para(name='Tj')
+ra = Para(name='ra')
+omega_b = Para(name='omega_b')
+Edp = Para(name='Edp')
+Eqp = Para(name='Eqp')
+Xdp = Para(name='Xdp')
+Xqp = Para(name='Xqp')
 
 # rotator_eqn = Ode(name='rotator speed',
 #                   f=(Pm - (Ux[g] * Ix[g] + Uy[g] * Iy[g] + (Ix[g] ** 2 + Iy[g] ** 2) * ra) - D * (omega - 1)) / Tj,

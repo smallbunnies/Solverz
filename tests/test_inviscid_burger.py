@@ -16,6 +16,8 @@ for ndx in [100, 200]:
     x = np.linspace(0 - dx / 2, L + dx / 2, ndx + 2)
     u0 = np.sin(x)
     u = Var('u', value=u0)
+    uL = Var('uL',value=5)
+    uR = Var('uR',value=5)
 
     pde = HyperbolicPde("Inviscid burger's equation",
                         diff_var=u,
@@ -24,8 +26,7 @@ for ndx in [100, 200]:
 
     dae0 = pde.semi_discretize(scheme=2)
 
-    uL = Var('uL')
-    uR = Var('uR')
+
 
     aeul = Eqn('equation of ul',
                uR - uL)

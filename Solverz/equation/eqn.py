@@ -8,7 +8,7 @@ from sympy import Symbol, preorder_traversal, Basic, Expr, latex, Derivative, sy
 from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
-from Solverz.num.num_alg import pre_lambdify, Mat_Mul, Param_, Var, IdxVar, idx, IdxParam, Const_, IdxConst, Slice, switch
+from Solverz.num.num_alg import pre_lambdify, Mat_Mul, Para, Var, IdxVar, idx, IdxPara, Slice, switch
 from Solverz.num.num_interface import numerical_interface
 from Solverz.num.matrix_calculus import MixedEquationDiff
 from Solverz.param import Param

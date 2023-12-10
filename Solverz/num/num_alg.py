@@ -1,228 +1,138 @@
+from typing import List, Dict
+
 from sympy import Symbol, Function, Mul, Expr, symbols, Number, S, Add, Integer, sin, cos
 from sympy import exp as spexp
-from sympy import Abs as spabs
 from sympy.core.function import ArgumentIndexError
-from scipy.sparse import csc_array
 import numpy as np
-from typing import Union
 from functools import reduce
 
 Sympify_Mapping = {}
 
 
-def print_slice(slice_obj: slice):
-    start = slice_obj.start if slice_obj.start is not None else ''
-    stop = slice_obj.stop if slice_obj.stop is not None else ''
-    step = slice_obj.step if slice_obj.step is not None else ''
+def IndexPrinter(index):
+    if not isinstance(index, (int, list, idx, IdxSymBasic, Expr, slice, tuple)):
+        raise TypeError(f"Unsupported idx type {type(index)}")
 
-    return f'{start}:{stop}:{step}'
+    def print_(index_):
+        if isinstance(index_, slice):
+            start = index_.start if index_.start is not None else ''
+            stop = index_.stop if index_.stop is not None else ''
+            step = index_.step if index_.step is not None else ''
+            return f'{start}:{stop}:{step}'
+        elif isinstance(index_, (int, list, idx, IdxSymBasic, Expr)):
+            return f'{index_}'
 
-
-class idx(Symbol):
-    is_Integer = True
-
-    def __new__(cls, name: str, value=None):
-        obj = Symbol.__new__(cls, f'{name}')
-        obj.is_Integer = True
-        obj.name = f'{name}'
-        if value is not None:
-            if isinstance(value, (list, int)):
-                value = np.array(value, dtype=int)
-            if value.ndim > 1:
-                raise TypeError('Only support 1-dim index value')
-            obj.value = np.asarray(value, dtype=int).reshape((-1,))
+    if isinstance(index, tuple):
+        if len(index) != 2:
+            raise ValueError("Support only two element tuples!")
         else:
-            obj.value = None
-        obj.initialized = True if value is not None else False
-        return obj
-
-    def __array__(self):
-        return self.value
+            return print_(index[0]) + ',' + print_(index[1])
+    else:
+        return print_(index)
 
 
-class Var(Symbol):
-    _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
+def SymbolExtractor(index) -> Dict:
+    if not isinstance(index, (int, list, idx, IdxSymBasic, Expr, slice, tuple)):
+        raise TypeError(f"Unsupported idx type {type(index)}")
 
-    def __new__(cls, name, value=None):
-        obj = Symbol.__new__(cls, name)
-        obj.name = name
-        if value is not None:
-            obj.value = np.array(value).reshape((-1, 1))
-        else:
-            obj.value = None
-        obj.dim = 1
-        obj.initialized = True if value is not None else False
-        return obj
+    temp = dict()
 
-    def __getitem__(self, item):
-        return IdxVar(self, item)
-
-
-class IdxVar(Symbol):
-
-    def __new__(cls, symbol, index):
-        if not isinstance(index, (idx, int, slice, list, Expr)):
-            raise TypeError(f"Unsupported idx type {type(index)}")
-        obj = Symbol.__new__(cls, f'{symbol.name}[{index}]')
-        obj.symbol = symbol
-        obj.index = index
-        obj.symbol_name = symbol.name
-        if isinstance(index, slice):
-            obj.name = f'{symbol.name}[{print_slice(index)}]'
-        else:
-            obj.name = f'{symbol.name}[{index}]'
-
-        # in case the index is Expression
-        obj.symbol_in_index = dict()  # Dict[str, Symbol]
+    if isinstance(index, (int, idx, IdxSymBasic)):
         if isinstance(index, idx):
-            obj.symbol_in_index[index.name] = index
-        elif isinstance(index, slice):
-            # in case start/stop of the slice index is not Number but expression, for example in PDE we have variable
-            # like x[1:M-1] where
-            if isinstance(index.start, (Expr, Symbol)):
-                for symbol_ in list(index.start.free_symbols):
-                    obj.symbol_in_index[symbol_.name] = symbol_
-            if isinstance(index.stop, (Expr, Symbol)):
-                for symbol_ in list(index.stop.free_symbols):
-                    obj.symbol_in_index[symbol_.name] = symbol_
-            if isinstance(index.step, (Expr, Symbol)):
-                for symbol_ in list(index.step.free_symbols):
-                    obj.symbol_in_index[symbol_.name] = symbol_
-        elif isinstance(index, Expr):
-            for symbol_ in list(index.free_symbols):
-                obj.symbol_in_index[symbol_.name] = symbol_
-        elif isinstance(index, list):
-            for ele in index:
-                if isinstance(ele, (Expr, Symbol)):
-                    for symbol_ in list(ele.free_symbols):
-                        obj.symbol_in_index[symbol_.name] = symbol_
-
-        return obj
-
-    def _numpycode(self, printer, **kwargs):
-        if isinstance(self.index, idx):
-            temp = self.symbol.name + '[ix_({i})]'.format(i=printer._print(self.index))
-            return temp
+            temp.update({index.name: index})
+        elif isinstance(index, IdxSymBasic):
+            temp.update({index.name0: index.symbol0})
+            temp.update(index.SymInIndex)
+    elif isinstance(index, list):
+        for i in range(len(index)):
+            temp.update(SymbolExtractor(index[i]))
+    elif isinstance(index, Expr):
+        for var_ in list(index.free_symbols):
+            temp.update(SymbolExtractor(var_))
+    elif isinstance(index, slice):
+        if index.start is not None:
+            temp.update(SymbolExtractor(index.start))
+        if index.stop is not None:
+            temp.update(SymbolExtractor(index.stop))
+        if index.step is not None:
+            temp.update(SymbolExtractor(index.step))
+    elif isinstance(index, tuple):
+        if len(index) != 2:
+            raise ValueError("Support only two element tuples!")
         else:
-            if isinstance(self.index, slice):
-                return self.symbol.name + '[slice_{i}]'.format(
-                    i=printer._print((self.index.start, self.index.stop + 1, self.index.step)))
-            else:
-                return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
+            temp.update(SymbolExtractor(index[0]))
+            temp.update(SymbolExtractor(index[1]))
 
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+    return temp
 
 
-class Param_(Symbol):
+class SolSymBasic(Symbol):
+    """
+    Basic class for Solverz Symbols
+    """
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
 
-    def __new__(cls, name, value=None, dim=1, triggerable=False):
-        obj = Symbol.__new__(cls, name)
-        obj.name = name
-        obj.triggerable = triggerable
+    def __new__(cls, name: str, value=None, dim: int = 1):
+        obj = Symbol.__new__(cls, f'{name}')
+        obj.name = f'{name}'
+        obj.dim = dim
         if value is not None:
-            if isinstance(value, csc_array):
-                obj.value = value
-            else:
-                temp_value = np.array(value)
-                if temp_value.ndim > 1 and temp_value.size > 1:
-                    obj.value = csc_array(temp_value)
-                else:
-                    obj.value = temp_value.reshape((-1, 1))
+            obj.value = np.array(value)
+            if obj.value.ndim < 2:
+                obj.value = obj.value.reshape((-1, 1))
         else:
             obj.value = None
-        obj.dim = dim
         obj.initialized = True if value is not None else False
         return obj
 
-    def __getitem__(self, item):
-        if isinstance(item, (idx, int, slice, Expr)):
-            return IdxParam(self, item, self.dim)
-        elif isinstance(item, tuple):
-            if all([isinstance(item_, (idx, Integer, int, slice)) for item_ in list(item)]):
-                return IdxParam(self, item, self.dim)
+    def __getitem__(self, index):
+        pass
 
 
-class IdxConst(Symbol):
+class IdxSymBasic(Symbol):
+    """
+    Basic class for Solverz indexed Symbols
+    """
 
     def __new__(cls, symbol, index, dim):
-        if not isinstance(index, (idx, int, slice, tuple, Expr)):
+        if not isinstance(index, (int, list, idx, IdxSymBasic, Expr, slice, tuple)):
             raise TypeError(f"Unsupported idx type {type(index)}")
-        if isinstance(index, idx):
-            name = f'{symbol.name}[{index.__str__()}]'
-        elif isinstance(index, int):
-            name = f'{symbol.name}[{index}]'
-        elif isinstance(index, Expr):
-            name = f'{symbol.name}[{index}]'
-        elif isinstance(index, slice):
-            name = f'{symbol.name}[{print_slice(index)}]'
-        elif isinstance(index, tuple):
-            temp = []
-            for idx_ in list(index):
-                if isinstance(idx_, idx):
-                    temp += [idx_.__str__()]
-                elif isinstance(idx_, int):
-                    temp += [str(idx_)]
-                elif isinstance(idx_, slice):
-                    temp += [str(print_slice(idx_))]
-            temp = ', '.join(element for element in temp)
-            name = f'{symbol.name}[{temp}]'
-        else:
-            raise TypeError(f"Unsupported index type {type(index)}")
-
-        obj = Symbol.__new__(cls, name)
-        obj.symbol = symbol
+        if not isinstance(symbol, Symbol):
+            raise TypeError(f"Invalid symbol type {type(symbol)}")
+        obj = Symbol.__new__(cls, f'{symbol.name}[{index}]')
+        obj.symbol0 = symbol
         obj.index = index
-        obj.symbol_name = symbol.name
+        obj.name0 = symbol.name
+        obj.name = obj.name0 + '[' + IndexPrinter(index) + ']'
+        obj.SymInIndex = SymbolExtractor(index)
         obj.dim = dim
-
-        # in case the index is Expression, for example in PDE we have variable
-        # like x[1:M-1] where
-        obj.symbol_in_index = dict()  # Dict[str, Symbol]
-        if isinstance(index, idx):
-            obj.symbol_in_index[index.name] = index
-        elif isinstance(index, slice):
-            if isinstance(index.start, (Expr, Symbol)):
-                for symbol_ in list(index.start.free_symbols):
-                    obj.symbol_in_index[symbol_.name] = symbol_
-            if isinstance(index.stop, (Expr, Symbol)):
-                for symbol_ in list(index.stop.free_symbols):
-                    obj.symbol_in_index[symbol_.name] = symbol_
-            if isinstance(index.step, (Expr, Symbol)):
-                for symbol_ in list(index.step.free_symbols):
-                    obj.symbol_in_index[symbol_.name] = symbol_
-        elif isinstance(index, Expr):
-            for symbol_ in list(index.free_symbols):
-                obj.symbol_in_index[symbol_.name] = symbol_
-        elif isinstance(index, list):
-            for ele in index:
-                if isinstance(ele, (Expr, Symbol)):
-                    for symbol_ in list(ele.free_symbols):
-                        obj.symbol_in_index[symbol_.name] = symbol_
 
         return obj
 
     def _numpycode(self, printer, **kwargs):
-        if isinstance(self.index, idx):
-            temp = self.symbol.name + '[ix_({i})]'.format(i=printer._print(self.index))
-            return temp
-        elif isinstance(self.index, slice):
-            return self.symbol.name + '[slice_{i}]'.format(
-                i=printer._print((self.index.start, self.index.stop + 1, self.index.step)))
-        elif isinstance(self.index, tuple):
-            idx_list = []
-            for idx_ in self.index:
-                if isinstance(idx_, idx):
-                    idx_list.append('ix_({i})'.format(i=printer._print(idx_)))
-                elif isinstance(idx_, slice):
-                    idx_list.append('{i}'.format(i=printer._print((idx_))))
-            return self.symbol.name + '[' + idx_list[0] + ',' + idx_list[1] + ']'
+
+        def IndexCodePrinter(index, printer):
+            if isinstance(index, (int, list)):
+                return '{i}'.format(i=printer._print(index))
+            elif isinstance(index, idx):
+                return '{i}'.format(i=printer._print(index))
+            elif isinstance(index, Expr):
+                return '{i}'.format(i=printer._print(index))
+            elif isinstance(index, slice):
+                start = IndexCodePrinter(index.start, printer) if index.start is not None else None
+                stop = IndexCodePrinter(index.stop + 1, printer) if index.stop is not None else None
+                step = IndexCodePrinter(index.step, printer) if index.step is not None else None
+                return 'sol_slice({i}, {j}, {k})'.format(i=start, j=stop, k=step)
+
+        if isinstance(self.index, tuple):
+            if len(self.index) != 2:
+                raise ValueError("Support only two element tuples!")
+            else:
+                temp = IndexCodePrinter(self.index[0], printer) + ',' + IndexCodePrinter(self.index[1], printer)
         else:
-            return self.symbol.name + '[{i}]'.format(i=printer._print(self.index))
+            temp = IndexCodePrinter(self.index, printer)
+
+        return self.name0 + '[' + temp + ']'
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
@@ -231,52 +141,39 @@ class IdxConst(Symbol):
         return self._numpycode(printer, **kwargs)
 
 
-class Const_(Symbol):
-    _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
+class Var(SolSymBasic):
+    def __getitem__(self, index):
+        return IdxVar(self, index, self.dim)
 
-    def __new__(cls, name, value=None, dim=1):
-        obj = Symbol.__new__(cls, name)
-        obj.name = name
-        if value is not None:
-            temp_value = np.array(value)
-            if temp_value.ndim > 1 and temp_value.size > 1:
-                obj.value = csc_array(temp_value)
-            else:
-                obj.value = temp_value.reshape((-1, 1))
-        else:
-            obj.value = None
-        obj.dim = dim
-        obj.initialized = True if value is not None else False
+
+class Para(SolSymBasic):
+    def __getitem__(self, index):
+        return IdxPara(self, index, self.dim)
+
+
+class idx(SolSymBasic):
+    def __new__(cls, name: str, value=None, dim: int = 1):
+        if dim > 1:
+            raise ValueError("idx can only be one-dimensional")
+        obj = SolSymBasic.__new__(cls, name, value, dim=1)
+        if obj.value is not None:
+            obj.value = obj.value.reshape(-1, )
         return obj
 
-    def __getitem__(self, item):
-        if isinstance(item, (idx, int, slice)):
-            return IdxConst(self, item, self.dim)
-        elif isinstance(item, tuple):
-            if all([isinstance(item_, (idx, Integer, int, slice)) for item_ in list(item)]):
-                return IdxConst(self, item, self.dim)
+    def __getitem__(self, index):
+        return Idxidx(self, index, dim=1)
 
 
-class IdxParam(IdxConst):
+class IdxVar(IdxSymBasic):
     pass
 
 
-class Set(Symbol):
+class IdxPara(IdxSymBasic):
+    pass
 
-    def __new__(cls, name, value):
-        obj = Symbol.__new__(cls, name)
-        obj.name = name
-        obj.value = value
-        return obj
 
-    def __getitem__(self, item):
-        if isinstance(item, idx):
-            return IdxVar(self, item)
-        else:
-            return self.value[item]
-
-    def __mul__(self, other):
-        pass
+class Idxidx(IdxSymBasic):
+    pass
 
 
 class Sum_(Function):  # no repeat name of sympy built-in func.

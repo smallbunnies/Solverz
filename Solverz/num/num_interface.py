@@ -21,8 +21,8 @@ def implements_nfunc(nfunc_name: str):
     return decorator
 
 
-@implements_nfunc('slice_')
-def slice_(*args):
+@implements_nfunc('sol_slice')
+def sol_slice(*args):
     """
     This is used to convert the slice arguments to int
     """
@@ -34,7 +34,7 @@ def Slice(*args):
     """
     This is used to evaluate the slice index of IdxVar/IdxParam/IdxConst
     """
-    return slice_(*args)
+    return sol_slice(*args)
 
 
 @implements_nfunc('ix_')

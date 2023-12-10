@@ -8,7 +8,7 @@ import numpy as np
 import sympy as sp
 from sympy import Expr, Mul, Add, S, Number, Integer, sign, Symbol
 
-from Solverz.num.num_alg import Mat_Mul, IdxVar, IdxConst, IdxParam, Diag, transpose, Var, Param_, Const_, Abs
+from Solverz.num.num_alg import Mat_Mul, IdxVar, IdxPara, Diag, transpose, Var, Para, Abs
 
 
 class TMatrix:
