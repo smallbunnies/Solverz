@@ -2,8 +2,8 @@ import numpy as np
 from sympy import lambdify
 import inspect
 
-from Solverz.num.num_alg import Var, Para, idx, IdxVar, IdxPara, Idxidx
-from Solverz.num.num_interface import sol_slice
+from Solverz.symboli_algebra.symbols import Var, Para, idx, IdxVar, IdxPara, Idxidx
+from Solverz.symboli_algebra.num_interface import sol_slice
 
 
 # test of IndexPrinter
@@ -101,4 +101,4 @@ def test_numpy_code_printer():
     G = np.random.randn(3, 3)
     k = np.array([0, 2])
     j = [1]
-    assert np.isclose(fkjG(k, j,G), G[:, 1:k[j][0] - 1:2]).all()
+    assert np.isclose(fkjG(k, j, G), G[:, 1:k[j][0] - 1:2]).all()

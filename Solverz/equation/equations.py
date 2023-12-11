@@ -6,16 +6,17 @@ from typing import Union, List, Dict, Tuple
 from copy import deepcopy
 
 import numpy as np
-from sympy import symbols, Symbol, Expr
+from sympy import Symbol, Expr
 from scipy.sparse import csc_array, coo_array
 from cvxopt import spmatrix, matrix
 
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
-from Solverz.event import Event
-from Solverz.param import Param
-from Solverz.num.num_alg import Var, Para, idx, IdxVar, Slice
+from Solverz.equation.event import Event
+from equation.param import Param
+from Solverz.symboli_algebra.symbols import Var, idx, IdxVar, Para
+from Solverz.symboli_algebra.functions import Slice
 from Solverz.variable.variables import Vars
-from Solverz.auxiliary import Address, combine_Address
+from Solverz.auxiliary_service.address import Address, combine_Address
 
 
 class Equations:
@@ -58,13 +59,11 @@ class Equations:
             self.f_list = self.f_list + [eqn.name]
 
         for symbol_ in eqn.SYMBOLS.values():
-            if isinstance(symbol_, Param_):
+            if isinstance(symbol_, Para):
                 # this is not fully initialize of Parameters, please use param_initializer
                 self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
             elif isinstance(symbol_, idx):
                 self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dtype=int)
-            elif isinstance(symbol_, Const_):
-                self.CONST[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
 
         self.EQNs[eqn.name].derive_derivative()
 

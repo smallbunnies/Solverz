@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from typing import Union, List, Dict, Callable, Tuple
+from typing import Union, List, Dict, Callable
 
 import numpy as np
 import sympy
-from sympy import Symbol, preorder_traversal, Basic, Expr, latex, Derivative, sympify, simplify
+from sympy import Symbol, Expr, latex, Derivative, sympify, simplify
 from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
-from Solverz.num.num_alg import pre_lambdify, Mat_Mul, Para, Var, IdxVar, idx, IdxPara, Slice, switch
-from Solverz.num.num_interface import numerical_interface
-from Solverz.num.matrix_calculus import MixedEquationDiff
-from Solverz.param import Param
+from Solverz.symboli_algebra.symbols import Var, Para, IdxVar, idx, IdxPara
+from Solverz.symboli_algebra.functions import Mat_Mul, Slice, switch
+from Solverz.num_interface.num_interface import numerical_interface
+from Solverz.symboli_algebra.matrix_calculus import MixedEquationDiff
 
 
 class Eqn:
@@ -40,9 +40,9 @@ class Eqn:
     def obtain_symbols(self) -> Dict[str, Symbol]:
         temp_dict = dict()
         for symbol_ in list((self.LHS - self.RHS).free_symbols):
-            if isinstance(symbol_, (Var, Param_, Const_, idx)):
+            if isinstance(symbol_, (Var, Para, idx)):
                 temp_dict[symbol_.name] = symbol_
-            elif isinstance(symbol_, (IdxVar, IdxParam, IdxConst)):
+            elif isinstance(symbol_, (IdxVar, IdxPara)):
                 temp_dict[symbol_.symbol.name] = symbol_.symbol
                 if isinstance(symbol_.index, idx):
                     temp_dict[symbol_.index.name] = symbol_.index
@@ -58,7 +58,7 @@ class Eqn:
         return temp_dict
 
     def lambdify(self) -> Callable:
-        return splambdify(self.SYMBOLS.values(), pre_lambdify(self.RHS), [numerical_interface, 'numpy'])
+        return splambdify(self.SYMBOLS.values(), self.RHS, [numerical_interface, 'numpy'])
 
     def eval(self, *args: Union[np.ndarray]) -> np.ndarray:
         return self.NUM_EQN(*args)

@@ -5,7 +5,7 @@ from numpy import abs, max, min, sum, sqrt
 from cvxopt import matrix
 
 from Solverz.equation.equations import AE
-from Solverz.num.num_interface import solve
+from Solverz.symboli_algebra.num_interface import solve
 from Solverz.variable.variables import Vars
 
 

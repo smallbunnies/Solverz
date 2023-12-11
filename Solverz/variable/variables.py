@@ -6,8 +6,8 @@ import warnings
 
 import numpy as np
 
-from Solverz.num.num_alg import Var
-from Solverz.auxiliary import Address, combine_Address
+from Solverz.symboli_algebra.symbols import Var
+from Solverz.auxiliary_service.address import Address, combine_Address
 
 
 def as_Vars(var: Union[Var, List[Var]]):

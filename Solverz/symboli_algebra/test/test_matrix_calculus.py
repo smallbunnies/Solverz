@@ -1,13 +1,14 @@
-from Solverz.num.num_alg import Var, Param_, Const_, Abs, idx, Mat_Mul
-from Solverz.num.matrix_calculus import TensorExpr
+from Solverz.symboli_algebra.symbols import Var, Para, idx
+from Solverz.symboli_algebra.functions import Abs, Mat_Mul
+from Solverz.symboli_algebra.matrix_calculus import TensorExpr
 from Solverz.equation.eqn import Eqn
 
-mL = Const_('mL', dim=2)
-K = Const_(name='K')
+mL = Para('mL', dim=2)
+K = Para(name='K')
 m = Var(name='m')
-V = Param_(name='V', dim=2)
+V = Para(name='V', dim=2)
 Ts = Var(name='Ts')
-Vp = Param_(name='Vp', dim=2)
+Vp = Para(name='Vp', dim=2)
 Touts = Var(name='Touts')
 li = idx(name='li')
 mq = Var(name='mq')
@@ -23,8 +24,8 @@ e = Var(name='e', value=[1.06, 1, 1.00])
 f = Var(name='f', value=[0, 0, 0])
 p = Var(name='p')
 q = Var(name='q')
-G = Param_(name='G', dim=2, value=[0])
-B = Param_(name='B', dim=2, value=[0])
+G = Para(name='G', dim=2, value=[0])
+B = Para(name='B', dim=2, value=[0])
 
 P1 = Eqn(name='Active power balance of PQ',
          eqn=e * (Mat_Mul(G, e) - Mat_Mul(B, f)) + f * (Mat_Mul(B, e) + Mat_Mul(G, f)) - p)

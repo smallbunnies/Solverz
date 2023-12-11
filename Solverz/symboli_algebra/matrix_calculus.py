@@ -8,7 +8,8 @@ import numpy as np
 import sympy as sp
 from sympy import Expr, Mul, Add, S, Number, Integer, sign, Symbol
 
-from Solverz.num.num_alg import Mat_Mul, IdxVar, IdxPara, Diag, transpose, Var, Para, Abs
+from Solverz.symboli_algebra.symbols import IdxVar, IdxPara, Var, Para
+from Solverz.symboli_algebra.functions import Mat_Mul, Diag, transpose, Abs
 
 
 class TMatrix:
@@ -240,7 +241,7 @@ def obtain_dim(expr) -> int:
     for symbol in list(expr.free_symbols):
         if isinstance(symbol, (Var, IdxVar)):
             symbol_dict[symbol] = np.ones((2, 1))
-        elif isinstance(symbol, (Const_, Param_, IdxConst, IdxParam)):
+        elif isinstance(symbol, (Para, IdxPara)):
             if symbol.dim == 2:
                 symbol_dict[symbol] = np.ones((2, 2))
             elif symbol.dim == 1:
@@ -263,7 +264,7 @@ def obtain_TExpr(expr: Expr, index: TensorIndex):
         Texpr = TAbs(expr, index)
     elif isinstance(expr, (Var, IdxVar)):
         Texpr = TVector(expr, index)
-    elif isinstance(expr, (Const_, Param_, IdxConst, IdxParam)):
+    elif isinstance(expr, (Para, IdxPara)):
         if expr.dim == 2:
             Texpr = TMatrix(expr, index)
         elif expr.dim == 1:
@@ -339,7 +340,7 @@ def TMul2Mul(x, y, index: List[TensorIndex, TensorIndex, TensorIndex]):
         return 0
     s1, s2, s3 = index[:]
     if s1 == TensorIndex(-1) or s2 == TensorIndex(-1):
-        return x*y
+        return x * y
     if len(s1.index) < 2:
         if len(s2.index) < 2:
             # i, j, ij
@@ -452,4 +453,3 @@ def MixedEquationDiff(expr: Expr, symbol: Symbol):
 
     """
     return TensorExpr(expr).diff(symbol)
-
