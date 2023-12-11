@@ -3,7 +3,7 @@ import tqdm
 from typing import List, Union
 
 from Solverz.solvers.aesolver import nr_method
-from Solverz.event import Event
+from Solverz.equation.event import Event
 from Solverz.equation.equations import AE
 from Solverz.variable.variables import TimeVars, Vars
 

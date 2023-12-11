@@ -5,20 +5,6 @@ from sympy import exp as spexp
 from sympy.core.function import ArgumentIndexError
 
 
-class Sign(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 1:
-            raise TypeError(f"Sum takes 1 positional arguments but {len(args)} were given!")
-
-    def fdiff(self, argindex=1):
-        # sign function should be treated as a constant.
-        if argindex == 1:
-            return 0
-        raise ArgumentIndexError(self, argindex)
-
-
 class MatrixFunction(Function):
     """
     The basic Function class of matrix computation
@@ -68,32 +54,6 @@ class Mat_Mul(MatrixFunction):
     def __repr__(self):
         return self.__str__()
 
-    def _eval_derivative(self, s):
-        # this is a mimic of sp.Mul and assumes that the equation declared satisfies the matrix computation rules
-        terms = []
-        for i in range(len(self.args)):
-            args = list(self.args)
-            # if i < len(args) - 1:
-            #     args[-1] = Diag(args[-1])
-            # Based on above assumption, the last element in Mat_Mul is always vector
-            d = args[i].diff(s)
-            if d:
-                if isinstance(args[i], Diag) and i < len(args) - 1 and not isinstance(d, Number):
-                    # Which means the original arg needs Diag() to expand itself as a matrix
-                    # The last arg does not need Diag()
-                    d = Diag(d)
-                    # for arg in args[i+1:]:
-
-                elif i == len(args) - 1 and not isinstance(d, Number):
-                    d = Diag(d)
-                else:
-                    d = d
-
-                #  * is replaced by @ in EqnDiff.__init__()
-                terms.append(reduce(lambda x, y: x * y, (args[:i] + [d] + args[i + 1:]), S.One))
-
-        return Add.fromiter(terms)
-
     def _latex(self, printer, **kwargs):
 
         arg_latex_str = []
@@ -138,9 +98,6 @@ class Mat_Mul(MatrixFunction):
 
 class Diag(MatrixFunction):
 
-    def fdiff(self, argindex=1):
-        return 1  # the 1 also means Identity matrix here
-
     @classmethod
     def eval(cls, *args):
         if len(args) > 1:
@@ -166,10 +123,6 @@ class Diag(MatrixFunction):
             return _latex_str
 
 
-class ElementwiseFunction(Function):
-    pass
-
-
 class Abs(Function):
 
     def fdiff(self, argindex=1):
@@ -178,7 +131,7 @@ class Abs(Function):
 
         """
         if argindex == 1:
-            return sign(self.args[0])
+            return Sign(self.args[0])
         else:
             raise ArgumentIndexError(self, argindex)
 
@@ -192,25 +145,6 @@ class exp(Function):
 
     def fdiff(self, argindex=1):
         return spexp(*self.args)
-
-
-class sign(ElementwiseFunction):
-    pass
-
-
-class minmod(ElementwiseFunction):
-    """
-
-
-    """
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 3:
-            raise TypeError(f"minmod takes 3 positional arguments but {len(args)} were given!")
-
-    def _eval_derivative(self, s):
-        return switch(*[arg.diff(s) for arg in self.args], 0, minmod_flag(*self.args))
 
 
 class minmod_flag(Function):
@@ -235,3 +169,17 @@ class Slice(Function):
 class switch(Function):
     def _eval_derivative(self, s):
         return switch(*[arg.diff(s) for arg in self.args[0:len(self.args) - 1]], self.args[-1])
+
+
+class Sign(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 1:
+            raise TypeError(f"Sum takes 1 positional arguments but {len(args)} were given!")
+
+    def fdiff(self, argindex=1):
+        # sign function should be treated as a constant.
+        if argindex == 1:
+            return 0
+        raise ArgumentIndexError(self, argindex)

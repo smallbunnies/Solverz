@@ -37,7 +37,6 @@ class Equations:
         self.g_list = []
         self.matrix_container = matrix_container
         self.PARAM: Dict[str, Param] = dict()
-        self.CONST: Dict[str, Param] = dict()
         self.triggerable_quantity: Dict[str, str] = dict()  # {triggable variable: its trigger variable}
         self.trigger_quantity_cache: Dict[str, Dict[str, np.ndarray]] = dict()  # {trigger variable: its cached value}
 
@@ -86,13 +85,10 @@ class Equations:
         if not self.is_param_defined(name):
             warnings.warn(f'Parameter {name} not defined in equations!')
         if isinstance(param, Param):
-            if name in self.CONST:
-                self.CONST[name] = param
-            else:
-                self.PARAM[name] = param
-                if param.triggerable:
-                    self.triggerable_quantity[param.name] = param.trigger_var
-                    self.trigger_quantity_cache[param.name] = dict()
+            self.PARAM[name] = param
+            if param.triggerable:
+                self.triggerable_quantity[param.name] = param.trigger_var
+                self.trigger_quantity_cache[param.name] = dict()
         else:
             raise TypeError(f"Unsupported parameter type {type(param)}")
 
@@ -105,10 +101,8 @@ class Equations:
             try:
                 if param in self.PARAM:
                     self.PARAM[param].v = value
-                else:
-                    self.CONST[param].v = value
             except KeyError:
-                warnings.warn(f'Equations have no parameter/constant: {param}')
+                warnings.warn(f'Equations have no parameter: {param}')
         elif isinstance(args[0], Vars):
             # Update params with Vars. For example, to update x0 in trapezoid rules.
             vars_: Vars = args[0]
@@ -184,12 +178,6 @@ class Equations:
                 temp = self.PARAM[symbol.name].v
                 if temp is None:
                     raise TypeError(f'Parameter {symbol.name} uninitialized')
-                args = [*args, temp]
-                value_obtained = True
-            elif symbol.name in self.CONST:
-                temp = self.CONST[symbol.name].v
-                if temp is None:
-                    raise TypeError(f'Constant {symbol.name} uninitialized')
                 args = [*args, temp]
                 value_obtained = True
             else:
@@ -650,31 +638,23 @@ class DAE(Equations):
             # trapezoidal method
             trapezoidal_ae = AE(name='trapezoidal_ae', eqn=[self.EQNs[ae] for ae in self.g_list])
 
-            dt = Param_('dt')
+            dt = Para('dt')
             for ode in self.f_list:
                 var_list = []
                 for symbol_ in list(self.EQNs[ode].RHS.free_symbols):
                     if isinstance(symbol_, Var):
-                        var_list.append((symbol_, Param_(symbol_.name+'0')))
+                        var_list.append((symbol_, Para(symbol_.name+'0')))
                     elif isinstance(symbol_, IdxVar):
-                        var_list.append((symbol_, Param_(symbol_.symbol.name+'0')[symbol_.index]))
+                        var_list.append((symbol_, Para(symbol_.symbol0+'0')[symbol_.index]))
                 diff_var = self.EQNs[ode].diff_var
                 ode_rhs1 = self.EQNs[ode].RHS
                 ode_rhs2 = self.EQNs[ode].RHS.subs(var_list)
                 trapezoidal_ae.add_eqn(Eqn(name=self.EQNs[ode].name,
-                                           eqn=diff_var-Param_(diff_var.name+'0')-1/2*dt*(ode_rhs1+ode_rhs2)
+                                           eqn=diff_var-Para(diff_var.name+'0')-1/2*dt*(ode_rhs1+ode_rhs2)
                                            ))
             trapezoidal_ae.PARAM.update(deepcopy(self.PARAM))
-            trapezoidal_ae.CONST.update(deepcopy(self.CONST))
+
         return trapezoidal_ae
-
-    @property
-    def is_autonomous(self):
-
-        if 't' in self.SYMBOLS.keys():
-            return False
-        else:
-            return True
 
     def __repr__(self):
         return f"DAE: {self.name}"

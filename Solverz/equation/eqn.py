@@ -10,8 +10,8 @@ from sympy.abc import t, x
 
 from Solverz.symboli_algebra.symbols import Var, Para, IdxVar, idx, IdxPara
 from Solverz.symboli_algebra.functions import Mat_Mul, Slice, switch
-from Solverz.num_interface.num_interface import numerical_interface
 from Solverz.symboli_algebra.matrix_calculus import MixedEquationDiff
+from Solverz.numerical_interface.custom_function import numerical_interface
 
 
 class Eqn:
@@ -23,7 +23,7 @@ class Eqn:
                  name: str,
                  eqn: Expr):
 
-        self.name = name
+        self.name: str = name
         self.LHS = 0
         self.RHS = eqn
         self.SYMBOLS: Dict[str, Symbol] = self.obtain_symbols()
@@ -43,17 +43,8 @@ class Eqn:
             if isinstance(symbol_, (Var, Para, idx)):
                 temp_dict[symbol_.name] = symbol_
             elif isinstance(symbol_, (IdxVar, IdxPara)):
-                temp_dict[symbol_.symbol.name] = symbol_.symbol
-                if isinstance(symbol_.index, idx):
-                    temp_dict[symbol_.index.name] = symbol_.index
-                elif isinstance(symbol_.index, tuple):
-                    for idx_ in symbol_.index:
-                        if isinstance(idx_, idx):
-                            temp_dict[idx_.name] = idx_
-                elif isinstance(symbol_.index, (slice, Expr)):
-                    temp_dict.update(symbol_.symbol_in_index)
-                elif isinstance(symbol_.index, list):
-                    temp_dict.update(symbol_.symbol_in_index)
+                temp_dict[symbol_.name0] = symbol_.symbol0
+                temp_dict.update(symbol_.SymInIndex)
 
         return temp_dict
 
@@ -113,7 +104,7 @@ class EqnDiff(Eqn):
     def __init__(self, name: str, eqn: Expr, diff_var: Symbol, var_idx=None):
         super().__init__(name, eqn)
         self.diff_var = diff_var
-        self.diff_var_name = diff_var.symbol.name if isinstance(diff_var, IdxVar) else diff_var.name
+        self.diff_var_name = diff_var.symbol0 if isinstance(diff_var, IdxVar) else diff_var.name
         self.var_idx = var_idx  # df/dPi[i] then var_idx=i
         self.var_idx_func = None
         if self.var_idx is not None:
@@ -276,19 +267,19 @@ class HyperbolicPde(Pde):
 
         """
         if scheme == 1:
-            dx = Const_('dx')
-            dt = Param_('dt')
+            dx = Para('dx')
+            dt = Para('dt')
             M = idx('M')
             u = self.diff_var
-            u0 = Param_(u.name + '0')
+            u0 = Para(u.name + '0')
 
             fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
             fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
-            fui1j = self.flux.subs([(a, Param_(a.name + '0')[1:M]) for a in self.two_dim_var])
-            fuij = self.flux.subs([(a, Param_(a.name + '0')[0:M - 1]) for a in self.two_dim_var])
+            fui1j = self.flux.subs([(a, Para(a.name + '0')[1:M]) for a in self.two_dim_var])
+            fuij = self.flux.subs([(a, Para(a.name + '0')[0:M - 1]) for a in self.two_dim_var])
 
             S = self.source.subs(
-                [(a, (a[1:M] + a[0:M - 1] + Param_(a.name + '0')[1:M] + Param_(a.name + '0')[0:M - 1]) / 4) for a in
+                [(a, (a[1:M] + a[0:M - 1] + Para(a.name + '0')[1:M] + Para(a.name + '0')[0:M - 1]) / 4) for a in
                  self.two_dim_var])
 
             ae = dx * (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) \
@@ -303,11 +294,11 @@ class HyperbolicPde(Pde):
 
         elif scheme == 2:
             if direction == 1:
-                dx = Const_('dx')
-                dt = Param_('dt')
+                dx = Para('dx')
+                dt = Para('dt')
                 M = idx('M')
                 u = self.diff_var
-                u0 = Param_(u.name + '0')
+                u0 = Para(u.name + '0')
 
                 fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
                 fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
@@ -318,11 +309,11 @@ class HyperbolicPde(Pde):
 
             elif direction == -1:
 
-                dx = Const_('dx')
-                dt = Param_('dt')
+                dx = Para('dx')
+                dt = Para('dt')
                 M = idx('M')
                 u = self.diff_var
-                u0 = Param_(u.name + '0')
+                u0 = Para(u.name + '0')
 
                 fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
                 fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
@@ -359,7 +350,7 @@ class HyperbolicPde(Pde):
 
                 \rho(A)=\max_i|\lambda_i(A)|.
 
-            If $a_0$ or $a_1$ is None, then they will be set as ``Param_`` ``ajp12`` and ``ajm12`` respectively.  
+            If $a_0$ or $a_1$ is None, then they will be set as ``Para`` ``ajp12`` and ``ajm12`` respectively.  
 
         a1 : Expr
 
@@ -424,11 +415,11 @@ class HyperbolicPde(Pde):
         """
 
         if a0 is None:
-            a0 = Param_('ajp12')
+            a0 = Para('ajp12')
         if a1 is None:
-            a1 = Param_('ajm12')
+            a1 = Para('ajm12')
 
-        dx = Const_('dx')
+        dx = Para('dx')
         M = idx('M')
         u = self.diff_var
 
@@ -500,15 +491,15 @@ class HyperbolicPde(Pde):
             Suj = self.source.subs([(var, var[2:M - 2]) for var in self.two_dim_var])
             Hp = (self.flux.subs([(var, ujprime(var[2:M - 2], 0)) for var in self.two_dim_var]) +
                   self.flux.subs([(var, ujprime(var[2:M - 2], 1)) for var in self.two_dim_var])) / 2 \
-                 - a0[2:M-2] / 2 * (ujprime(u[2:M - 2], 0) - ujprime(u[2:M - 2], 1))
+                 - a0[2:M - 2] / 2 * (ujprime(u[2:M - 2], 0) - ujprime(u[2:M - 2], 1))
             Hm = (self.flux.subs([(var, ujprime(var[2:M - 2], 2)) for var in self.two_dim_var]) +
                   self.flux.subs([(var, ujprime(var[2:M - 2], 3)) for var in self.two_dim_var])) / 2 \
-                 - a1[2:M-2] / 2 * (ujprime(u[2:M - 2], 2) - ujprime(u[2:M - 2], 3))
+                 - a1[2:M - 2] / 2 * (ujprime(u[2:M - 2], 2) - ujprime(u[2:M - 2], 3))
             ode_rhs2 = -simplify(Hp - Hm) / dx + Suj
 
-            theta = Const_('theta')
+            theta = Para('theta')
             ux = Var(u.name + 'x')
-            minmod_flag = Param_('minmod_flag_of_' + ux.name)
+            minmod_flag = Para('minmod_flag_of_' + ux.name)
             minmod_rhs = ux[1:M - 1] - switch(theta * (u[1:M - 1] - u[0:M - 2]) / dx,
                                               (u[2:M] - u[0:M - 2]) / (2 * dx),
                                               theta * (u[2:M] - u[1:M - 1]) / dx,

@@ -37,11 +37,11 @@ TP2 = TensorExpr(P2.RHS)
 
 def test_matrix_calculus():
     assert TE8.diff(m).__repr__() == 'mL@(diag(K*Abs(m)) + diag(K*m*sign(m)))'
-    assert TE5.diff(m).__repr__() == 'V[rs, ::]'
+    assert TE5.diff(m).__repr__() == 'V[rs,::]'
     assert TE5.diff(mq[rs]).__repr__() == '-1'
-    assert TE9.diff(m).__repr__() == '-Vp[li, ::]@diag(Touts*sign(m)) + diag(Ts[li])@Vp[li, ::]@diag(sign(m))'
-    assert TE9.diff(Ts[li]).__repr__() == 'diag(Vp[li, ::]@Abs(m))'
-    assert TE9.diff(Touts).__repr__() == '-Vp[li, ::]@diag(Abs(m))'
+    assert TE9.diff(m).__repr__() == '-Vp[li,::]@diag(Touts*sign(m)) + diag(Ts[li])@Vp[li,::]@diag(sign(m))'
+    assert TE9.diff(Ts[li]).__repr__() == 'diag(Vp[li,::]@Abs(m))'
+    assert TE9.diff(Touts).__repr__() == '-Vp[li,::]@diag(Abs(m))'
     assert TP1.diff(e).__repr__() == 'diag(-B@f + G@e) + diag(e)@G + diag(f)@B'
     assert TP1.diff(f).__repr__() == 'diag(B@e + G@f) + diag(e)@(-B) + diag(f)@G'
     assert TP2.diff(e).__repr__() == '-(diag(B@e + G@f) + diag(e)@B) + diag(f)@G'

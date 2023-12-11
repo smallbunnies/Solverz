@@ -8,12 +8,9 @@ from numpy import abs, linalg
 from scipy.sparse import csc_array, linalg as sla
 
 from Solverz.equation.equations import DAE
-from Solverz.event import Event
+from Solverz.equation.event import Event
 from Solverz.solvers.aesolver import nr_method
 from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
-
-
-# from Solverz.sas.sas_num import DTcache, DTvar, DTeqn
 
 
 def implicit_trapezoid(dae: DAE,
