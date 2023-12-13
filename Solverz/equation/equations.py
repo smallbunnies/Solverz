@@ -37,8 +37,8 @@ class Equations:
         self.g_list = []
         self.matrix_container = matrix_container
         self.PARAM: Dict[str, Param] = dict()
-        self.triggerable_quantity: Dict[str, str] = dict()  # {triggable variable: its trigger variable}
-        self.trigger_quantity_cache: Dict[str, Dict[str, np.ndarray]] = dict()  # {trigger variable: its cached value}
+        self.triggerable_quantity: Dict[str, str] = dict()
+        self.trigger_quantity_cache: Dict[str, Dict[str, np.ndarray]] = dict()
 
         if isinstance(eqn, Eqn):
             eqn = [eqn]
@@ -595,7 +595,7 @@ class DAE(Equations):
                     variable_address = self.var_address.v[diff_var.name]
                 elif isinstance(diff_var, IdxVar):
                     var_idx = diff_var.index
-                    var_name = diff_var.symbol_name
+                    var_name = diff_var.name0
                     if isinstance(var_idx, (float, int)):
                         variable_address = self.var_address.v[var_name][var_idx: var_idx + 1]
                     elif isinstance(var_idx, str):
