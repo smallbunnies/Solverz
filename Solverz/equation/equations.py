@@ -11,7 +11,6 @@ from scipy.sparse import csc_array, coo_array
 from cvxopt import spmatrix, matrix
 
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
-from Solverz.equation.event import Event
 from equation.param import Param
 from Solverz.symboli_algebra.symbols import Var, idx, IdxVar, Para
 from Solverz.symboli_algebra.functions import Slice
@@ -109,16 +108,6 @@ class Equations:
             for param_name in self.PARAM.keys():
                 if param_name in vars_.var_list:
                     self.PARAM[param_name].v = vars_[param_name]
-        elif isinstance(args[0], Event):
-            # Update params with Event object
-            event = args[0]
-            t = args[1]
-            for param_name in event.var_value.keys():
-                temp = event.index[param_name]
-                if temp is not None:
-                    self.PARAM[param_name].v[temp] = event.interpolate(param_name, t)
-                else:
-                    self.PARAM[param_name].v = event.interpolate(param_name, t)
 
     def eval(self, eqn_name: str, *args: Union[np.ndarray]) -> np.ndarray:
         """
@@ -433,7 +422,8 @@ class DAE(Equations):
         for eqn_name in self.g_list:
             temp_g = self.g(*xys, eqn=eqn_name)
             if np.max(np.abs(temp_g)) > 1e-5:
-                warnings.warn(f'Inconsistent initial values for algebraic equation: {eqn_name}, with deviation {np.max(np.abs(temp_g))}!')
+                warnings.warn(
+                    f'Inconsistent initial values for algebraic equation: {eqn_name}, with deviation {np.max(np.abs(temp_g))}!')
             eqn_size = temp_g.shape[0]
             self.a.update(eqn_name, temp, temp + eqn_size - 1)
             temp = temp + eqn_size
@@ -643,14 +633,14 @@ class DAE(Equations):
                 var_list = []
                 for symbol_ in list(self.EQNs[ode].RHS.free_symbols):
                     if isinstance(symbol_, Var):
-                        var_list.append((symbol_, Para(symbol_.name+'0')))
+                        var_list.append((symbol_, Para(symbol_.name + '0')))
                     elif isinstance(symbol_, IdxVar):
-                        var_list.append((symbol_, Para(symbol_.symbol0+'0')[symbol_.index]))
+                        var_list.append((symbol_, Para(symbol_.symbol0 + '0')[symbol_.index]))
                 diff_var = self.EQNs[ode].diff_var
                 ode_rhs1 = self.EQNs[ode].RHS
                 ode_rhs2 = self.EQNs[ode].RHS.subs(var_list)
                 trapezoidal_ae.add_eqn(Eqn(name=self.EQNs[ode].name,
-                                           eqn=diff_var-Para(diff_var.name+'0')-1/2*dt*(ode_rhs1+ode_rhs2)
+                                           eqn=diff_var - Para(diff_var.name + '0') - 1 / 2 * dt * (ode_rhs1 + ode_rhs2)
                                            ))
             trapezoidal_ae.PARAM.update(deepcopy(self.PARAM))
 

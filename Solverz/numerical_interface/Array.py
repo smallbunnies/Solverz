@@ -15,6 +15,8 @@ def Array(array: Union[np.ndarray, csc_array, list, Number],
           sparse=False,
           dtype=float) -> Union[np.ndarray, csc_array]:
     type_checker(dtype)
+    if dim < 2 and sparse:
+        raise ValueError(f"Cannot create sparse matrix with dim: {dim}")
 
     # initialize and check dtype in case of non-int/float dtypes
     if isinstance(array, Number):

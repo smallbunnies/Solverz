@@ -17,6 +17,10 @@ def test_Array():
     assert Array(x2, dim=1, dtype=float).__repr__() == 'array([1., 2., 3.])'
     assert Array(x2, dim=2, dtype=int).__str__() == '[[1]\n [2]\n [3]]'
     assert Array(x2, dim=2, sparse=False, dtype=float).__str__() == '[[1.]\n [2.]\n [3.]]'
+    try:
+        Array(x2, dim=1, sparse=True)
+    except ValueError as e:
+        assert e.args[0] == 'Cannot create sparse matrix with dim: 1'
     assert Array(x2, dim=2, sparse=True, dtype=float).__str__() == '  (0, 0)\t1.0\n  (1, 0)\t2.0\n  (2, 0)\t3.0'
 
     x2 = [[1, 0], [2, 9], [0, 3]]
@@ -54,7 +58,7 @@ def test_Array():
     try:
         Array(x4, dim=1, sparse=True)
     except ValueError as e:
-        assert e.args[0] == 'Input numpy.ndarray dim 2 higher than dim set to be 1'
+        assert e.args[0] == 'Cannot create sparse matrix with dim: 1'
 
     assert Array(np.array([1.0, 2.0, 3.0]), dtype=int, dim=2).__str__() == '[[1]\n [2]\n [3]]'
     assert Array(np.array([1.0, 2.0, 3.0]), dtype=int, dim=1).__str__() == '[1 2 3]'

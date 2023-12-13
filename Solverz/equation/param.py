@@ -1,11 +1,11 @@
+from typing import Callable
 from typing import Optional, Union
+from numbers import Number
 
 import numpy as np
-from scipy.sparse import csc_array
-from typing import Callable
-from Solverz.numerical_interface.Array import Array
+from scipy.interpolate import interp1d
 
-from numbers import Number
+from Solverz.numerical_interface.Array import Array
 
 
 class Param:
@@ -14,13 +14,12 @@ class Param:
                  name: str,
                  unit: Optional[str] = None,
                  info: Optional[str] = None,
-                 value: Union[np.ndarray, list] = None,
+                 value: Union[np.ndarray, list, Number] = None,
                  triggerable: bool = False,
                  trigger_var: str = None,
                  trigger_fun: Callable = None,
-                 dim=1,
+                 dim: int = 1,
                  dtype=float,
-                 event=None,
                  sparse=False
                  ):
         self.name = name
@@ -29,9 +28,8 @@ class Param:
         self.triggerable = triggerable
         self.trigger_var = trigger_var
         self.trigger_fun = trigger_fun
-        self.dtype = dtype
         self.dim = dim
-        self.event = event
+        self.dtype = dtype
         self.sparse = sparse
         self.__v = None
         self.v = value
@@ -48,6 +46,9 @@ class Param:
         else:
             self.__v = Array(value, dim=self.dim, sparse=self.sparse, dtype=self.dtype)
 
+    def get_v_t(self, t):
+        pass
+
     def __repr__(self):
         return f"Param: {self.name} value: {self.v}"
 
@@ -58,7 +59,7 @@ class IdxParam(Param):
                  name: str,
                  unit: Optional[str] = None,
                  info: Optional[str] = None,
-                 value: Union[np.ndarray, list] = None,
+                 value: Union[np.ndarray, list, Number] = None,
                  triggerable: bool = False,
                  trigger_var: str = None,
                  trigger_fun: Callable = None
@@ -73,3 +74,44 @@ class IdxParam(Param):
                          dim=1,
                          dtype=int,
                          sparse=False)
+
+
+class TimeSeriesParam(Param):
+    def __init__(self,
+                 name: str,
+                 v_series,
+                 time_series,
+                 index=None,
+                 unit: Optional[str] = None,
+                 info: Optional[str] = None,
+                 value: Union[np.ndarray, list, Number] = None,
+                 dim=1,
+                 sparse=False,
+                 dtype=float
+                 ):
+        super().__init__(name,
+                         unit,
+                         info,
+                         value,
+                         triggerable=False,
+                         trigger_var=None,
+                         trigger_fun=None,
+                         dim=dim,
+                         dtype=dtype,
+                         sparse=sparse)
+        self.v_series = Array(v_series, dim=1)
+        self.time_series = Array(time_series, dim=1)
+        if len(self.v_series) != len(self.time_series):
+            raise ValueError("Incompatible length between value series and time series!")
+        if not np.all(np.diff(self.time_series) > 0):
+            raise ValueError("Time stamp should be strictly monotonically increasing!")
+        self.index = index
+        self.vt = interp1d(self.time_series, self.v_series, kind='linear')
+
+    def get_v_t(self, t):
+        if self.index is not None:
+            temp = self.v.copy()
+            temp[self.index] = self.vt(t)
+            return temp
+        else:
+            return self.vt(t).reshape((-1,))  # input of interp1d is zero-dimensional, we need to reshape
