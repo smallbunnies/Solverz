@@ -47,7 +47,7 @@ class Param:
             self.__v = Array(value, dim=self.dim, sparse=self.sparse, dtype=self.dtype)
 
     def get_v_t(self, t):
-        pass
+        return self.v
 
     def __repr__(self):
         return f"Param: {self.name} value: {self.v}"
@@ -100,7 +100,9 @@ class TimeSeriesParam(Param):
                          dtype=dtype,
                          sparse=sparse)
         self.v_series = Array(v_series, dim=1)
+        self.v_series = np.append(self.v_series, np.array(self.v_series[-1]))
         self.time_series = Array(time_series, dim=1)
+        self.time_series = np.append(self.time_series, self.time_series[-1]+0.00001)
         if len(self.v_series) != len(self.time_series):
             raise ValueError("Incompatible length between value series and time series!")
         if not np.all(np.diff(self.time_series) > 0):
@@ -109,6 +111,9 @@ class TimeSeriesParam(Param):
         self.vt = interp1d(self.time_series, self.v_series, kind='linear')
 
     def get_v_t(self, t):
+        if t is None:
+            return self.v
+
         if self.index is not None:
             temp = self.v.copy()
             temp[self.index] = self.vt(t)

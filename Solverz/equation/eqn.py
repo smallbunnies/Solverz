@@ -104,7 +104,7 @@ class EqnDiff(Eqn):
     def __init__(self, name: str, eqn: Expr, diff_var: Symbol, var_idx=None):
         super().__init__(name, eqn)
         self.diff_var = diff_var
-        self.diff_var_name = diff_var.symbol0 if isinstance(diff_var, IdxVar) else diff_var.name
+        self.diff_var_name = diff_var.name0 if isinstance(diff_var, IdxVar) else diff_var.name
         self.var_idx = var_idx  # df/dPi[i] then var_idx=i
         self.var_idx_func = None
         if self.var_idx is not None:

@@ -1,6 +1,6 @@
 from functools import reduce
 
-from sympy import Symbol, Function, Number, S, Add
+from sympy import Symbol, Function, Number, S, sin, cos
 from sympy import exp as spexp
 from sympy.core.function import ArgumentIndexError
 

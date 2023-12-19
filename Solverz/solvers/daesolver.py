@@ -8,8 +8,8 @@ from numpy import abs, linalg
 from scipy.sparse import csc_array, linalg as sla
 
 from Solverz.equation.equations import DAE
-from Solverz.equation.event import Event
 from Solverz.solvers.aesolver import nr_method
+from Solverz.symboli_algebra.symbols import Var
 from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
 
 
@@ -17,7 +17,6 @@ def implicit_trapezoid(dae: DAE,
                        y0: Vars,
                        tspan: Union[List, np.ndarray],
                        dt,
-                       event: Event = None,
                        pbar=False):
     ae = dae.discretize(scheme=1)
 
@@ -25,9 +24,11 @@ def implicit_trapezoid(dae: DAE,
 
     tspan = np.array(tspan)
     T_initial = tspan[0]
+    t = Var('t', 0)
+    y0 = combine_Vars(y0, as_Vars(t))
     T_end = tspan[-1]
     nt = 0
-    t = T_initial
+    tt = T_initial
 
     y = TimeVars(y0, 10000)
     T = np.zeros((10000,))
@@ -36,12 +37,10 @@ def implicit_trapezoid(dae: DAE,
     if pbar:
         bar = tqdm.tqdm(total=T_end)
 
-    while abs(t - T_end) > abs(dt) / 10:
+    while abs(tt - T_end) > abs(dt) / 10:
 
         ae.update_param('dt', dt)
         ae.update_param(y0_alias)
-        if event:
-            ae.update_param(event, t)
 
         y1, ite = nr_method(ae, y0, stats=True)
         stats.ndecomp = stats.ndecomp + ite
@@ -49,10 +48,10 @@ def implicit_trapezoid(dae: DAE,
 
         y0_alias.array[:] = y1.array[:]
 
-        t = t + dt
+        tt = tt + dt
         nt = nt + 1
         y[nt] = y1
-        T[nt] = t
+        T[nt] = tt
         y0 = y1
 
     y = y[0:nt + 1]
@@ -106,83 +105,6 @@ def sirk_ode(ode: DAE,
         # x[i + 1] = x[i] + b1 * k1 + b2 * k2 + b3 * k3
 
     return x
-
-
-def sirk_dae(dae: DAE,
-             x: TimeVars,
-             y: TimeVars,
-             T,
-             dt,
-             event: Event = None):
-    r = 0.572816
-    r21 = -2.34199281090742
-    r31 = -0.0273333497228473
-    r32 = 0.213811780334800
-    r41 = -0.259083734468120
-    r42 = -0.190595825778459
-    r43 = -0.228030947223683
-    a21 = 1.145632
-    a31 = 0.520920769237066
-    a32 = 0.134294177986617
-    a41 = 0.520920769237066
-    a42 = 0.134294177986617
-    a43 = 0
-    b1 = 0.324534692057929
-    b2 = 0.0490865790926829
-    b3 = 0
-    b4 = 0.626378728849388
-
-    # a21 = 1
-    # a31 = 1
-    # a32 = 0
-    # r21 = (1 - 6 * r) / 2
-    # r31 = (12 * r ** 2 - 6 * r - 1) / (3 * (1 - 2 * r))
-    # r32 = (12 * r ** 2 - 12 * r + 5) / (6 * (1 - 2 * r))
-    # b1 = 2 / 3
-    # b2 = 1 / 6
-    # b3 = 1 / 6
-
-    dae.assign_eqn_var_address(x[0], y[0])
-    n_v = dae.var_size
-    n_s = dae.state_num
-    block_I = np.zeros((n_v, n_v))
-    block_I[np.ix_(range(n_s), range(n_s))] = block_I[np.ix_(range(n_s), range(n_s))] + np.eye(n_s)
-
-    i = 0
-    t = 0
-
-    pbar = tqdm.tqdm(total=T)
-    while abs(t - T) > dt / 10:
-        if event:
-            dae.update_param(event, t)
-        x0 = x[i]
-        y0 = y[i]
-        J0 = dae.j(x0, y0)
-        J_inv = linalg.inv(block_I - dt * J0 * r) * dt
-        k1 = J_inv @ (np.concatenate((dae.f(x0, y0), dae.g(x0, y0)), axis=0))
-        k2 = J_inv @ (np.concatenate(
-            (dae.f(x0 + a21 * k1[0:n_s], y0 + a21 * k1[n_s:n_v]),
-             dae.g(x0 + a21 * k1[0:n_s], y0 + a21 * k1[n_s:n_v])), axis=0)
-                      + J0 @ (r21 * k1))
-        k3 = J_inv @ (np.concatenate((dae.f(x0 + a31 * k1[0:n_s] + a32 * k2[0:n_s],
-                                            y0 + a31 * k1[n_s:n_v] + a32 * k2[n_s:n_v]),
-                                      dae.g(x0 + a31 * k1[0:n_s] + a32 * k2[0:n_s],
-                                            y0 + a31 * k1[n_s:n_v] + a32 * k2[n_s:n_v])), axis=0) +
-                      J0 @ (r31 * k1 + r32 * k2))
-        k4 = J_inv @ (
-                np.concatenate(
-                    (dae.f(x0 + a41 * k1[0:n_s] + a42 * k2[0:n_s] + a43 * k3[0:n_s],
-                           y0 + a41 * k1[n_s:n_v] + a42 * k2[n_s:n_v] + a43 * k3[n_s:n_v]),
-                     dae.g(x0 + a41 * k1[0:n_s] + a42 * k2[0:n_s] + a43 * k3[0:n_s],
-                           y0 + a41 * k1[n_s:n_v] + a42 * k2[n_s:n_v] + a43 * k3[n_s:n_v])), axis=0) +
-                J0 @ (r41 * k1 + r42 * k2 + r43 * k3))
-        x[i + 1] = x0 + b1 * k1[0:n_s] + b2 * k2[0:n_s] + b3 * k3[0:n_s] + b4 * k4[0:n_s]
-        y[i + 1] = y0 + b1 * k1[n_s:n_v] + b2 * k2[n_s:n_v] + b3 * k3[n_s:n_v] + b4 * k4[n_s:n_v]
-
-        pbar.update(dt)
-        t = t + dt
-        i = i + 1
-    return x, y
 
 
 def euler(ode: DAE,
@@ -343,8 +265,7 @@ def nrtp45(tinterp: np.ndarray, t: float, y: np.ndarray, dt: float, k: np.ndarra
 def ode15s(ode: DAE,
            y: TimeVars,
            dt,
-           T,
-           event: Event = None):
+           T):
     pass
 
 
@@ -427,8 +348,7 @@ def Rodas(dae: DAE,
           tspan: Union[List, np.ndarray],
           y0: Vars,
           z0: Vars = None,
-          opt: Opt = None,
-          event: Event = None):
+          opt: Opt = None):
     if opt is None:
         opt = Opt()
     stats = Stats(opt.scheme)
@@ -476,6 +396,7 @@ def Rodas(dae: DAE,
     M = dae.M
 
     done = False
+    reject = 0
     while not done:
         # step size too small
         # pass
@@ -489,25 +410,18 @@ def Rodas(dae: DAE,
         else:
             dt = np.minimum(dt, 0.5 * (tend - t))
 
-        if event is not None:  # event
-            # detect event time stamp and change the step
-            t_next_stamp = float(event.time[np.argwhere(event.time > t)[0]])
-            dt = np.minimum(dt, t_next_stamp - t)
-
         if opt.fix_h:
             dt = opt.hinit
 
         if done:
             break
         K = np.zeros((dae.vsize, rparam.s))
-        if event is not None:
-            # If there is simulation events, i.e. time-varying coefficients,
-            # the solution of RODAS can be viewed as solution of non-autonomous DAEs.
-            dae.update_param(event, t)
-        J = dae.j(y0)
 
-        dfdt0 = dt * dfdt(dae, event, t, y0)
-        rhs = dae.F(y0) + rparam.g[0] * dfdt0
+        if reject == 0:
+            J = dae.j(t, y0)
+
+        dfdt0 = dt * dfdt(dae, t, y0)
+        rhs = dae.F(t, y0) + rparam.g[0] * dfdt0
         stats.nfeval = stats.nfeval + 1
 
         lu = sla.splu(M - dt * rparam.gamma * J)
@@ -518,10 +432,8 @@ def Rodas(dae: DAE,
             sum_1 = K @ rparam.alpha[:, j]
             sum_2 = K @ rparam.gamma_tilde[:, j]
             y1 = y0 + dt * sum_1
-            if event is not None:
-                dae.update_param(event, t + dt * rparam.a[j])
 
-            rhs = dae.F(y1) + M @ sum_2 + rparam.g[j] * dfdt0
+            rhs = dae.F(t + dt * rparam.a[j], y1) + M @ sum_2 + rparam.g[j] * dfdt0
             stats.nfeval = stats.nfeval + 1
             sol = lu.solve(rhs)
             K[:, j] = sol - sum_2
@@ -544,7 +456,7 @@ def Rodas(dae: DAE,
             dtnew = dt
 
         if err <= 1.0:
-
+            reject = 0
             told = t
             t = t + dt
             stats.nstep = stats.nstep + 1
@@ -574,6 +486,7 @@ def Rodas(dae: DAE,
             dae.update_param(y0_alias)
 
         else:
+            reject = reject + 1
             stats.nreject = stats.nreject + 1
             opt.facmax = 1
         dt = np.min([opt.hmax, np.max([hmin, dtnew])])
@@ -688,13 +601,11 @@ class Opt:
         self.scheme = scheme
 
 
-def dfdt(dae, event, t, y):
+def dfdt(dae, t, y):
     tscale = np.maximum(0.1 * np.abs(t), 1e-8)
     ddt = t + np.sqrt(np.spacing(1)) * tscale - t
-    f0 = dae.F(y)
-    dae.update_param(event, t + ddt)
-    f1 = dae.F(y)
-    dae.update_param(event, t)
+    f0 = dae.F(t, y)
+    f1 = dae.F(t + ddt, y)
     return (f1 - f0) / ddt
 
 

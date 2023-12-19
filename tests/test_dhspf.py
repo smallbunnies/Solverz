@@ -1,8 +1,7 @@
 import pandas as pd
 import numpy as np
 
-from Solverz import Eqn, AE, nr_method, as_Vars, Var, Param, continuous_nr, Param_, Const_, idx, Abs, transpose, exp, \
-     Mat_Mul
+from Solverz import Eqn, AE, nr_method, as_Vars, Var, Param, continuous_nr, Para, idx, Abs, exp, Mat_Mul
 
 # %% initialize variables and params
 sys_df = pd.read_excel('instances/4node3pipe.xlsx',
@@ -36,29 +35,29 @@ i = idx(name='i', value=np.asarray(Node['type'][Node['type'] == 3].index))  # in
 l = idx(name='l', value=np.asarray(Node['type'][Node['type'] == 2].index))  # load nodes
 s = idx(name='s', value=np.asarray(Node['type'][Node['type'] == 1].index))  # non-balance source nodes
 r = idx(name='r', value=np.asarray(Node['type'][Node['type'] == 0].index))  # balance source nodes
-sl = idx(name='sl', value=np.concatenate([s, l]))
-rs = idx(name='rs', value=np.concatenate([r, s]))
-rsl = idx(name='rsl', value=np.concatenate([r, s, l]))
-li = idx(name='li', value=np.concatenate([l, i]))
-rsi = idx(name='rsi', value=np.concatenate([r, s, i]))
+sl = idx(name='sl', value=np.concatenate((s.value, l.value)))
+rs = idx(name='rs', value=np.concatenate((r.value, s.value)))
+rsl = idx(name='rsl', value=np.concatenate((r.value, s.value, l.value)))
+li = idx(name='li', value=np.concatenate((l.value, i.value)))
+rsi = idx(name='rsi', value=np.concatenate((r.value, s.value, i.value)))
 
-mL = Const_('mL', dim=2, value=np.asarray(sys_df['m_L']))
-K = Const_(name='K', value=np.asarray(sys_df['K']))
-Ts_set = Const_(name='Ts_set', value=np.asarray(sys_df['Ts_set']))
-Tr_set = Const_(name='Tr_set', value=np.asarray(sys_df['Tr_set']))
-phi_set = Const_(name='phi_set', value=np.asarray(sys_df['phi_set']))
+mL = Para('mL', dim=2, value=np.asarray(sys_df['m_L']))
+K = Para(name='K', value=np.asarray(sys_df['K']).reshape(-1,))
+Ts_set = Para(name='Ts_set', value=np.asarray(sys_df['Ts_set']).reshape(-1,))
+Tr_set = Para(name='Tr_set', value=np.asarray(sys_df['Tr_set']).reshape(-1,))
+phi_set = Para(name='phi_set', value=np.asarray(sys_df['phi_set']).reshape(-1,))
 
-Cp = Param_(name='Cp', value=np.asarray(sys_df['Cp']))
-L = Param_(name='L', value=np.asarray(sys_df['L']))
-coeff_lambda = Param_(name='coeff_lambda', value=np.asarray(sys_df['coeff_lambda']))
-Ta = Param_(name='Ta', value=np.asarray(sys_df['Ta']))
+Cp = Para(name='Cp', value=np.asarray(sys_df['Cp']).reshape(-1,))
+L = Para(name='L', value=np.asarray(sys_df['L']).reshape(-1,))
+coeff_lambda = Para(name='coeff_lambda', value=np.asarray(sys_df['coeff_lambda']).reshape(-1,))
+Ta = Para(name='Ta', value=np.asarray(sys_df['Ta']).reshape(-1,))
 f_node = sys_df['Pipe']['f_node']
 t_node = sys_df['Pipe']['t_node']
-V = Param_(name='V', dim=2, value=derive_incidence_matrix(f_node, t_node))
-Vp = Param_(name='Vp', dim=2, value=derive_v_plus(V.value))
-Vm = Param_(name='Vm', dim=2, value=derive_v_minus(V.value))
-f = idx(name='f', value=f_node)  # intermediate nodes
-t = idx(name='t', value=t_node)  # load nodes
+V = Para(name='V', dim=2, value=derive_incidence_matrix(f_node, t_node))
+Vp = Para(name='Vp', dim=2, value=derive_v_plus(V.value))
+Vm = Para(name='Vm', dim=2, value=derive_v_minus(V.value))
+f_node = idx(name='f_node', value=np.asarray(f_node).reshape(-1, ))  # intermediate nodes
+t_node = idx(name='t_node', value=np.asarray(t_node).reshape(-1, ))  # load nodes
 
 m = Var(name='m', value=np.asarray(sys_df['var']['m']))
 mq = Var(name='mq', value=np.asarray(sys_df['var']['mq']))
@@ -68,8 +67,8 @@ Touts = Var(name='Touts', value=np.asarray(sys_df['var']['Touts']))
 Toutr = Var(name='Toutr', value=np.asarray(sys_df['var']['Toutr']))
 phi = Var(name='phi', value=np.asarray(sys_df['var']['phi']))
 
-E1 = Eqn(name='E1', eqn=(Ts[f] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Touts)
-E3 = Eqn(name='E3', eqn=(Tr[t] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Toutr)
+E1 = Eqn(name='E1', eqn=(Ts[f_node] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Touts)
+E3 = Eqn(name='E3', eqn=(Tr[t_node] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Toutr)
 E5 = Eqn(name='E5', eqn=Mat_Mul(V[rs, :], m) + mq[rs])
 E6 = Eqn(name='E6', eqn=Mat_Mul(V[l, :], m) - mq[l])
 E7 = Eqn(name='E7', eqn=Mat_Mul(V[i, :], m))

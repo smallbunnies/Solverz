@@ -8,6 +8,7 @@ import numpy as np
 
 from Solverz.symboli_algebra.symbols import Var
 from Solverz.auxiliary_service.address import Address, combine_Address
+from Solverz.numerical_interface.Array import Array
 
 
 def as_Vars(var: Union[Var, List[Var]]):
@@ -16,18 +17,18 @@ def as_Vars(var: Union[Var, List[Var]]):
     temp = 0
     for var_ in var:
         if var_.initialized:
-            a.add(var_.name, temp, temp + var_.value.shape[0] - 1)
+            a.add(var_.name, var_.value.shape[0])
         else:
             warnings.warn(f"Variable {var_.name} not initialized, set to zero")
-            a.add(var_.name, temp, temp)
+            a.add(var_.name, 1)
         temp = temp + a.size[var_.name]
 
-    array = np.zeros((a.total_size, 1))
+    array = np.zeros((a.total_size, ))
     for var_ in var:
         if var_.initialized:
-            array[a[var_.name], 0:] = var_.value
+            array[a[var_.name]] = var_.value
         else:
-            array[a[var_.name], 0:] = 0
+            array[a[var_.name]] = 0
 
     return Vars(a, array)
 
@@ -67,18 +68,22 @@ class Vars(VarsBasic):
                  array: np.ndarray):
         super().__init__()
         self.a = a
-        array = array.reshape(-1, 1).copy()
+        array = Array(array, dim=1)
         if array.shape[0] != self.a.total_size:
             raise ValueError("Unequal address size and array size!")
         else:
             self.array = array
 
-    def __getitem__(self, var_name):
-        return self.array[self.a[var_name], 0:]
+    def __getitem__(self, var_name: str):
+        return self.array[self.a[var_name]]
 
     def __setitem__(self, key, value):
         if key in self.var_list:
-            self.array[self.a[key], 0:] = value
+            temp = Array(value, dim=1)
+            if temp.shape[0] == self.array[self.a[key]].shape[0]:
+                self.array[self.a[key]] = temp
+            else:
+                raise ValueError(f'Incompatible input array shape!')
         else:
             raise ValueError(f'There is no variable {key}!')
 
@@ -91,8 +96,11 @@ class Vars(VarsBasic):
             new_vars.array[:] = new_vars.array * other
             return new_vars
         elif isinstance(other, Vars):
-            new_vars.array[:] = new_vars.array * other.array
-            return new_vars
+            if self.a == other.a:
+                new_vars.array[:] = new_vars.array * other.array
+                return new_vars
+            else:
+                raise ValueError('Cannot multiply Vars object by another one with different variables!')
         else:
             raise TypeError(f'Input type {type(other)} invalid')
 
@@ -119,7 +127,7 @@ class Vars(VarsBasic):
             if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = new_vars.array + other.reshape(-1, 1)
+                new_vars.array[:] = new_vars.array + other.reshape(-1, )
                 return new_vars
 
     def __radd__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
@@ -134,7 +142,7 @@ class Vars(VarsBasic):
             if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = other.reshape(-1, 1) + new_vars.array
+                new_vars.array[:] = other.reshape(-1, ) + new_vars.array
                 return new_vars
 
     def __sub__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
@@ -149,7 +157,7 @@ class Vars(VarsBasic):
             if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = new_vars.array - other.reshape(-1, 1)
+                new_vars.array[:] = new_vars.array - other.reshape(-1, )
                 return new_vars
 
     def __rsub__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
@@ -164,7 +172,7 @@ class Vars(VarsBasic):
             if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = other.reshape(-1, 1) - new_vars.array
+                new_vars.array[:] = other.reshape(-1, ) - new_vars.array
                 return new_vars
 
     def __truediv__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
@@ -182,6 +190,21 @@ class Vars(VarsBasic):
                 new_vars.array[:] = new_vars.array / other.reshape(-1, )
                 return new_vars
 
+    def __rtruediv__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
+        new_vars = deepcopy(self)
+        if isinstance(other, int) or isinstance(other, float):
+            new_vars.array[:] = other / new_vars.array
+            return new_vars
+        elif isinstance(other, Vars):
+            new_vars.array[:] = other.array / new_vars.array
+            return new_vars
+        elif isinstance(other, np.ndarray):
+            if new_vars.total_size != other.reshape(-1, ).shape[0]:
+                raise ValueError('Incompatible array size')
+            else:
+                new_vars.array[:] = other.reshape(-1, ) / new_vars.array
+                return new_vars
+
     def derive_alias(self, suffix: str):
 
         return Vars(self.a.derive_alias(suffix), self.array)
@@ -191,7 +214,7 @@ class TimeVars(VarsBasic):
 
     def __init__(self,
                  Vars_: Vars,
-                 length: int = 101
+                 length: int = 1001
                  ):
 
         super().__init__()
@@ -199,7 +222,7 @@ class TimeVars(VarsBasic):
         self.a = Vars_.a
 
         self.array = np.zeros((length, self.total_size))
-        self.array[0, :] = Vars_.array[:].reshape(-1, )
+        self.array[0, :] = Vars_.array
 
     def __getitem__(self, item):
         """

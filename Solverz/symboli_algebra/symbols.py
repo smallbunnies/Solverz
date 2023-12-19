@@ -3,6 +3,8 @@ from typing import Dict
 import numpy as np
 from sympy import Symbol, Expr
 
+from Solverz.numerical_interface.Array import Array
+
 Sympify_Mapping = {}
 
 
@@ -74,9 +76,7 @@ class SolSymBasic(Symbol):
         obj.name = f'{name}'
         obj.dim = dim
         if value is not None:
-            obj.value = np.array(value)
-            if obj.value.ndim < 2:
-                obj.value = obj.value.reshape((-1, 1))
+            obj.value = Array(value, dim)
         else:
             obj.value = None
         obj.initialized = True if value is not None else False
@@ -154,7 +154,7 @@ class idx(SolSymBasic):
             raise ValueError("idx can only be one-dimensional")
         obj = SolSymBasic.__new__(cls, name, value, dim=1)
         if obj.value is not None:
-            obj.value = obj.value.reshape(-1, )
+            obj.value = Array(value, dim=1, dtype=int)
         return obj
 
     def __getitem__(self, index):

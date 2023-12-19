@@ -1,4 +1,4 @@
-from Solverz import Eqn, idx, Var, Const_, Sum_, sin, cos
+# from Solverz import Eqn, idx, Var, Const_, Sum_, sin, cos
 
 # g = Const_('g', dim=2)
 # b = Const_('b', dim=2)
