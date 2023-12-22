@@ -120,6 +120,7 @@ class EqnDiff(Eqn):
             elif isinstance(self.var_idx, Expr):
                 self.var_idx_func = Eqn('To evaluate var_idx of variable' + self.diff_var.name, self.var_idx)
         self.LHS = Derivative(sympy.Function('g'), diff_var)
+        self.dim = -1
 
 
 class Ode(Eqn):
@@ -459,9 +460,8 @@ class HyperbolicPde(Pde):
                 start = U.index.start
                 stop = U.index.stop
                 step = U.index.step
-                var_name = U.symbol.name
-                U = Var(var_name)
-                Ux = Var(var_name + 'x')
+                U = U.symbol0
+                Ux = Var(U.name + 'x')
 
                 # u_j
                 Uj = U[start:stop:step]

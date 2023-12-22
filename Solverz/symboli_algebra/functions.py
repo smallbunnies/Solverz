@@ -1,6 +1,6 @@
 from functools import reduce
 
-from sympy import Symbol, Function, Number, S, sin, cos
+from sympy import Symbol, Function, Number, S, sin, cos, Integer
 from sympy import exp as spexp
 from sympy.core.function import ArgumentIndexError
 
@@ -122,6 +122,16 @@ class Diag(MatrixFunction):
         else:
             return _latex_str
 
+    def _numpycode(self, printer, **kwargs):
+
+        return r'diagflat(' + printer._print(self.args[0], **kwargs) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
 
 class Abs(Function):
 
@@ -135,16 +145,28 @@ class Abs(Function):
         else:
             raise ArgumentIndexError(self, argindex)
 
+    def _numpycode(self, printer, **kwargs):
+        return r'abs(' + printer._print(self.args[0]) + r')'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
 
 class exp(Function):
 
     @classmethod
     def eval(cls, *args):
-        if len(args) > 1:
+        if len(args) != 1:
             raise TypeError(f'Supports one operand while {len(args)} input!')
 
     def fdiff(self, argindex=1):
-        return spexp(*self.args)
+        return exp(*self.args)
+
+    def _numpycode(self, printer, **kwargs):
+        return r'exp(' + printer._print(self.args[0]) + r')'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
 
 
 class minmod_flag(Function):
@@ -183,3 +205,75 @@ class Sign(Function):
         if argindex == 1:
             return 0
         raise ArgumentIndexError(self, argindex)
+
+    def _numpycode(self, printer, **kwargs):
+
+        return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+class zeros(Function):
+    # print zeros(6,6) as zeros((6,6))
+    # or zeros(6,) as zeros((6,))
+    def _numpycode(self, printer, **kwargs):
+        if len(self.args) == 2:
+            temp1 = printer._print(self.args[0])
+            temp2 = printer._print(self.args[1])
+            return r'zeros((' + temp1 + ',' + temp2 + r'))'
+        elif len(self.args) == 1:
+            temp = printer._print(self.args[0])
+            return r'zeros((' + temp + ',' + r'))'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class CSC_array(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 1:
+            raise TypeError(f"CSC_array takes 1 positional arguments but {len(args)} were given!")
+
+    def _numpycode(self, printer, **kwargs):
+        return r'csc_array(' + printer._print(self.args[0]) + r')'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class SolList(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if any([not isinstance(arg, Integer) for arg in args]):
+            raise ValueError(f"Solverz' list object accepts only integer inputs.")
+
+    def _numpycode(self, printer, **kwargs):
+        return r'[' + ','.join([printer._print(arg) for arg in self.args]) + r']'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class Arange(Function):
+    """
+    Solverz' arange function
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        if any([not isinstance(arg, Integer) for arg in args]):
+            raise ValueError(f"Solverz' arange object accepts only integer inputs.")
+        if len(args) > 2:
+            raise ValueError(f"Solverz' arange object takes 2 positional arguments but {len(args)} were given!")
+
+    def _numpycode(self, printer, **kwargs):
+        return r'arange(' + ','.join([printer._print(arg) for arg in self.args]) + r')'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)

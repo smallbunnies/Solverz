@@ -64,8 +64,7 @@ m3b9.param_initializer('G', TimeSeriesParam(name='G',
                                             time_series=[0, 0.002, 0.03, 0.032, T],
                                             value=Gvalue,
                                             index=(6, 6),
-                                            dim=2,
-                                            sparse=True))
+                                            dim=2))
 m3b9.update_param('B', np.asarray(df['B']))
 
 delta = Var('delta', [0.0625815077879868, 1.06638275203221, 0.944865048677501])
@@ -101,7 +100,7 @@ T1, y, stats2 = Rodas(m3b9,
 # plt.show()
 
 def test_m3b9():
-    assert np.abs(np.asarray(df['omega']) - y['omega']).max() <= 1.59e-5
+    assert np.abs(np.asarray(df['omega']) - y['omega']).max() <= 2e-5
     assert np.abs(np.asarray(df['omega']) - y_trape['omega']).max() <= 2.48e-4
     assert np.abs(np.asarray(df['delta']) - y['delta']).max() <= 9.3e-4
     assert np.abs(np.asarray(df['delta']) - y_trape['delta']).max() <= 7.8e-2

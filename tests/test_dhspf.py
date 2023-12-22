@@ -42,15 +42,15 @@ li = idx(name='li', value=np.concatenate((l.value, i.value)))
 rsi = idx(name='rsi', value=np.concatenate((r.value, s.value, i.value)))
 
 mL = Para('mL', dim=2, value=np.asarray(sys_df['m_L']))
-K = Para(name='K', value=np.asarray(sys_df['K']).reshape(-1,))
-Ts_set = Para(name='Ts_set', value=np.asarray(sys_df['Ts_set']).reshape(-1,))
-Tr_set = Para(name='Tr_set', value=np.asarray(sys_df['Tr_set']).reshape(-1,))
-phi_set = Para(name='phi_set', value=np.asarray(sys_df['phi_set']).reshape(-1,))
+K = Para(name='K', value=np.asarray(sys_df['K']).reshape(-1, ))
+Ts_set = Para(name='Ts_set', value=np.asarray(sys_df['Ts_set']).reshape(-1, ))
+Tr_set = Para(name='Tr_set', value=np.asarray(sys_df['Tr_set']).reshape(-1, ))
+phi_set = Para(name='phi_set', value=np.asarray(sys_df['phi_set']).reshape(-1, ))
 
-Cp = Para(name='Cp', value=np.asarray(sys_df['Cp']).reshape(-1,))
-L = Para(name='L', value=np.asarray(sys_df['L']).reshape(-1,))
-coeff_lambda = Para(name='coeff_lambda', value=np.asarray(sys_df['coeff_lambda']).reshape(-1,))
-Ta = Para(name='Ta', value=np.asarray(sys_df['Ta']).reshape(-1,))
+Cp = Para(name='Cp', value=np.asarray(sys_df['Cp']).reshape(-1, ))
+L = Para(name='L', value=np.asarray(sys_df['L']).reshape(-1, ))
+coeff_lambda = Para(name='coeff_lambda', value=np.asarray(sys_df['coeff_lambda']).reshape(-1, ))
+Ta = Para(name='Ta', value=np.asarray(sys_df['Ta']).reshape(-1, ))
 f_node = sys_df['Pipe']['f_node']
 t_node = sys_df['Pipe']['t_node']
 V = Para(name='V', dim=2, value=derive_incidence_matrix(f_node, t_node))
@@ -93,6 +93,50 @@ sys_df = pd.read_excel('instances/4node3pipe_bench.xlsx',
                        header=None
                        )
 
+from Solverz.numerical_interface.num_eqn import print_g, print_J, Solverzlambdify, nAE, parse_p
+from Solverz.numerical_interface.custom_function import solve
+
+code_g = print_g(E)
+g = Solverzlambdify(code_g, 'F_', modules=['numpy'])
+
+
+g0 = E.g(y0)
+gv = g(0, y0.array, parse_p(E))
+
+code_J = print_J(E)
+from scipy.sparse import csc_array
+
+J = Solverzlambdify(code_J, 'J_', modules=[{'csc_array': csc_array}, 'numpy'])
+J0 = E.j(y0)
+Jv = J(0, y0.array, parse_p(E))
+
+
+def nr_method1(eqn: nAE,
+               y: np.ndarray,
+               p,
+               tol: float = 1e-8,
+               stats=False):
+    df = eqn.g(y, p)
+    ite = 0
+    while max(abs(df)) > tol:
+        ite = ite + 1
+        y = y - solve(eqn.J(y, p), df)
+        df = eqn.g(y, p)
+        if ite >= 100:
+            print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
+            break
+    if not stats:
+        return y
+    else:
+        return y, ite
+
+
+from Solverz.numerical_interface.num_eqn import nAE
+
+f1 = nAE(E.vsize, lambda z, p: g(0, z, p), lambda z, p: J(0, z, p), E.var_address)
+y1 = nr_method1(f1, as_Vars([m, mq, Ts, Tr, Touts, Toutr, phi]).array, parse_p(E))
+y1 = f1.parse_v(y1)
+
 
 def test_nr_method():
     for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
@@ -100,6 +144,9 @@ def test_nr_method():
         idx_nonzero = np.nonzero(y_nr[var_name])
         assert max(abs((y_nr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) /
                    np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, )) <= 1e-8
+    assert np.max(np.abs(gv - g0)) < 1e-15
+    assert np.max(np.abs(y_nr.array-y1.array)) < 1e-15
+    assert np.max(np.abs(Jv - J0)) < 1e-15
 
 
 def test_cnr_method():

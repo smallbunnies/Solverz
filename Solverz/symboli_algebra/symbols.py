@@ -9,16 +9,17 @@ Sympify_Mapping = {}
 
 
 def IndexPrinter(index):
-    if not isinstance(index, (int, list, idx, IdxSymBasic, Expr, slice, tuple)):
+    if not isinstance(index, (int, np.integer, list, idx, IdxSymBasic, Expr, slice, tuple)):
         raise TypeError(f"Unsupported idx type {type(index)}")
 
     def print_(index_):
         if isinstance(index_, slice):
             start = index_.start if index_.start is not None else ''
             stop = index_.stop if index_.stop is not None else ''
-            step = index_.step if index_.step is not None else ''
-            return f'{start}:{stop}:{step}'
-        elif isinstance(index_, (int, list, idx, IdxSymBasic, Expr)):
+            slice_str = f'{start}:{stop}'
+            slice_str += f':{index_.step}' if index_.step is not None else ''
+            return slice_str
+        elif isinstance(index_, (int, np.integer, list, idx, IdxSymBasic, Expr)):
             return f'{index_}'
 
     if isinstance(index, tuple):
@@ -31,12 +32,12 @@ def IndexPrinter(index):
 
 
 def SymbolExtractor(index) -> Dict:
-    if not isinstance(index, (int, list, idx, IdxSymBasic, Expr, slice, tuple)):
+    if not isinstance(index, (int, np.integer, list, idx, IdxSymBasic, Expr, slice, tuple)):
         raise TypeError(f"Unsupported idx type {type(index)}")
 
     temp = dict()
 
-    if isinstance(index, (int, idx, IdxSymBasic)):
+    if isinstance(index, (int, np.integer, idx, IdxSymBasic)):
         if isinstance(index, idx):
             temp.update({index.name: index})
         elif isinstance(index, IdxSymBasic):
@@ -65,13 +66,19 @@ def SymbolExtractor(index) -> Dict:
     return temp
 
 
+Solverz_internal_name = ['y_', 'F_', 'p_', 'J_']
+
+
 class SolSymBasic(Symbol):
     """
     Basic class for Solverz Symbols
     """
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
 
-    def __new__(cls, name: str, value=None, dim: int = 1):
+    def __new__(cls, name: str, value=None, dim: int = 1, internal_use=False):
+        if any([name == built_in_name for built_in_name in Solverz_internal_name]):
+            if not internal_use:
+                raise ValueError(f"Solverz built-in name {name}, cannot be used as variable name.")
         obj = Symbol.__new__(cls, f'{name}')
         obj.name = f'{name}'
         obj.dim = dim
@@ -92,7 +99,7 @@ class IdxSymBasic(Symbol):
     """
 
     def __new__(cls, symbol, index, dim):
-        if not isinstance(index, (int, list, idx, IdxSymBasic, Expr, slice, tuple)):
+        if not isinstance(index, (int, np.integer, list, idx, IdxSymBasic, Expr, slice, tuple)):
             raise TypeError(f"Unsupported idx type {type(index)}")
         if not isinstance(symbol, Symbol):
             raise TypeError(f"Invalid symbol type {type(symbol)}")
@@ -109,17 +116,27 @@ class IdxSymBasic(Symbol):
     def _numpycode(self, printer, **kwargs):
 
         def IndexCodePrinter(index, printer):
-            if isinstance(index, (int, list)):
+            if isinstance(index, (int, np.integer, list)):
                 return '{i}'.format(i=printer._print(index))
             elif isinstance(index, idx):
                 return '{i}'.format(i=printer._print(index))
             elif isinstance(index, Expr):
                 return '{i}'.format(i=printer._print(index))
             elif isinstance(index, slice):
-                start = IndexCodePrinter(index.start, printer) if index.start is not None else None
-                stop = IndexCodePrinter(index.stop + 1, printer) if index.stop is not None else None
-                step = IndexCodePrinter(index.step, printer) if index.step is not None else None
-                return 'sol_slice({i}, {j}, {k})'.format(i=start, j=stop, k=step)
+                start = index.start
+                stop = index.stop
+                step = index.step
+                if any([isinstance(arg, (idx, Expr)) for arg in [start, stop, step]]):
+                    start = IndexCodePrinter(start, printer) if start is not None else None
+                    stop = IndexCodePrinter(stop + 1, printer) if stop is not None else None
+                    step = IndexCodePrinter(step, printer) if step is not None else None
+                    return 'sol_slice({i}, {j}, {k})'.format(i=start, j=stop, k=step)
+                else:
+                    start = IndexCodePrinter(start, printer) if start is not None else ''
+                    stop = IndexCodePrinter(stop + 1, printer) if stop is not None else ''
+                    slice_str = '{i}:{j}'.format(i=start, j=stop)
+                    slice_str += f':{IndexCodePrinter(step, printer)}' if step is not None else ''
+                    return slice_str
 
         if isinstance(self.index, tuple):
             if len(self.index) != 2:
@@ -171,3 +188,43 @@ class IdxPara(IdxSymBasic):
 
 class Idxidx(IdxSymBasic):
     pass
+
+
+class SolDict(Symbol):
+    """
+    Solverz' Dict class for numerical equation code printer, which accepts only str index
+    """
+    _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
+
+    def __new__(cls, name: str):
+        obj = Symbol.__new__(cls, f'{name}')
+        obj.name = f'{name}'
+        return obj
+
+    def __getitem__(self, index):
+        return IdxDict(self, index)
+
+
+class IdxDict(Symbol):
+    """
+    Basic class for Solverz indexed Symbols
+    """
+
+    def __new__(cls, symbol, index):
+        if not isinstance(index, str):
+            raise TypeError(f"Unsupported idx type {type(index)}")
+        if not isinstance(symbol, SolDict):
+            raise TypeError(f"Invalid symbol type {type(symbol)}")
+        obj = Symbol.__new__(cls, f'{symbol.name}["{index}"]')
+        obj.index = index
+
+        return obj
+
+    def _numpycode(self, printer, **kwargs):
+        return self.name
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)

@@ -65,7 +65,7 @@ class Address:
 
     @property
     def size(self):
-        return dict([(var_name, self.length_array[self.object_list.index(var_name)]) for var_name in self.v.keys()])
+        return dict(zip(self.object_list, self.length_array))
 
     @property
     def total_size(self):

@@ -6,10 +6,10 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import sympy as sp
-from sympy import Expr, Mul, Add, S, Number, Integer, sign, Symbol
+from sympy import Expr, Mul, Add, S, Number, Integer, Symbol
 
 from Solverz.symboli_algebra.symbols import IdxVar, IdxPara, Var, Para
-from Solverz.symboli_algebra.functions import Mat_Mul, Diag, transpose, Abs
+from Solverz.symboli_algebra.functions import Mat_Mul, Diag, transpose, Abs, Sign
 
 
 class TMatrix:
@@ -421,7 +421,7 @@ class TensorExpr:
                     s1 = derivatives[succ[0]][1]
                     s2 = index_s
                     Aprime = derivatives[succ[0]][0]
-                    fprimeA = sign(node.args[0])
+                    fprimeA = Sign(node.args[0])
                     s1s2 = TensorIndex(s1.index_value + s2.index_value)
 
                     derivatives[node] = (TMul2Mul(fprimeA, Aprime, [s1, s1s2, s1s2]),

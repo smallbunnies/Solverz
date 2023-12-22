@@ -116,19 +116,12 @@ class Vars(VarsBasic):
             raise TypeError(f'Input type {type(other)} invalid')
 
     def __add__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
-        new_vars = deepcopy(self)
         if isinstance(other, int) or isinstance(other, float):
-            new_vars.array[:] = new_vars.array + other
-            return new_vars
+            return Vars(self.a, self.array+other)
         elif isinstance(other, Vars):
-            new_vars.array[:] = new_vars.array + other.array
-            return new_vars
+            return Vars(self.a, self.array+other.array)
         elif isinstance(other, np.ndarray):
-            if new_vars.total_size != other.reshape(-1, ).shape[0]:
-                raise ValueError('Incompatible array size')
-            else:
-                new_vars.array[:] = new_vars.array + other.reshape(-1, )
-                return new_vars
+            return Vars(self.a, self.array+other)
 
     def __radd__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
         new_vars = deepcopy(self)

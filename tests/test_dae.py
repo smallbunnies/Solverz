@@ -31,8 +31,8 @@ T1, Y1, stats2 = Rodas(dae,
 # def test_discretize():
 #     c = ComputeParam('c')
 #     Xk1 = AliasVar(X, 'k1')
-#     Yk1 = AliasVar(Y, 'k1')
-#     scheme1 = F(X + 1 / 2 * Xk1, Y + 1 / 3 * Yk1, t + dt * c)
+#     Yk1 = AliasVar(yy, 'k1')
+#     scheme1 = F(X + 1 / 2 * Xk1, yy + 1 / 3 * Yk1, t + dt * c)
 #     f1 = Ode(name='F', eqn='(Pm-D*omega)', diff_var='omega')
 #
 #     param0, eqn0 = f1.discretize(scheme1)

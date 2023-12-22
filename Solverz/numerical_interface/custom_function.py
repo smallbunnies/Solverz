@@ -5,8 +5,8 @@ from functools import reduce
 import numpy as np
 from numpy import linalg
 from scipy.sparse import diags, csc_array, linalg as sla
-from cvxopt.umfpack import linsolve
-from cvxopt import matrix, spmatrix
+# from cvxopt.umfpack import linsolve
+# from cvxopt import matrix, spmatrix
 
 numerical_interface = {}
 
@@ -187,10 +187,4 @@ def inv(mat: np.ndarray):
 
 
 def solve(A, b):
-    if isinstance(A, spmatrix):
-        # return splinalg.spsolve(A, b)
-        c = matrix(b)
-        linsolve(A, c)
-        return np.array(c)
-    elif isinstance(A, csc_array):
-        return sla.spsolve(A, b)
+    return sla.spsolve(A, b)

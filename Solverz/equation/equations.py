@@ -8,10 +8,10 @@ from copy import deepcopy
 import numpy as np
 from sympy import Symbol, Expr
 from scipy.sparse import csc_array, coo_array
-from cvxopt import spmatrix, matrix
+# from cvxopt import spmatrix, matrix
 
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
-from Solverz.equation.param import Param
+from Solverz.equation.param import Param, IdxParam
 from Solverz.symboli_algebra.symbols import Var, idx, IdxVar, Para
 from Solverz.symboli_algebra.functions import Slice
 from Solverz.variable.variables import Vars
@@ -61,7 +61,7 @@ class Equations:
                 # this is not fully initialize of Parameters, please use param_initializer
                 self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
             elif isinstance(symbol_, idx):
-                self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dtype=int)
+                self.PARAM[symbol_.name] = IdxParam(symbol_.name, value=symbol_.value)
 
         self.EQNs[eqn.name].derive_derivative()
 
@@ -185,7 +185,7 @@ class Equations:
         """
         return self.EQNs[eqn_name].derivatives[var_name].NUM_EQN(*args)
 
-    def parse_address(self, eqn_name, var_name, eqndiff, *xys):
+    def parse_address(self, eqn_name, var_name, eqndiff, t=None, *xys):
         var_idx = eqndiff.var_idx
         var_idx_func = eqndiff.var_idx_func
 
@@ -198,7 +198,7 @@ class Equations:
             variable_address = self.var_address.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
         elif isinstance(var_idx, slice):
             variable_address = self.var_address.v[var_name][
-                var_idx_func.NUM_EQN(*self.obtain_eqn_args(var_idx_func, *xys))]
+                var_idx_func.NUM_EQN(*self.obtain_eqn_args(var_idx_func, t, *xys))]
         elif isinstance(var_idx, Expr):
             args = self.obtain_eqn_args(var_idx_func, *xys)
             variable_address = self.var_address.v[var_name][var_idx_func.NUM_EQN(*args).reshape(-1, )]
@@ -209,7 +209,7 @@ class Equations:
 
         return equation_address, variable_address
 
-    def form_jac(self, gy, *xys):
+    def form_jac(self, gy, t=None, *xys):
 
         if self.matrix_container == 'cvxopt':
 
@@ -223,6 +223,7 @@ class Equations:
                 equation_address, variable_address = self.parse_address(eqn_name,
                                                                         var_name,
                                                                         eqndiff,
+                                                                        t,
                                                                         *xys)
 
                 if isinstance(value, (np.ndarray, csc_array)):
@@ -261,6 +262,7 @@ class Equations:
                 equation_address, variable_address = self.parse_address(eqn_name,
                                                                         var_name,
                                                                         eqndiff,
+                                                                        t,
                                                                         *xys)
 
                 if isinstance(value, (np.ndarray, csc_array)):
@@ -323,6 +325,24 @@ class AE(Equations):
         self.var_address = y.a
         self.vsize = y.total_size
 
+        # assign dim of derivatives, which is indispensable in Jac printer
+        gy = self.g_y(y)
+        for gy_tuple in gy:
+            eqn_name = gy_tuple[0]
+            var_name = gy_tuple[1]
+            eqndiff = gy_tuple[2]
+            value = gy_tuple[3]
+            if isinstance(value, (np.ndarray, csc_array)):
+                # We use coo_array here because by default when converting to CSR or CSC format,
+                # duplicate (i,j) entries will be summed together.
+                # This facilitates efficient construction of finite element matrices and the like.
+                if value.ndim == 2:  # matrix
+                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 2
+                elif value.ndim == 1:  # vector
+                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 1
+                else:  # np.dim ==0  scalar in np.ndarray
+                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
+
     def g(self, y: Vars, eqn: str = None) -> np.ndarray:
         """
 
@@ -375,7 +395,7 @@ class AE(Equations):
 
         gy = self.g_y(y)
 
-        return self.form_jac(gy, y)
+        return self.form_jac(gy, None, y)
 
     def __repr__(self):
         if not self.eqn_size:
@@ -385,6 +405,18 @@ class AE(Equations):
 
 
 class tAE(AE):
+
+    def __init__(self,
+                 eqn: Union[List[Eqn], Eqn],
+                 name: str = None,
+                 matrix_container='scipy'):
+        super().__init__(eqn, name, matrix_container)
+
+        dt = Para('dt')
+        t0 = Para('t0')
+        t = Var('t')
+        self.add_eqn(Eqn('eqn of time', t - t0 - dt))
+
     def obtain_eqn_args(self, eqn: Eqn, t=None, *xys: Vars) -> List[np.ndarray]:
         for y in xys:
             if 't' in y.var_list:
@@ -456,12 +488,31 @@ class DAE(Equations):
             self.var_address = combine_Address(x.a, y.a)
 
             for var_name in self.var_address.v.keys():
-                if not var_name in self.SYMBOLS:
+                if var_name not in self.SYMBOLS:
                     raise ValueError(f"DAE {self.name} has no variable {var_name}")
 
             self.vsize: int = self.var_address.total_size
         elif len(xys) > 2:
             raise ValueError("Accept at most two positional arguments!")
+
+        # assign dim of derivatives, which is indispensable in Jac printer
+        fg_xy = self.f_xy(0, *xys)
+        if len(self.g_list) > 0:
+            fg_xy.extend(self.g_xy(0, *xys))
+        for gy_tuple in fg_xy:
+            eqn_name = gy_tuple[0]
+            eqndiff = gy_tuple[2]
+            value = gy_tuple[3]
+            if isinstance(value, (np.ndarray, csc_array)):
+                # We use coo_array here because by default when converting to CSR or CSC format,
+                # duplicate (i,j) entries will be summed together.
+                # This facilitates efficient construction of finite element matrices and the like.
+                if value.ndim == 2:  # matrix
+                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 2
+                elif value.ndim == 1:  # vector
+                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 1
+                else:  # np.dim ==0  scalar in np.ndarray
+                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
 
     def F(self, t, *xys) -> np.ndarray:
         """
@@ -575,7 +626,7 @@ class DAE(Equations):
         if len(self.g_list) > 0:
             fg_xy.extend(self.g_xy(t, *xys))
 
-        return self.form_jac(fg_xy, *xys)
+        return self.form_jac(fg_xy, t, *xys)
 
     @property
     def M(self):
@@ -642,9 +693,6 @@ class DAE(Equations):
             trapezoidal_ae = tAE(name='trapezoidal_ae', eqn=[self.EQNs[ae] for ae in self.g_list])
 
             dt = Para('dt')
-            t0 = Para('t0')
-            t = Var('t')
-            trapezoidal_ae.add_eqn(Eqn('eqn of time', t - t0 - dt))
             for ode in self.f_list:
                 var_list = []
                 for symbol_ in list(self.EQNs[ode].RHS.free_symbols):
@@ -664,3 +712,7 @@ class DAE(Equations):
 
     def __repr__(self):
         return f"DAE: {self.name}"
+
+
+class PDAE(Equations):
+    pass
