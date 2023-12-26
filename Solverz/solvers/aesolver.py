@@ -5,6 +5,7 @@ from numpy import abs, max, min, sum, sqrt
 # from cvxopt import matrix
 
 from Solverz.equation.equations import AE
+from Solverz.numerical_interface.num_eqn import nAE
 from Solverz.numerical_interface.custom_function import solve
 from Solverz.variable.variables import Vars
 
@@ -19,6 +20,26 @@ def nr_method(eqn: AE,
         ite = ite + 1
         y = y - solve(eqn.j(y), df)
         df = eqn.g(y)
+        if ite >= 100:
+            print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
+            break
+    if not stats:
+        return y
+    else:
+        return y, ite
+
+
+def nr_method_numerical(eqn: nAE,
+                        y: np.ndarray,
+                        tol: float = 1e-8,
+                        stats=False):
+    p = eqn.p
+    df = eqn.g(y, p)
+    ite = 0
+    while max(abs(df)) > tol:
+        ite = ite + 1
+        y = y - solve(eqn.J(y, p), df)
+        df = eqn.g(y, p)
         if ite >= 100:
             print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
             break

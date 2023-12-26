@@ -1,7 +1,6 @@
 from functools import reduce
 
-from sympy import Symbol, Function, Number, S, sin, cos, Integer
-from sympy import exp as spexp
+from sympy import Symbol, Function, Number, S, Integer
 from sympy.core.function import ArgumentIndexError
 
 
@@ -169,6 +168,40 @@ class exp(Function):
         return self._numpycode(printer, **kwargs)
 
 
+class sin(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 1:
+            raise TypeError(f'Supports one operand while {len(args)} input!')
+
+    def fdiff(self, argindex=1):
+        return cos(*self.args)
+
+    def _numpycode(self, printer, **kwargs):
+        return r'sin(' + printer._print(self.args[0]) + r')'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class cos(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 1:
+            raise TypeError(f'Supports one operand while {len(args)} input!')
+
+    def fdiff(self, argindex=1):
+        return -sin(*self.args)
+
+    def _numpycode(self, printer, **kwargs):
+        return r'cos(' + printer._print(self.args[0]) + r')'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
 class minmod_flag(Function):
     """
     Different from `minmod`, minmod function outputs the position of args instead of the values of args.
@@ -215,6 +248,7 @@ class Sign(Function):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
+
 
 class zeros(Function):
     # print zeros(6,6) as zeros((6,6))

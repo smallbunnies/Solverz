@@ -207,7 +207,7 @@ class SolDict(Symbol):
 
 class IdxDict(Symbol):
     """
-    Basic class for Solverz indexed Symbols
+    Indexed Dicts
     """
 
     def __new__(cls, symbol, index):

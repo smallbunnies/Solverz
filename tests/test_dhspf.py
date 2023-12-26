@@ -93,13 +93,12 @@ sys_df = pd.read_excel('instances/4node3pipe_bench.xlsx',
                        header=None
                        )
 
-from Solverz.numerical_interface.num_eqn import print_g, print_J, Solverzlambdify, nAE, parse_p
-from Solverz.numerical_interface.custom_function import solve
+from Solverz.numerical_interface.code_printer import print_F, print_J, Solverzlambdify, parse_p
+from Solverz.numerical_interface.num_eqn import nAE, parse_ae_v
+from Solverz.solvers.aesolver import nr_method_numerical
 
-code_g = print_g(E)
+code_g = print_F(E)
 g = Solverzlambdify(code_g, 'F_', modules=['numpy'])
-
-
 g0 = E.g(y0)
 gv = g(0, y0.array, parse_p(E))
 
@@ -110,32 +109,9 @@ J = Solverzlambdify(code_J, 'J_', modules=[{'csc_array': csc_array}, 'numpy'])
 J0 = E.j(y0)
 Jv = J(0, y0.array, parse_p(E))
 
-
-def nr_method1(eqn: nAE,
-               y: np.ndarray,
-               p,
-               tol: float = 1e-8,
-               stats=False):
-    df = eqn.g(y, p)
-    ite = 0
-    while max(abs(df)) > tol:
-        ite = ite + 1
-        y = y - solve(eqn.J(y, p), df)
-        df = eqn.g(y, p)
-        if ite >= 100:
-            print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
-            break
-    if not stats:
-        return y
-    else:
-        return y, ite
-
-
-from Solverz.numerical_interface.num_eqn import nAE
-
-f1 = nAE(E.vsize, lambda z, p: g(0, z, p), lambda z, p: J(0, z, p), E.var_address)
-y1 = nr_method1(f1, as_Vars([m, mq, Ts, Tr, Touts, Toutr, phi]).array, parse_p(E))
-y1 = f1.parse_v(y1)
+nE = nAE(E.vsize, lambda z, p: g(0, z, p), lambda z, p: J(0, z, p), parse_p(E))
+y1 = nr_method_numerical(nE, y0.array)
+y1 = parse_ae_v(y1, E.var_address)
 
 
 def test_nr_method():
