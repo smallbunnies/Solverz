@@ -8,7 +8,7 @@ from sympy import Symbol, Expr, latex, Derivative, sympify, simplify
 from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
-from Solverz.symboli_algebra.symbols import Var, Para, IdxVar, idx, IdxPara
+from Solverz.symboli_algebra.symbols import Var, Para, IdxVar, idx, IdxPara, AliasVar, IdxAliasVar
 from Solverz.symboli_algebra.functions import Mat_Mul, Slice, switch
 from Solverz.symboli_algebra.matrix_calculus import MixedEquationDiff
 from Solverz.numerical_interface.custom_function import numerical_interface
@@ -40,9 +40,9 @@ class Eqn:
     def obtain_symbols(self) -> Dict[str, Symbol]:
         temp_dict = dict()
         for symbol_ in list((self.LHS - self.RHS).free_symbols):
-            if isinstance(symbol_, (Var, Para, idx)):
+            if isinstance(symbol_, (Var, Para, idx, AliasVar)):
                 temp_dict[symbol_.name] = symbol_
-            elif isinstance(symbol_, (IdxVar, IdxPara)):
+            elif isinstance(symbol_, (IdxVar, IdxPara, IdxAliasVar)):
                 temp_dict[symbol_.name0] = symbol_.symbol0
                 temp_dict.update(symbol_.SymInIndex)
 
@@ -272,15 +272,15 @@ class HyperbolicPde(Pde):
             dt = Para('dt')
             M = idx('M')
             u = self.diff_var
-            u0 = Para(u.name + '0')
+            u0 = AliasVar(u.name + '0')
 
             fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
             fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
-            fui1j = self.flux.subs([(a, Para(a.name + '0')[1:M]) for a in self.two_dim_var])
-            fuij = self.flux.subs([(a, Para(a.name + '0')[0:M - 1]) for a in self.two_dim_var])
+            fui1j = self.flux.subs([(a, AliasVar(a.name + '0')[1:M]) for a in self.two_dim_var])
+            fuij = self.flux.subs([(a, AliasVar(a.name + '0')[0:M - 1]) for a in self.two_dim_var])
 
             S = self.source.subs(
-                [(a, (a[1:M] + a[0:M - 1] + Para(a.name + '0')[1:M] + Para(a.name + '0')[0:M - 1]) / 4) for a in
+                [(a, (a[1:M] + a[0:M - 1] + AliasVar(a.name + '0')[1:M] + AliasVar(a.name + '0')[0:M - 1]) / 4) for a in
                  self.two_dim_var])
 
             ae = dx * (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) \
@@ -299,7 +299,7 @@ class HyperbolicPde(Pde):
                 dt = Para('dt')
                 M = idx('M')
                 u = self.diff_var
-                u0 = Para(u.name + '0')
+                u0 = AliasVar(u.name + '0')
 
                 fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
                 fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
@@ -314,7 +314,7 @@ class HyperbolicPde(Pde):
                 dt = Para('dt')
                 M = idx('M')
                 u = self.diff_var
-                u0 = Para(u.name + '0')
+                u0 = Var(u.name + '0')
 
                 fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
                 fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])

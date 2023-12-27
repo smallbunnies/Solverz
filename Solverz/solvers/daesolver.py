@@ -8,10 +8,13 @@ from numpy import abs, linalg
 from scipy.sparse import csc_array, linalg as sla
 
 from Solverz.equation.equations import DAE
-from Solverz.solvers.aesolver import nr_method, nr_method_numerical
+from Solverz.solvers.nlaesolver import nr_method, nr_method_numerical
 from Solverz.symboli_algebra.symbols import Var
 from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
 from Solverz.numerical_interface.num_eqn import nDAE, nAE
+from Solverz.solvers.stats import Stats
+from Solverz.solvers.option import Opt
+from Solverz.solvers.laesolver import lu_decomposition
 
 
 def implicit_trapezoid(dae: DAE,
@@ -616,7 +619,7 @@ def Rodas_numerical(dae: nDAE,
         rhs = dae.F(t, y0, dae.p) + rparam.g[0] * dfdt0
         stats.nfeval = stats.nfeval + 1
 
-        lu = sla.splu(M - dt * rparam.gamma * J)
+        lu = lu_decomposition(M - dt * rparam.gamma * J)
         stats.ndecomp = stats.ndecomp + 1
         K[:, 0] = lu.solve(rhs)
 
@@ -767,30 +770,6 @@ class Rodas_param:
             raise ValueError("Not implemented")
 
 
-class Opt:
-    def __init__(self,
-                 atol=1e-6,
-                 rtol=1e-3,
-                 f_savety=0.9,
-                 facmax=6,
-                 fac1=0.2,
-                 fac2=6,
-                 scheme='rodas',
-                 fix_h: bool = False,
-                 hinit=None,
-                 hmax=None):
-        self.atol = atol
-        self.rtol = rtol
-        self.f_savety = f_savety
-        self.facmax = facmax
-        self.fac1 = fac1
-        self.fac2 = fac2
-        self.fix_h = fix_h  # To force the step sizes to be invariant. This is not robust.
-        self.hinit = hinit
-        self.hmax = hmax
-        self.scheme = scheme
-
-
 def dfdt(dae, t, y):
     tscale = np.maximum(0.1 * np.abs(t), 1e-8)
     ddt = t + np.sqrt(np.spacing(1)) * tscale - t
@@ -805,16 +784,3 @@ def dfdt1(dae: nDAE, t, y):
     f0 = dae.F(t, y, dae.p)
     f1 = dae.F(t + ddt, y, dae.p)
     return (f1 - f0) / ddt
-
-
-class Stats:
-
-    def __init__(self, scheme):
-        self.scheme = scheme
-        self.nstep = 0
-        self.nfeval = 0
-        self.ndecomp = 0
-        self.nreject = 0
-
-    def __repr__(self):
-        return f"Scheme {self.scheme}, nstep: {self.nstep}, nfeval: {self.nfeval}, ndecomp: {self.ndecomp}, nreject: {self.nreject}."

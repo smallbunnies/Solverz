@@ -19,7 +19,8 @@ class Param:
                  trigger_var: str = None,
                  trigger_fun: Callable = None,
                  dim: int = 1,
-                 dtype=float
+                 dtype=float,
+                 sparse=False
                  ):
         self.name = name
         self.unit = unit
@@ -29,6 +30,7 @@ class Param:
         self.trigger_fun = trigger_fun
         self.dim = dim
         self.dtype = dtype
+        self.sparse = sparse
         self.__v = None
         self.v = value
 
@@ -42,7 +44,7 @@ class Param:
         if value is None:
             self.__v = None
         else:
-            self.__v = Array(value, dim=self.dim, dtype=self.dtype)
+            self.__v = Array(value, dim=self.dim, sparse=self.sparse, dtype=self.dtype)
 
     def get_v_t(self, t):
         return self.v
@@ -70,7 +72,8 @@ class IdxParam(Param):
                          trigger_var,
                          trigger_fun,
                          dim=1,
-                         dtype=int)
+                         dtype=int,
+                         sparse=False)
 
 
 class TimeSeriesParam(Param):
@@ -83,7 +86,8 @@ class TimeSeriesParam(Param):
                  info: Optional[str] = None,
                  value: Union[np.ndarray, list, Number] = None,
                  dim=1,
-                 dtype=float
+                 dtype=float,
+                 sparse=False
                  ):
         super().__init__(name,
                          unit,
@@ -93,7 +97,8 @@ class TimeSeriesParam(Param):
                          trigger_var=None,
                          trigger_fun=None,
                          dim=dim,
-                         dtype=dtype)
+                         dtype=dtype,
+                         sparse=sparse)
         self.v_series = Array(v_series, dim=1)
         self.v_series = np.append(self.v_series, np.array(self.v_series[-1]))
         self.time_series = Array(time_series, dim=1)

@@ -21,12 +21,33 @@ eqn3 = Eqn(name='pressure', eqn=Pi[0] - 50)
 eqn4 = Eqn(name='pressure1', eqn=Pi[3] - 1.3 * Pi[1])
 
 gas_flow = AE(eqn=[eqn1, eqn2, eqn3, eqn4])
-y = as_Vars([f, Pi])
+y0 = as_Vars([f, Pi])
 
-y = nr_method(gas_flow, y)
+y = nr_method(gas_flow, y0)
+
+from Solverz.numerical_interface.code_printer import print_F, print_J, Solverzlambdify
+from Solverz.numerical_interface.num_eqn import nAE, parse_ae_v, parse_p
+from Solverz.solvers.nlaesolver import nr_method_numerical
+
+code_g = print_F(gas_flow)
+g = Solverzlambdify(code_g, 'F_', modules=['numpy'])
+g0 = gas_flow.g(y0)
+gv = g(0, y0.array, parse_p(gas_flow))
+
+code_J = print_J(gas_flow)
+from scipy.sparse import csc_array
+
+J = Solverzlambdify(code_J, 'J_', modules=[{'csc_array': csc_array}, 'numpy'])
+J0 = gas_flow.j(y0)
+Jv = J(0, y0.array, parse_p(gas_flow))
+
+nE = nAE(gas_flow.vsize, lambda z, p: g(0, z, p), lambda z, p: J(0, z, p), parse_p(gas_flow))
+y1, stats = nr_method_numerical(nE, y0.array, stats=True)
+y1 = parse_ae_v(y1, gas_flow.var_address)
 
 
 def test_nr_method():
     bench = np.array([29.830799999999996, 4.809800000000001, 18.965799999999998,
                       18.965799999999998, 50.0, 40.816, 49.78269999999999, 53.06080000000001])
     assert np.max(abs((y.array.T - bench) / bench)) <= 1e-8
+    assert np.max(abs((y1.array.T - bench) / bench)) <= 1e-8

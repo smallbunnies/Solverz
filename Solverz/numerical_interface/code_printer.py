@@ -12,7 +12,7 @@ from sympy.utilities.lambdify import _import, _imp_namespace, _module_present, _
 from Solverz.equation.equations import Equations as SymEquations, AE as SymAE, tAE as SymtAE, DAE as SymDAE
 from Solverz.equation.eqn import EqnDiff, Eqn
 from Solverz.equation.param import TimeSeriesParam
-from Solverz.symboli_algebra.symbols import Var, idx, SolDict, Para
+from Solverz.symboli_algebra.symbols import Var, idx, SolDict, Para, AliasVar, idx
 from Solverz.symboli_algebra.functions import zeros, CSC_array, Arange
 from Solverz.auxiliary_service.address import Address
 from Solverz.variable.variables import Vars
@@ -82,25 +82,33 @@ def Solverzlambdify(funcstr, funcname, modules=None):
 
 def print_var(ae: SymEquations):
     var_declaration = []
-    y = Var('y_', internal_use=True)
-    for var_name in ae.var_address.v.keys():
-        var_address_range = ae.var_address.v[var_name]
-        if len(var_address_range.tolist()) > 1:
-            var_address = slice(var_address_range[0], var_address_range[-1])
-        else:
-            var_address = var_address_range.tolist()
-        var_declaration.extend([Assignment(ae.SYMBOLS[var_name], y[var_address])])
+    if hasattr(ae, 'nstep'):
+        nstep = ae.nstep
+    else:
+        nstep = 0
+    suffix = [''] + [f'{i}' for i in range(nstep)]
+    for i in suffix:
+        y = Var('y_' + i, internal_use=True)
+        for var_name in ae.var_address.v.keys():
+            var_address_range = ae.var_address.v[var_name]
+            if len(var_address_range.tolist()) > 1:
+                var_address = slice(var_address_range[0], var_address_range[-1])
+            else:
+                var_address = var_address_range.tolist()
+            var_declaration.extend([Assignment(Var(var_name + i), y[var_address])])
     return var_declaration
 
 
 def print_param(ae: SymEquations):
     param_declaration = []
     p = SolDict('p_')
-    for param_name, v in ae.PARAM.items():
-        if isinstance(ae.PARAM[param_name], TimeSeriesParam):
-            param_declaration.append(Assignment(Para(param_name), FunctionCall(f'p_["{param_name}"].get_v_t', 't')))
-        else:
-            param_declaration.append(Assignment(Para(param_name), p[param_name]))
+    for symbol_name, symbol in ae.SYMBOLS.items():
+        if isinstance(symbol, (Para, idx)):
+            if isinstance(ae.PARAM[symbol_name], TimeSeriesParam):
+                param_declaration.append(
+                    Assignment(Para(symbol_name), FunctionCall(f'p_["{symbol_name}"].get_v_t', 't')))
+            else:
+                param_declaration.append(Assignment(Para(symbol_name), p[symbol_name]))
     return param_declaration
 
 
@@ -174,9 +182,19 @@ def print_trigger(ae: SymEquations):
     return trigger_declaration
 
 
-def print_F(ae: SymEquations):
+def print_func_prototype(ae: SymEquations, func_name: str):
     t, y_, p_ = symbols('t y_ p_', real=True)
-    fp = FunctionPrototype(real, 'F_', [t, y_, p_])
+    xtra_args = []
+    if hasattr(ae, 'nstep'):
+        if ae.nstep > 0:
+            xtra_args.extend([symbols('y_' + f'{i}', real=True) for i in range(ae.nstep)])
+
+    fp = FunctionPrototype(real, func_name, [t, y_, p_] + xtra_args)
+    return fp
+
+
+def print_F(ae: SymEquations):
+    fp = print_func_prototype(ae, 'F_')
     body = []
     body.extend(print_var(ae))
     body.extend(print_param(ae))
@@ -185,12 +203,11 @@ def print_F(ae: SymEquations):
     temp = Var('F_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
-    return pycode(fd)
+    return pycode(fd, fully_qualified_modules=False)
 
 
 def print_J(ae: SymEquations):
-    t, y_, p_ = symbols('t y_ p_', real=True)
-    fp = FunctionPrototype(real, 'J_', [t, y_, p_])
+    fp = print_func_prototype(ae, 'J_')
     # initialize temp
     temp = Var('J_', internal_use=True)
     body = [Assignment(temp, zeros(ae.eqn_size, ae.vsize))]
@@ -198,24 +215,9 @@ def print_J(ae: SymEquations):
     body.extend(print_param(ae))
     body.extend(print_trigger(ae))
     body.extend(print_J_block(ae))
-    body.append(Return(CSC_array(temp)))
+    body.append(Return(temp))
     Jd = FunctionDefinition.from_FunctionPrototype(fp, body)
-    return pycode(Jd)
+    return pycode(Jd, fully_qualified_modules=False)
 
 
-def parse_p(ae: SymEquations):
-    p = dict()
-    for param_name, param in ae.PARAM.items():
-        if isinstance(param, TimeSeriesParam):
-            p.update({param_name: param})
-        else:
-            p.update({param_name: param.v})
-    return p
 
-
-def parse_trigger_fun(ae: SymEquations):
-    func = dict()
-    for triggered_var, trigger_var in ae.triggerable_quantity.items():
-        func.update({triggered_var + '_trigger_func': ae.PARAM[triggered_var].trigger_fun})
-
-    return func

@@ -6,7 +6,7 @@ from numpy import abs, max, min, sum, sqrt
 
 from Solverz.equation.equations import AE
 from Solverz.numerical_interface.num_eqn import nAE
-from Solverz.numerical_interface.custom_function import solve
+from Solverz.solvers.laesolver import solve
 from Solverz.variable.variables import Vars
 
 

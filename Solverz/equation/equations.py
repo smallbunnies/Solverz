@@ -12,7 +12,7 @@ from scipy.sparse import csc_array, coo_array
 
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
 from Solverz.equation.param import Param, IdxParam
-from Solverz.symboli_algebra.symbols import Var, idx, IdxVar, Para
+from Solverz.symboli_algebra.symbols import Var, idx, IdxVar, Para, AliasVar
 from Solverz.symboli_algebra.functions import Slice
 from Solverz.variable.variables import Vars
 from Solverz.auxiliary_service.address import Address, combine_Address
@@ -57,13 +57,16 @@ class Equations:
             self.f_list = self.f_list + [eqn.name]
 
         for symbol_ in eqn.SYMBOLS.values():
-            if isinstance(symbol_, Para):
+            if isinstance(symbol_, (Para, AliasVar)):
                 # this is not fully initialize of Parameters, please use param_initializer
                 self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
             elif isinstance(symbol_, idx):
                 self.PARAM[symbol_.name] = IdxParam(symbol_.name, value=symbol_.value)
 
         self.EQNs[eqn.name].derive_derivative()
+
+    def assign_eqn_var_address(self, *xys: Vars):
+        pass
 
     @property
     def eqn_size(self):
@@ -308,10 +311,12 @@ class AE(Equations):
         if len(self.f_list) > 0:
             raise ValueError(f'Ode found. This object should be DAE!')
 
-    def assign_eqn_var_address(self, y: Vars):
+    def assign_eqn_var_address(self, *xys: Vars):
         """
         ASSIGN ADDRESSES TO EQUATIONS
         """
+        y = xys[0]
+
         temp = 0
         for eqn_name in self.EQNs.keys():
             geval = self.g(y, eqn_name)
@@ -422,6 +427,18 @@ class tAE(AE):
             if 't' in y.var_list:
                 return super().obtain_eqn_args(eqn, y['t'], *xys)
         raise KeyError("Simulation time t undefined in AEs by discretizing DAE!")
+
+
+class FDAE(AE):
+
+    def __init__(self,
+                 eqn: Union[List[Eqn], Eqn],
+                 name: str = None,
+                 nstep: int = 0,
+                 matrix_container='scipy'):
+        super().__init__(eqn, name, matrix_container)
+
+        self.nstep = nstep
 
 
 class DAE(Equations):

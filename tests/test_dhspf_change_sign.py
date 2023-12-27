@@ -161,9 +161,9 @@ sys_df = pd.read_excel('instances/4node3pipe_change_sign_bench.xlsx',
                        header=None
                        )
 
-from Solverz.numerical_interface.num_eqn import nAE, parse_ae_v
-from Solverz.numerical_interface.code_printer import print_F, print_J, Solverzlambdify, parse_p, parse_trigger_fun
-from Solverz.solvers.aesolver import nr_method_numerical
+from Solverz.numerical_interface.num_eqn import nAE, parse_ae_v, parse_p, parse_trigger_fun
+from Solverz.numerical_interface.code_printer import print_F, print_J, Solverzlambdify
+from Solverz.solvers.nlaesolver import nr_method_numerical
 
 code_g = print_F(E)
 g = Solverzlambdify(code_g, 'F_', modules=[parse_trigger_fun(E), 'numpy'])
@@ -178,7 +178,7 @@ J0 = E.j(y0)
 Jv = J(0, y0.array, parse_p(E))
 
 f1 = nAE(E.vsize, lambda z, p: g(0, z, p), lambda z, p: J(0, z, p), parse_p(E))
-y1, ite1 = nr_method_numerical(f1, as_Vars([m, mq, Ts, Tr, Touts, Toutr, phi]).array, stats=True)
+y1, ite1 = nr_method_numerical(f1, y0.array, stats=True)
 y1 = parse_ae_v(y1, E.var_address)
 
 

@@ -5,6 +5,7 @@ from functools import reduce
 import numpy as np
 from numpy import linalg
 from scipy.sparse import diags, csc_array, linalg as sla
+
 # from cvxopt.umfpack import linsolve
 # from cvxopt import matrix, spmatrix
 
@@ -39,7 +40,7 @@ def Slice(*args):
 
 @implements_nfunc('ix_')
 def ix_(arg: np.ndarray):
-    return arg.reshape(-1,)
+    return arg.reshape(-1, )
 
 
 @implements_nfunc('Sign')
@@ -180,11 +181,3 @@ def linspace(start, end) -> np.ndarray:
 
     """
     return np.arange(start, end, dtype=int)[:, np.newaxis]
-
-
-def inv(mat: np.ndarray):
-    return linalg.inv(mat)
-
-
-def solve(A, b):
-    return sla.spsolve(A, b)

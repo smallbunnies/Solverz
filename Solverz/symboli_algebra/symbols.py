@@ -160,6 +160,11 @@ class Var(SolSymBasic):
         return IdxVar(self, index, self.dim)
 
 
+class AliasVar(SolSymBasic):
+    def __getitem__(self, index):
+        return IdxAliasVar(self, index, self.dim)
+
+
 class Para(SolSymBasic):
     def __getitem__(self, index):
         return IdxPara(self, index, self.dim)
@@ -179,6 +184,10 @@ class idx(SolSymBasic):
 
 
 class IdxVar(IdxSymBasic):
+    pass
+
+
+class IdxAliasVar(IdxSymBasic):
     pass
 
 

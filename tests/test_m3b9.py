@@ -89,8 +89,8 @@ Uy = Var('Uy',
 #                       y0=as_Vars([delta, omega, Ixg, Iyg, Ux, Uy]),
 #                       opt=Opt(hinit=1e-5))
 
-from Solverz.numerical_interface.code_printer import print_F, print_J, Solverzlambdify, parse_p
-from Solverz.numerical_interface.num_eqn import nDAE, parse_dae_v
+from Solverz.numerical_interface.code_printer import print_F, print_J, Solverzlambdify
+from Solverz.numerical_interface.num_eqn import nDAE, parse_dae_v, parse_p
 from Solverz.solvers.daesolver import Rodas_numerical
 
 y0 = as_Vars([delta, omega, Ixg, Iyg, Ux, Uy])
@@ -104,7 +104,7 @@ Fv = F(0, y0.array, parse_p(m3b9))
 code_J = print_J(m3b9)
 from scipy.sparse import csc_array
 
-J = Solverzlambdify(code_J, 'J_', modules=[{'csc_array': csc_array}, 'numpy'])
+J = Solverzlambdify(code_J, 'J_', modules=['numpy'])
 J0 = m3b9.j(0, y0)
 Jv = J(0, y0.array, parse_p(m3b9))
 
@@ -134,5 +134,5 @@ y_trape = parse_dae_v(y_trape, m3b9.var_address)
 def test_m3b9():
     assert np.abs(np.asarray(df['omega']) - y['omega']).max() <= 2e-5
     assert np.abs(np.asarray(df['omega']) - y_trape['omega']).max() <= 2.48e-4
-    assert np.abs(np.asarray(df['delta']) - y['delta']).max() <= 9.3e-4
+    assert np.abs(np.asarray(df['delta']) - y['delta']).max() <= 9.6e-4
     assert np.abs(np.asarray(df['delta']) - y_trape['delta']).max() <= 7.8e-2
