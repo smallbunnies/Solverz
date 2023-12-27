@@ -6,9 +6,10 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import sympy as sp
-from sympy import Expr, Mul, Add, S, Number, Integer, sign, Symbol
+from sympy import Expr, Mul, Add, S, Number, Integer, Symbol
 
-from Solverz.num.num_alg import Mat_Mul, IdxVar, IdxConst, IdxParam, Diag, transpose, Var_, Param_, Const_, Abs
+from Solverz.symboli_algebra.symbols import IdxVar, IdxPara, Var, Para
+from Solverz.symboli_algebra.functions import Mat_Mul, Diag, transpose, Abs, Sign
 
 
 class TMatrix:
@@ -238,9 +239,9 @@ def obtain_dim(expr) -> int:
 
     symbol_dict = dict()
     for symbol in list(expr.free_symbols):
-        if isinstance(symbol, (Var_, IdxVar)):
+        if isinstance(symbol, (Var, IdxVar)):
             symbol_dict[symbol] = np.ones((2, 1))
-        elif isinstance(symbol, (Const_, Param_, IdxConst, IdxParam)):
+        elif isinstance(symbol, (Para, IdxPara)):
             if symbol.dim == 2:
                 symbol_dict[symbol] = np.ones((2, 2))
             elif symbol.dim == 1:
@@ -261,9 +262,9 @@ def obtain_TExpr(expr: Expr, index: TensorIndex):
         Texpr = TMul(expr, index)
     elif isinstance(expr, Abs):
         Texpr = TAbs(expr, index)
-    elif isinstance(expr, (Var_, IdxVar)):
+    elif isinstance(expr, (Var, IdxVar)):
         Texpr = TVector(expr, index)
-    elif isinstance(expr, (Const_, Param_, IdxConst, IdxParam)):
+    elif isinstance(expr, (Para, IdxPara)):
         if expr.dim == 2:
             Texpr = TMatrix(expr, index)
         elif expr.dim == 1:
@@ -339,7 +340,7 @@ def TMul2Mul(x, y, index: List[TensorIndex, TensorIndex, TensorIndex]):
         return 0
     s1, s2, s3 = index[:]
     if s1 == TensorIndex(-1) or s2 == TensorIndex(-1):
-        return x*y
+        return x * y
     if len(s1.index) < 2:
         if len(s2.index) < 2:
             # i, j, ij
@@ -420,7 +421,7 @@ class TensorExpr:
                     s1 = derivatives[succ[0]][1]
                     s2 = index_s
                     Aprime = derivatives[succ[0]][0]
-                    fprimeA = sign(node.args[0])
+                    fprimeA = Sign(node.args[0])
                     s1s2 = TensorIndex(s1.index_value + s2.index_value)
 
                     derivatives[node] = (TMul2Mul(fprimeA, Aprime, [s1, s1s2, s1s2]),
@@ -452,4 +453,3 @@ def MixedEquationDiff(expr: Expr, symbol: Symbol):
 
     """
     return TensorExpr(expr).diff(symbol)
-

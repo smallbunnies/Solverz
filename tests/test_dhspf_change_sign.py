@@ -2,8 +2,7 @@ import pandas as pd
 import numpy as np
 from functools import partial
 
-from Solverz import Eqn, AE, nr_method, Vars, Var_, Param, continuous_nr, Param_, Const_, idx, Abs, transpose, exp, \
-    as_Vars, Mat_Mul
+from Solverz import Eqn, AE, nr_method, as_Vars, Var, Param, continuous_nr, Para, idx, Abs, exp, Mat_Mul
 
 # %% initialize variables and params
 sys_df = pd.read_excel('instances/4node3pipe_change_sign.xlsx',
@@ -71,38 +70,38 @@ i = idx(name='i', value=np.asarray(Node['type'][Node['type'] == 3].index))  # in
 l = idx(name='l', value=np.asarray(Node['type'][Node['type'] == 2].index))  # load nodes
 s = idx(name='s', value=np.asarray(Node['type'][Node['type'] == 1].index))  # non-balance source nodes
 r = idx(name='r', value=np.asarray(Node['type'][Node['type'] == 0].index))  # balance source nodes
-sl = idx(name='sl', value=np.concatenate([s, l]))
-rs = idx(name='rs', value=np.concatenate([r, s]))
-rsl = idx(name='rsl', value=np.concatenate([r, s, l]))
-li = idx(name='li', value=np.concatenate([l, i]))
-rsi = idx(name='rsi', value=np.concatenate([r, s, i]))
+sl = idx(name='sl', value=np.concatenate((s.value, l.value)))
+rs = idx(name='rs', value=np.concatenate((r.value, s.value)))
+rsl = idx(name='rsl', value=np.concatenate((r.value, s.value, l.value)))
+li = idx(name='li', value=np.concatenate((l.value, i.value)))
+rsi = idx(name='rsi', value=np.concatenate((r.value, s.value, i.value)))
 
-mL = Const_('mL', dim=2, value=np.asarray(sys_df['m_L']))
-K = Const_(name='K', value=np.asarray(sys_df['K']))
-phi_set = Const_(name='phi_set', value=np.asarray(sys_df['phi_set']))
+mL = Para('mL', dim=2, value=np.asarray(sys_df['m_L']))
+K = Para(name='K', value=np.asarray(sys_df['K']).reshape(-1, ))
+phi_set = Para(name='phi_set', value=np.asarray(sys_df['phi_set']).reshape(-1, ))
 
-Cp = Param_(name='Cp', value=np.asarray(sys_df['Cp']))
-L = Param_(name='L', value=np.asarray(sys_df['L']))
-coeff_lambda = Param_(name='coeff_lambda', value=np.asarray(sys_df['coeff_lambda']))
-Ta = Param_(name='Ta', value=np.asarray(sys_df['Ta']))
+Cp = Para(name='Cp', value=np.asarray(sys_df['Cp']).reshape(-1, ))
+L = Para(name='L', value=np.asarray(sys_df['L']).reshape(-1, ))
+coeff_lambda = Para(name='coeff_lambda', value=np.asarray(sys_df['coeff_lambda']).reshape(-1, ))
+Ta = Para(name='Ta', value=np.asarray(sys_df['Ta']).reshape(-1, ))
 f_node = sys_df['Pipe']['f_node']
 t_node = sys_df['Pipe']['t_node']
-V = Param_(name='V', dim=2, value=derive_incidence_matrix(f_node, t_node))
-Vp = Param_(name='Vp', dim=2, value=derive_v_plus(V.value))
-Vm = Param_(name='Vm', dim=2, value=derive_v_minus(V.value))
-f = idx(name='f', value=f_node)  # intermediate nodes
-t = idx(name='t', value=t_node)  # load nodes
+V = Para(name='V', dim=2, value=derive_incidence_matrix(f_node, t_node))
+Vp = Para(name='Vp', dim=2, value=derive_v_plus(V.value))
+Vm = Para(name='Vm', dim=2, value=derive_v_minus(V.value))
+f_node = idx(name='f_node', value=np.asarray(f_node).reshape(-1, ))  # intermediate nodes
+t_node = idx(name='t_node', value=np.asarray(t_node).reshape(-1, ))  # load nodes
 
-m = Var_(name='m', value=np.asarray(sys_df['var']['m']))
-mq = Var_(name='mq', value=np.asarray(sys_df['var']['mq']))
-Ts = Var_(name='Ts', value=np.asarray(sys_df['var']['Ts']))
-Tr = Var_(name='Tr', value=np.asarray(sys_df['var']['Tr']))
-Touts = Var_(name='Touts', value=np.asarray(sys_df['var']['Touts']))
-Toutr = Var_(name='Toutr', value=np.asarray(sys_df['var']['Toutr']))
-phi = Var_(name='phi', value=np.asarray(sys_df['var']['phi']))
+m = Var(name='m', value=np.asarray(sys_df['var']['m']))
+mq = Var(name='mq', value=np.asarray(sys_df['var']['mq']))
+Ts = Var(name='Ts', value=np.asarray(sys_df['var']['Ts']))
+Tr = Var(name='Tr', value=np.asarray(sys_df['var']['Tr']))
+Touts = Var(name='Touts', value=np.asarray(sys_df['var']['Touts']))
+Toutr = Var(name='Toutr', value=np.asarray(sys_df['var']['Toutr']))
+phi = Var(name='phi', value=np.asarray(sys_df['var']['phi']))
 
-E1 = Eqn(name='E1', eqn=(Ts[f] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Touts)
-E3 = Eqn(name='E3', eqn=(Tr[t] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Toutr)
+E1 = Eqn(name='E1', eqn=(Ts[f_node] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Touts)
+E3 = Eqn(name='E3', eqn=(Tr[t_node] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Toutr)
 E5 = Eqn(name='E5', eqn=Mat_Mul(V[rs, :], m) + mq[rs])
 E6 = Eqn(name='E6', eqn=Mat_Mul(V[l, :], m) - mq[l])
 E7 = Eqn(name='E7', eqn=Mat_Mul(V[i, :], m))
@@ -121,33 +120,35 @@ E.param_initializer('Vp', param=Param('Vp',
                                       value=Vp.value,
                                       triggerable=True,
                                       trigger_var='m',
-                                      trigger_fun=partial(v_p_reverse_pipe, V.value, m.value)
+                                      trigger_fun=partial(v_p_reverse_pipe, V.value, m.value),
+                                      dim=2
                                       ))
 
 E.param_initializer('Vm', param=Param('Vm',
                                       value=Vm.value,
                                       triggerable=True,
                                       trigger_var='m',
-                                      trigger_fun=partial(v_m_reverse_pipe, V.value, m.value)
+                                      trigger_fun=partial(v_m_reverse_pipe, V.value, m.value),
+                                      dim=2
                                       ))
 
-E.param_initializer('f', param=Param('f',
-                                     value=f.value,
-                                     triggerable=True,
-                                     trigger_var='m',
-                                     trigger_fun=partial(f_node_calculator,
-                                                         f.value, t.value, m.value),
-                                     dtype=int
-                                     ))
+E.param_initializer('f_node', param=Param('f_node',
+                                          value=f_node.value,
+                                          triggerable=True,
+                                          trigger_var='m',
+                                          trigger_fun=partial(f_node_calculator,
+                                                              f_node.value, t_node.value, m.value),
+                                          dtype=int
+                                          ))
 
-E.param_initializer('t', param=Param('t',
-                                     value=t.value,
-                                     triggerable=True,
-                                     trigger_var='m',
-                                     trigger_fun=partial(t_node_calculator,
-                                                         f.value, t.value, m.value),
-                                     dtype=int
-                                     ))
+E.param_initializer('t_node', param=Param('t_node',
+                                          value=t_node.value,
+                                          triggerable=True,
+                                          trigger_var='m',
+                                          trigger_fun=partial(t_node_calculator,
+                                                              f_node.value, t_node.value, m.value),
+                                          dtype=int
+                                          ))
 
 y0 = as_Vars([m, mq, Ts, Tr, Touts, Toutr, phi])
 
@@ -160,6 +161,26 @@ sys_df = pd.read_excel('instances/4node3pipe_change_sign_bench.xlsx',
                        header=None
                        )
 
+from Solverz.numerical_interface.num_eqn import nAE, parse_ae_v, parse_p, parse_trigger_fun
+from Solverz.numerical_interface.code_printer import print_F, print_J, Solverzlambdify
+from Solverz.solvers.nlaesolver import nr_method_numerical
+
+code_g = print_F(E)
+g = Solverzlambdify(code_g, 'F_', modules=[parse_trigger_fun(E), 'numpy'])
+g0 = E.g(y0)
+gv = g(0, y0.array, parse_p(E))
+
+code_J = print_J(E)
+from scipy.sparse import csc_array
+
+J = Solverzlambdify(code_J, 'J_', modules=[parse_trigger_fun(E), {'csc_array': csc_array}, 'numpy'])
+J0 = E.j(y0)
+Jv = J(0, y0.array, parse_p(E))
+
+f1 = nAE(E.vsize, lambda z, p: g(0, z, p), lambda z, p: J(0, z, p), parse_p(E))
+y1, ite1 = nr_method_numerical(f1, y0.array, stats=True)
+y1 = parse_ae_v(y1, E.var_address)
+
 
 def test_nr_method():
     for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
@@ -167,6 +188,9 @@ def test_nr_method():
         idx_nonzero = np.nonzero(y_nr[var_name])
         assert max(abs((y_nr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) /
                    np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, )) <= 1e-8
+        assert np.max(np.abs(gv - g0)) < 1e-15
+        assert np.max(np.abs(y_nr.array - y1.array)) < 5e-10
+        assert np.max(np.abs(Jv - J0)) < 1e-15
 
 
 def test_cnr_method():

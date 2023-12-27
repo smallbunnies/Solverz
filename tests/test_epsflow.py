@@ -1,14 +1,18 @@
-# from Solverz.equation.eqn import Eqn
-# from Solverz.param import Param
+# from Solverz import Eqn, idx, Var, Const_, Sum_, sin, cos
+
+# g = Const_('g', dim=2)
+# b = Const_('b', dim=2)
+# h = idx('h')
+# k = idx('k')
+# B = idx('B')
 #
-# Apq = Param(name='Apq')
-# Gpq = Param(name='Gpq')
-# Bpq = Param(name='Bpq')
-
-# E1 = Eqn(name='Active power', eqn='-Apq*p+Diagonal(Apq*e)*(Gpq*e-Bpq*f)')
-
-# E = Equations(E1,
-#               name='AC Power flow',
-#               param=[Apq, Bpq, Gpq])
-
-
+# v = Var('v')
+# theta = Var('theta')
+# p = Var('p')
+#
+# E1 = Eqn(name='Active power', eqn=v[h])
+#
+# # from sympy import Sum
+# # from sympy.abc import m
+# #
+# a = v[h] * Sum_(v[k] * (g[h, k] * cos(theta[h] - theta[k]) + b[h, k] * sin(theta[h] - theta[k])), (k, B, ))

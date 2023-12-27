@@ -2,20 +2,51 @@ from __future__ import annotations
 
 import numpy as np
 from numpy import abs, max, min, sum, sqrt
+# from cvxopt import matrix
 
 from Solverz.equation.equations import AE
-from Solverz.num.num_interface import inv
+from Solverz.numerical_interface.num_eqn import nAE
+from Solverz.solvers.laesolver import solve
 from Solverz.variable.variables import Vars
 
 
 def nr_method(eqn: AE,
               y: Vars,
-              tol: float = 1e-8):
+              tol: float = 1e-8,
+              stats=False):
     df = eqn.g(y)
+    ite = 0
     while max(abs(df)) > tol:
-        y = y - inv(eqn.j(y)) @ df
+        ite = ite + 1
+        y = y - solve(eqn.j(y), df)
         df = eqn.g(y)
-    return y
+        if ite >= 100:
+            print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
+            break
+    if not stats:
+        return y
+    else:
+        return y, ite
+
+
+def nr_method_numerical(eqn: nAE,
+                        y: np.ndarray,
+                        tol: float = 1e-8,
+                        stats=False):
+    p = eqn.p
+    df = eqn.g(y, p)
+    ite = 0
+    while max(abs(df)) > tol:
+        ite = ite + 1
+        y = y - solve(eqn.J(y, p), df)
+        df = eqn.g(y, p)
+        if ite >= 100:
+            print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
+            break
+    if not stats:
+        return y
+    else:
+        return y, ite
 
 
 def continuous_nr(eqn: AE,
@@ -24,7 +55,7 @@ def continuous_nr(eqn: AE,
                   dt=1,
                   hmax=1.7):
     def f(y) -> np.ndarray:
-        return -inv(eqn.j(y)) @ eqn.g(y)
+        return -solve(eqn.j(y), eqn.g(y))
 
     Pow = 1 / 5
     # c2, c3, c4, c5 = 1 / 5, 3 / 10, 4 / 5, 8 / 9 for non-autonomous equations
@@ -63,7 +94,8 @@ def continuous_nr(eqn: AE,
             # error control
             # error estimation
             err = dt * np.linalg.norm(
-                kE / np.maximum(np.maximum(abs(y.array), abs(ynew.array)).reshape(-1, ), threshold), np.Inf)
+                kE.reshape(-1, ) / np.maximum(np.maximum(abs(y.array), abs(ynew.array)).reshape(-1, ), threshold),
+                np.Inf)
             if err > rtol:  # failed step
                 if dt <= hmin:
                     raise ValueError(f'IntegrationTolNotMet step size: {dt} hmin: {hmin}')

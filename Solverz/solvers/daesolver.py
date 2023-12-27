@@ -5,63 +5,111 @@ from typing import Union, List
 import numpy as np
 import tqdm
 from numpy import abs, linalg
+from scipy.sparse import csc_array, linalg as sla
 
 from Solverz.equation.equations import DAE
-from Solverz.event import Event
-from Solverz.num.num_alg import AliasVar, X, Y, ComputeParam, F
-from Solverz.solvers.aesolver import nr_method
-from Solverz.variable.var import TimeVar
-from Solverz.variable.variables import TimeVars
-from Solverz.sas.sas_num import DTcache, DTvar, DTeqn
-from Solverz.solvers.aesolver import inv
+from Solverz.solvers.nlaesolver import nr_method, nr_method_numerical
+from Solverz.symboli_algebra.symbols import Var
+from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
+from Solverz.numerical_interface.num_eqn import nDAE, nAE
+from Solverz.solvers.stats import Stats
+from Solverz.solvers.option import Opt
+from Solverz.solvers.laesolver import lu_decomposition
 
 
 def implicit_trapezoid(dae: DAE,
-                       x: TimeVars,
+                       y0: Vars,
                        tspan: Union[List, np.ndarray],
                        dt,
-                       event: Event = None,
                        pbar=False):
-    X0 = AliasVar(X, '0')
-    Y0 = AliasVar(Y, '0')
-    t = ComputeParam('t')
-    t0 = ComputeParam('t0')
-    Dt = ComputeParam('Dt')
-    scheme = X - X0 - Dt / 2 * (F(X, Y, t) + F(X0, Y0, t0))
-    ae = dae.discretize(scheme)
-    
+    ae = dae.discretize(scheme=1)
+
+    stats = Stats(scheme='Trapezoidal')
+
     tspan = np.array(tspan)
     T_initial = tspan[0]
+    t = Var('t', 0)
+    y0 = combine_Vars(y0, as_Vars(t))
     T_end = tspan[-1]
-    i = 0
-    t = T_initial
+    nt = 0
+    tt = T_initial
 
-    xi1 = x[0]  # x_{i+1}
-    xi0 = xi1.derive_alias('0')  # x_{i}
+    y = TimeVars(y0, 10000)
+    T = np.zeros((10000,))
+    y0_alias = y0.derive_alias('0')
 
     if pbar:
         bar = tqdm.tqdm(total=T_end)
 
-    while abs(t - T_end) > abs(dt)/10:
-        ae.update_param('Dt', dt)
+    while abs(tt - T_end) > abs(dt) / 10:
+        ae.update_param('dt', dt)
+        ae.update_param(y0_alias)
 
-        if event:
-            ae.update_param(event, t)
+        y1, ite = nr_method(ae, y0, stats=True)
+        stats.ndecomp = stats.ndecomp + ite
+        stats.nfeval = stats.nfeval + ite
 
-        ae.update_param(xi0)
-        ae.update_param('t', t + dt)
-        ae.update_param('t0', t)
+        y0_alias.array[:] = y1.array[:]
 
-        xi1 = nr_method(ae, xi1)
-        xi0.array[:] = xi1.array
+        tt = tt + dt
+        nt = nt + 1
+        y[nt] = y1
+        T[nt] = tt
+        y0 = y1
 
-        x[i + 1] = xi1
-        if pbar:
-            bar.update(dt)
-        t = t + dt
-        i = i + 1
+    y = y[0:nt + 1]
+    T = T[0:nt + 1]
+    stats.nstep = nt
 
-    return x
+    return T, y, stats
+
+
+def implicit_trapezoid_numerical(dae: nDAE,
+                                 y0: np.ndarray,
+                                 tspan: Union[List, np.ndarray],
+                                 dt,
+                                 pbar=False):
+    stats = Stats(scheme='Trapezoidal')
+
+    tspan = np.array(tspan)
+    T_initial = tspan[0]
+    T_end = tspan[-1]
+    nt = 0
+    tt = T_initial
+    t0 = tt
+
+    y = np.zeros((10000, dae.v_size))
+    y[0, :] = y0
+    T = np.zeros((10000,))
+
+    if pbar:
+        bar = tqdm.tqdm(total=T_end)
+
+    p = dae.p
+    while abs(tt - T_end) > abs(dt) / 10:
+        My0 = dae.M @ y0
+        F0 = dae.F(t0, y0, p)
+        ae = nAE(dae.v_size,
+                 lambda y, p: dt / 2 * (dae.F(t0 + dt, y, p) + F0) - dae.M @ y + My0,
+                 lambda y, p: -dae.M + dt / 2 * dae.J(t0 + dt, y, p),
+                 p)
+
+        y1, ite = nr_method_numerical(ae, y0, stats=True)
+        stats.ndecomp = stats.ndecomp + ite
+        stats.nfeval = stats.nfeval + ite
+
+        tt = tt + dt
+        nt = nt + 1
+        y[nt] = y1
+        T[nt] = tt
+        y0 = y1
+        t0 = tt
+
+    y = y[0:nt + 1]
+    T = T[0:nt + 1]
+    stats.nstep = nt
+
+    return T, y, stats
 
 
 def sirk_ode(ode: DAE,
@@ -108,83 +156,6 @@ def sirk_ode(ode: DAE,
         # x[i + 1] = x[i] + b1 * k1 + b2 * k2 + b3 * k3
 
     return x
-
-
-def sirk_dae(dae: DAE,
-             x: TimeVars,
-             y: TimeVars,
-             T,
-             dt,
-             event: Event = None):
-    r = 0.572816
-    r21 = -2.34199281090742
-    r31 = -0.0273333497228473
-    r32 = 0.213811780334800
-    r41 = -0.259083734468120
-    r42 = -0.190595825778459
-    r43 = -0.228030947223683
-    a21 = 1.145632
-    a31 = 0.520920769237066
-    a32 = 0.134294177986617
-    a41 = 0.520920769237066
-    a42 = 0.134294177986617
-    a43 = 0
-    b1 = 0.324534692057929
-    b2 = 0.0490865790926829
-    b3 = 0
-    b4 = 0.626378728849388
-
-    # a21 = 1
-    # a31 = 1
-    # a32 = 0
-    # r21 = (1 - 6 * r) / 2
-    # r31 = (12 * r ** 2 - 6 * r - 1) / (3 * (1 - 2 * r))
-    # r32 = (12 * r ** 2 - 12 * r + 5) / (6 * (1 - 2 * r))
-    # b1 = 2 / 3
-    # b2 = 1 / 6
-    # b3 = 1 / 6
-
-    dae.assign_eqn_var_address(x[0], y[0])
-    n_v = dae.var_size
-    n_s = dae.state_num
-    block_I = np.zeros((n_v, n_v))
-    block_I[np.ix_(range(n_s), range(n_s))] = block_I[np.ix_(range(n_s), range(n_s))] + np.eye(n_s)
-
-    i = 0
-    t = 0
-
-    pbar = tqdm.tqdm(total=T)
-    while abs(t - T) > dt / 10:
-        if event:
-            dae.update_param(event, t)
-        x0 = x[i]
-        y0 = y[i]
-        J0 = dae.j(x0, y0)
-        J_inv = linalg.inv(block_I - dt * J0 * r) * dt
-        k1 = J_inv @ (np.concatenate((dae.f(x0, y0), dae.g(x0, y0)), axis=0))
-        k2 = J_inv @ (np.concatenate(
-            (dae.f(x0 + a21 * k1[0:n_s], y0 + a21 * k1[n_s:n_v]),
-             dae.g(x0 + a21 * k1[0:n_s], y0 + a21 * k1[n_s:n_v])), axis=0)
-                      + J0 @ (r21 * k1))
-        k3 = J_inv @ (np.concatenate((dae.f(x0 + a31 * k1[0:n_s] + a32 * k2[0:n_s],
-                                            y0 + a31 * k1[n_s:n_v] + a32 * k2[n_s:n_v]),
-                                      dae.g(x0 + a31 * k1[0:n_s] + a32 * k2[0:n_s],
-                                            y0 + a31 * k1[n_s:n_v] + a32 * k2[n_s:n_v])), axis=0) +
-                      J0 @ (r31 * k1 + r32 * k2))
-        k4 = J_inv @ (
-                np.concatenate(
-                    (dae.f(x0 + a41 * k1[0:n_s] + a42 * k2[0:n_s] + a43 * k3[0:n_s],
-                           y0 + a41 * k1[n_s:n_v] + a42 * k2[n_s:n_v] + a43 * k3[n_s:n_v]),
-                     dae.g(x0 + a41 * k1[0:n_s] + a42 * k2[0:n_s] + a43 * k3[0:n_s],
-                           y0 + a41 * k1[n_s:n_v] + a42 * k2[n_s:n_v] + a43 * k3[n_s:n_v])), axis=0) +
-                J0 @ (r41 * k1 + r42 * k2 + r43 * k3))
-        x[i + 1] = x0 + b1 * k1[0:n_s] + b2 * k2[0:n_s] + b3 * k3[0:n_s] + b4 * k4[0:n_s]
-        y[i + 1] = y0 + b1 * k1[n_s:n_v] + b2 * k2[n_s:n_v] + b3 * k3[n_s:n_v] + b4 * k4[n_s:n_v]
-
-        pbar.update(dt)
-        t = t + dt
-        i = i + 1
-    return x, y
 
 
 def euler(ode: DAE,
@@ -345,81 +316,471 @@ def nrtp45(tinterp: np.ndarray, t: float, y: np.ndarray, dt: float, k: np.ndarra
 def ode15s(ode: DAE,
            y: TimeVars,
            dt,
-           T,
-           event: Event = None):
+           T):
     pass
 
 
-def DTsolver(eqn: DTeqn, **args):
-    if 'x' not in args:
-        raise ValueError("No TimeVars input")
-    else:
-        x_: TimeVars = args['x']
-        K: int = args['K']
-        x = DTcache(x_, K)
-        xdt = DTvar(x)
-        if 'y' in args:
-            y_: TimeVars = args['y']
-            y = DTcache(y_, K)
-            x, y = eqn.lambdify(x, y)  # attach intermediate variables
-            ydt = DTvar(y)
-        else:
-            y = None
-            x, y = eqn.lambdify(x, y)  # attach intermediate variables
-            if y is not None:
-                ydt = DTvar(y)
+# def DTsolver(eqn: DTeqn, **args):
+#     if 'x' not in args:
+#         raise ValueError("No TimeVars input")
+#     else:
+#         x_: TimeVars = args['x']
+#         K: int = args['K']
+#         x = DTcache(x_, K)
+#         xdt = DTvar(x)
+#         if 'y' in args:
+#             y_: TimeVars = args['y']
+#             y = DTcache(y_, K)
+#             x, y = eqn.lambdify(x, y)  # attach intermediate variables
+#             ydt = DTvar(y)
+#         else:
+#             y = None
+#             x, y = eqn.lambdify(x, y)  # attach intermediate variables
+#             if y is not None:
+#                 ydt = DTvar(y)
+#
+#     dt = args['dt']
+#     dt_array = np.array([[dt ** i] for i in range(K + 1)])
+#     T = args['T']
+#     i = 0
+#     t = 0
+#     done = False
+#
+#     if y is None:
+#         # ode and no intermediate variables
+#         while not done:
+#             i = i + 1
+#             # Stretch the step if within 10% of T-t.
+#             if dt >= np.abs(T - t):
+#                 dt = T - t
+#                 done = True
+#
+#             # recursive calculation
+#             for k in range(0, K):
+#                 x[:, k + 1] = eqn.F(k)
+#
+#             # store the DTs
+#             xdt[i] = x
+#             # update initial values and the coefficient matrix
+#             x[:, 0] = x @ dt_array
+#
+#             t = t + dt
+#
+#         return xdt
+#
+#     else:
+#         while not done:
+#
+#             # Stretch the step if within 10% of T-t.
+#             if dt >= np.abs(T - t):
+#                 dt = T - t
+#                 done = True
+#             A = eqn.A()
+#             Ainv = inv(A)
+#             # recursive calculation
+#             for k in range(0, K):
+#                 x[k + 1, :] = eqn.F(k)
+#                 y[k + 1, :] = Ainv @ eqn.G(k + 1)  # Ainv matrix is cached
+#
+#             # store the DTs
+#             xdt[i] = x[:, :]
+#             ydt[i] = y[:, :]
+#             # update initial values and the coefficient matrix
+#
+#             x[0, :] = (x.T @ dt_array).reshape(-1, )
+#             y[0, :] = (y.T @ dt_array).reshape(-1, )
+#
+#             t = t + dt
+#             i = i + 1
+#         return xdt, ydt
 
-    dt = args['dt']
-    dt_array = np.array([[dt ** i] for i in range(K + 1)])
-    T = args['T']
-    i = 0
+
+def Rodas(dae: DAE,
+          tspan: Union[List, np.ndarray],
+          y0: Vars,
+          z0: Vars = None,
+          opt: Opt = None):
+    if opt is None:
+        opt = Opt()
+    stats = Stats(opt.scheme)
+
+    rparam = Rodas_param(opt.scheme)
+
+    if z0 is not None:
+        y0 = combine_Vars(y0, z0)
+
+    tspan = np.array(tspan)
+    tend = tspan[-1]
+    t0 = tspan[0]
+    if opt.hmax is None:
+        opt.hmax = np.abs(tend - t0)
+    nt = 0
     t = 0
-    done = False
+    hmin = 16 * np.spacing(t)
+    uround = np.spacing(1.0)
+    T = np.zeros((10001,))
+    T[nt] = t0
+    y = TimeVars(y0, 10000)
 
-    if y is None:
-        # ode and no intermediate variables
-        while not done:
-            i = i + 1
-            # Stretch the step if within 10% of T-t.
-            if dt >= np.abs(T - t):
-                dt = T - t
-                done = True
+    y0_alias = y0.derive_alias('0')
+    dae.update_param(y0_alias)
 
-            # recursive calculation
-            for k in range(0, K):
-                x[:, k + 1] = eqn.F(k)
+    dense_output = False
+    n_tspan = len(tspan)
+    told = t0
+    if n_tspan > 2:
+        dense_output = True
+        inext = 1
+        tnext = tspan[inext]
 
-            # store the DTs
-            xdt[i] = x
-            # update initial values and the coefficient matrix
-            x[:, 0] = x @ dt_array
-
-            t = t + dt
-
-        return xdt
-
+    # The initial step size
+    if opt.hinit is None:
+        dt = 1e-6 * (tend - t0)
     else:
-        while not done:
+        dt = opt.hinit
 
-            # Stretch the step if within 10% of T-t.
-            if dt >= np.abs(T - t):
-                dt = T - t
-                done = True
-            A = eqn.A()
-            Ainv = inv(A)
-            # recursive calculation
-            for k in range(0, K):
-                x[k + 1, :] = eqn.F(k)
-                y[k + 1, :] = Ainv @ eqn.G(k + 1)  # Ainv matrix is cached
+    dt = np.maximum(dt, hmin)
+    dt = np.minimum(dt, opt.hmax)
 
-            # store the DTs
-            xdt[i] = x[:, :]
-            ydt[i] = y[:, :]
-            # update initial values and the coefficient matrix
+    dae.assign_eqn_var_address(y0)
 
-            x[0, :] = (x.T @ dt_array).reshape(-1, )
-            y[0, :] = (y.T @ dt_array).reshape(-1, )
+    M = dae.M
 
+    done = False
+    reject = 0
+    while not done:
+        # step size too small
+        # pass
+
+        if np.abs(dt) < uround:
+            print(f"Error exit of RODAS at time = {t}: step size too small h = {dt}.\n")
+
+        # Stretch the step if within 10% of T-t.
+        if t + dt >= tend:
+            dt = tend - t
+        else:
+            dt = np.minimum(dt, 0.5 * (tend - t))
+
+        if opt.fix_h:
+            dt = opt.hinit
+
+        if done:
+            break
+        K = np.zeros((dae.vsize, rparam.s))
+
+        if reject == 0:
+            J = dae.j(t, y0)
+
+        dfdt0 = dt * dfdt(dae, t, y0)
+        rhs = dae.F(t, y0) + rparam.g[0] * dfdt0
+        stats.nfeval = stats.nfeval + 1
+
+        lu = sla.splu(M - dt * rparam.gamma * J)
+        stats.ndecomp = stats.ndecomp + 1
+        K[:, 0] = lu.solve(rhs)
+
+        for j in range(1, rparam.s):
+            sum_1 = K @ rparam.alpha[:, j]
+            sum_2 = K @ rparam.gamma_tilde[:, j]
+            y1 = y0 + dt * sum_1
+
+            rhs = dae.F(t + dt * rparam.a[j], y1) + M @ sum_2 + rparam.g[j] * dfdt0
+            stats.nfeval = stats.nfeval + 1
+            sol = lu.solve(rhs)
+            K[:, j] = sol - sum_2
+
+        sum_1 = K @ (dt * rparam.b)
+        ynew = y0 + sum_1
+        if not opt.fix_h:
+            sum_2 = K @ (dt * rparam.bd)
+            SK = (opt.atol + opt.rtol * abs(ynew)).reshape((-1,))
+            err = np.max(np.abs((sum_1 - sum_2) / SK))
+            if np.any(np.isinf(ynew)) or np.any(np.isnan(ynew)):
+                err = 1.0e6
+                print('Warning Rodas: NaN or Inf occurs.')
+            err = np.maximum(err, 1.0e-6)
+            fac = opt.f_savety / (err ** (1 / rparam.pord))
+            fac = np.minimum(opt.facmax, np.maximum(opt.fac1, fac))
+            dtnew = dt * fac
+        else:
+            err = 1.0
+            dtnew = dt
+
+        if err <= 1.0:
+            reject = 0
+            told = t
             t = t + dt
-            i = i + 1
-        return xdt, ydt
+            stats.nstep = stats.nstep + 1
+
+            if dense_output:  # dense_output
+                while t >= tnext > told:
+                    tau = (tnext - told) / dt
+                    ynext = y0 + tau * dt * K @ (rparam.b + (tau - 1) * (rparam.c + tau * (rparam.d + tau * rparam.e)))
+                    nt = nt + 1
+                    T[nt] = tnext
+                    y[nt] = ynext
+                    inext = inext + 1
+                    if inext <= n_tspan - 1:
+                        tnext = tspan[inext]
+                    else:
+                        tnext = tend + dt
+            else:
+                nt = nt + 1
+                T[nt] = t
+                y[nt] = ynew
+
+            if np.abs(tend - t) < uround:
+                done = True
+            y0 = ynew
+            opt.facmax = opt.fac2
+            y0_alias.array[:] = y0.array[:]
+            dae.update_param(y0_alias)
+
+        else:
+            reject = reject + 1
+            stats.nreject = stats.nreject + 1
+            opt.facmax = 1
+        dt = np.min([opt.hmax, np.max([hmin, dtnew])])
+
+    T = T[0:nt + 1]
+    y = y[0:nt + 1]
+    return T, y, stats
+
+
+def Rodas_numerical(dae: nDAE,
+                    tspan: Union[List, np.ndarray],
+                    y0: np.ndarray,
+                    opt: Opt = None):
+    if opt is None:
+        opt = Opt()
+    stats = Stats(opt.scheme)
+
+    rparam = Rodas_param(opt.scheme)
+
+    tspan = np.array(tspan)
+    tend = tspan[-1]
+    t0 = tspan[0]
+    if opt.hmax is None:
+        opt.hmax = np.abs(tend - t0)
+    nt = 0
+    t = 0
+    hmin = 16 * np.spacing(t)
+    uround = np.spacing(1.0)
+    T = np.zeros((10001,))
+    T[nt] = t0
+    y = np.zeros((10000, dae.v_size))
+    y[0, :] = y0
+
+    dense_output = False
+    n_tspan = len(tspan)
+    told = t0
+    if n_tspan > 2:
+        dense_output = True
+        inext = 1
+        tnext = tspan[inext]
+
+    # The initial step size
+    if opt.hinit is None:
+        dt = 1e-6 * (tend - t0)
+    else:
+        dt = opt.hinit
+
+    dt = np.maximum(dt, hmin)
+    dt = np.minimum(dt, opt.hmax)
+
+    M = dae.M
+
+    done = False
+    reject = 0
+    while not done:
+        # step size too small
+        # pass
+
+        if np.abs(dt) < uround:
+            print(f"Error exit of RODAS at time = {t}: step size too small h = {dt}.\n")
+
+        # Stretch the step if within 10% of T-t.
+        if t + dt >= tend:
+            dt = tend - t
+        else:
+            dt = np.minimum(dt, 0.5 * (tend - t))
+
+        if opt.fix_h:
+            dt = opt.hinit
+
+        if done:
+            break
+        K = np.zeros((dae.v_size, rparam.s))
+
+        if reject == 0:
+            J = dae.J(t, y0, dae.p)
+
+        dfdt0 = dt * dfdt1(dae, t, y0)
+        rhs = dae.F(t, y0, dae.p) + rparam.g[0] * dfdt0
+        stats.nfeval = stats.nfeval + 1
+
+        lu = lu_decomposition(M - dt * rparam.gamma * J)
+        stats.ndecomp = stats.ndecomp + 1
+        K[:, 0] = lu.solve(rhs)
+
+        for j in range(1, rparam.s):
+            sum_1 = K @ rparam.alpha[:, j]
+            sum_2 = K @ rparam.gamma_tilde[:, j]
+            y1 = y0 + dt * sum_1
+
+            rhs = dae.F(t + dt * rparam.a[j], y1, dae.p) + M @ sum_2 + rparam.g[j] * dfdt0
+            stats.nfeval = stats.nfeval + 1
+            sol = lu.solve(rhs)
+            K[:, j] = sol - sum_2
+
+        sum_1 = K @ (dt * rparam.b)
+        ynew = y0 + sum_1
+        if not opt.fix_h:
+            sum_2 = K @ (dt * rparam.bd)
+            SK = (opt.atol + opt.rtol * abs(ynew)).reshape((-1,))
+            err = np.max(np.abs((sum_1 - sum_2) / SK))
+            if np.any(np.isinf(ynew)) or np.any(np.isnan(ynew)):
+                err = 1.0e6
+                print('Warning Rodas: NaN or Inf occurs.')
+            err = np.maximum(err, 1.0e-6)
+            fac = opt.f_savety / (err ** (1 / rparam.pord))
+            fac = np.minimum(opt.facmax, np.maximum(opt.fac1, fac))
+            dtnew = dt * fac
+        else:
+            err = 1.0
+            dtnew = dt
+
+        if err <= 1.0:
+            reject = 0
+            told = t
+            t = t + dt
+            stats.nstep = stats.nstep + 1
+
+            if dense_output:  # dense_output
+                while t >= tnext > told:
+                    tau = (tnext - told) / dt
+                    ynext = y0 + tau * dt * K @ (rparam.b + (tau - 1) * (rparam.c + tau * (rparam.d + tau * rparam.e)))
+                    nt = nt + 1
+                    T[nt] = tnext
+                    y[nt] = ynext
+                    inext = inext + 1
+                    if inext <= n_tspan - 1:
+                        tnext = tspan[inext]
+                    else:
+                        tnext = tend + dt
+            else:
+                nt = nt + 1
+                T[nt] = t
+                y[nt] = ynew
+
+            if np.abs(tend - t) < uround:
+                done = True
+            y0 = ynew
+            opt.facmax = opt.fac2
+
+        else:
+            reject = reject + 1
+            stats.nreject = stats.nreject + 1
+            opt.facmax = 1
+        dt = np.min([opt.hmax, np.max([hmin, dtnew])])
+
+    T = T[0:nt + 1]
+    y = y[0:nt + 1]
+    return T, y, stats
+
+
+class Rodas_param:
+
+    def __init__(self,
+                 scheme: str = 'rodas'):
+        if scheme == 'rodas':
+            self.scheme = 'rodas'
+            self.s = 6
+            self.pord = 4
+            self.alpha = np.zeros((self.s, self.s))
+            self.beta = np.zeros((self.s, self.s))
+            self.g = np.zeros((self.s, 1))
+            self.gamma = 0.25
+            self.alpha[1, 0] = 3.860000000000000e-01
+            self.alpha[2, 0:2] = [1.460747075254185e-01, 6.392529247458190e-02]
+            self.alpha[3, 0:3] = [-3.308115036677222e-01, 7.111510251682822e-01, 2.496604784994390e-01]
+            self.alpha[4, 0:4] = [-4.552557186318003e+00, 1.710181363241323e+00, 4.014347332103149e+00,
+                                  -1.719715090264703e-01]
+            self.alpha[5, 0:5] = [2.428633765466977e+00, -3.827487337647808e-01, -1.855720330929572e+00,
+                                  5.598352992273752e-01,
+                                  2.499999999999995e-01]
+            self.beta[1, 0] = 3.170000000000250e-02
+            self.beta[2, 0:2] = [1.247220225724355e-02, 5.102779774275723e-02]
+            self.beta[3, 0:3] = [1.196037669338736e+00, 1.774947364178279e-01, -1.029732405756564e+00]
+            self.beta[4, 0:4] = [2.428633765466977e+00, -3.827487337647810e-01, -1.855720330929572e+00,
+                                 5.598352992273752e-01]
+            self.beta[5, 0:5] = [3.484442712860512e-01, 2.130136219118989e-01, -1.541025326623184e-01,
+                                 4.713207793914960e-01,
+                                 -1.286761399271284e-01]
+            self.b = np.zeros((6,))
+            self.b[0:5] = self.beta[5, 0:5]
+            self.b[5] = self.gamma
+            self.bd = np.zeros((6,))
+            self.bd[0:4] = self.beta[4, 0:4]
+            self.bd[4] = self.gamma
+            self.c = np.array([-4.786970949443344e+00, -6.966969867338157e-01, 4.491962205414260e+00,
+                               1.247990161586704e+00, -2.562844308238056e-01, 0])
+            self.d = np.array([1.274202171603216e+01, -1.894421984691950e+00, -1.113020959269748e+01,
+                               -1.365987420071593e+00, 1.648597281428871e+00, 0])
+            self.e = np.zeros((6,))
+            self.gamma_tilde = self.beta - self.alpha
+            self.a = np.sum(self.alpha, axis=1)
+            self.g = np.sum(self.gamma_tilde, axis=1) + self.gamma
+            self.gamma_tilde = self.gamma_tilde / self.gamma
+            self.alpha = self.alpha.T
+            self.gamma_tilde = self.gamma_tilde.T
+
+        elif scheme == 'rodasp':
+            pass
+            # self.s = 6
+            # self.pord = 4
+            # self.alpha = np.zeros((s, s))
+            # beta = np.zeros((s, s))
+            # gamma = 0.25
+            # alpha[1, 0] = 0.75
+            # alpha[2, 0:2] = [0.0861204008141522, 0.123879599185848]
+            # alpha[3, 0:3] = [0.774934535507324, 0.149265154950868, -0.294199690458192]
+            # alpha[4, 0:4] = [5.30874668264614, 1.33089214003727, -5.37413781165556, -0.265501011027850]
+            # alpha[5, 0:5] = [-1.76443764877448, -0.474756557206303, 2.36969184691580, 0.619502359064983,
+            #                  0.250000000000000]
+            # beta[1, 0] = 0.0
+            # beta[2, 0:2] = [-0.0493920000000000, -0.0141120000000000]
+            # beta[3, 0:3] = [-0.482049469387756, -0.100879555555556, 0.926729024943312]
+            # beta[4, 0:4] = [-1.76443764877448, -0.474756557206303, 2.36969184691580, 0.619502359064983]
+            # beta[5, 0:5] = [-0.0803683707891135, -0.0564906135924476, 0.488285630042799, 0.505716211481619,
+            #                 -0.107142857142857]
+            # b = np.zeros((6,))
+            # b[0:5] = beta[5, 0:5]
+            # b[5] = gamma
+            # bd = np.zeros((6,))
+            # bd[0:4] = beta[4, 0:4]
+            # bd[4] = gamma
+            # # c
+            # # d
+            # gamma_tilde = beta - alpha
+            # gamma_tilde = gamma_tilde / gamma
+            # alpha = alpha.T
+            # gamma_tilde = gamma_tilde.T
+        else:
+            raise ValueError("Not implemented")
+
+
+def dfdt(dae, t, y):
+    tscale = np.maximum(0.1 * np.abs(t), 1e-8)
+    ddt = t + np.sqrt(np.spacing(1)) * tscale - t
+    f0 = dae.F(t, y)
+    f1 = dae.F(t + ddt, y)
+    return (f1 - f0) / ddt
+
+
+def dfdt1(dae: nDAE, t, y):
+    tscale = np.maximum(0.1 * np.abs(t), 1e-8)
+    ddt = t + np.sqrt(np.spacing(1)) * tscale - t
+    f0 = dae.F(t, y, dae.p)
+    f1 = dae.F(t + ddt, y, dae.p)
+    return (f1 - f0) / ddt

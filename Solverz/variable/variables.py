@@ -2,92 +2,110 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Union, List, Dict
+import warnings
 
 import numpy as np
 
-from Solverz.variable.var import Var, TimeVar
-from Solverz.num.num_alg import Var_
-from Solverz.auxiliary import Address
+from Solverz.symboli_algebra.symbols import Var
+from Solverz.auxiliary_service.address import Address, combine_Address
+from Solverz.numerical_interface.Array import Array
 
 
-def as_Vars(var_s: Union[Var_, List[Var_]]):
-    if isinstance(var_s, Var_):
-        var_s = [var_s]
-    return Vars([Var(var_.name, value=var_.value) for var_ in var_s])
+def as_Vars(var: Union[Var, List[Var]]):
+    var = [var] if isinstance(var, Var) else var
+    a = Address()
+    temp = 0
+    for var_ in var:
+        if var_.initialized:
+            a.add(var_.name, var_.value.shape[0])
+        else:
+            warnings.warn(f"Variable {var_.name} not initialized, set to zero")
+            a.add(var_.name, 1)
+        temp = temp + a.size[var_.name]
+
+    array = np.zeros((a.total_size, ))
+    for var_ in var:
+        if var_.initialized:
+            array[a[var_.name]] = var_.value
+        else:
+            array[a[var_.name]] = 0
+
+    return Vars(a, array)
 
 
 class VarsBasic:
 
-    def __init__(self,
-                 var: Union[List[Var], Var]):
-
-        if isinstance(var, Var):
-            var = [var]
-
-        self.v: Dict[str, np.ndarray] = {}
-        self.var_size: Dict[str, int] = {}
+    def __init__(self):
         self.a: Address = Address()
-
-        temp = 0
-        for var_ in var:
-            self.v[var_.name] = var_.v
-            self.var_size[var_.name] = var_.v.shape[0]
-            self.a.add(var_.name, temp, temp + self.var_size[var_.name] - 1)
-            temp = temp + self.var_size[var_.name]
-
         self.array = None
-
-    def link_var_and_array(self):
-        pass
 
     def __array__(self):
         return self.array
 
     @property
     def total_size(self):
-        return np.sum(list(self.var_size.values()))
+        return self.a.total_size
+
+    @property
+    def var_size(self) -> Dict[str, int]:
+        return self.a.size
+
+    @property
+    def var_list(self):
+        return list(self.a.v.keys())
+
+
+def combine_Vars(vars1: Vars, vars2: Vars):
+    a = combine_Address(vars1.a, vars2.a)
+    array = np.concatenate([vars1.array, vars2.array], axis=0)
+    return Vars(a, array)
 
 
 class Vars(VarsBasic):
 
     def __init__(self,
-                 var: Union[List[Var], Var]):
-        super().__init__(var)
-        self.link_var_and_array()
+                 a: Address,
+                 array: np.ndarray):
+        super().__init__()
+        self.a = a
+        array = Array(array, dim=1)
+        if array.shape[0] != self.a.total_size:
+            raise ValueError("Unequal address size and array size!")
+        else:
+            self.array = array
 
-    def link_var_and_array(self):
-        self.array = np.zeros((self.total_size, 1))
-        for var_name in self.var_size.keys():
-            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0:] = self.v[var_name]
-            self.v[var_name] = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, 0:]
-
-    def __getitem__(self, item):
-        return self.v[item]
+    def __getitem__(self, var_name: str):
+        return self.array[self.a[var_name]]
 
     def __setitem__(self, key, value):
-        if key in self.v:
-            self.v[key] = value
+        if key in self.var_list:
+            temp = Array(value, dim=1)
+            if temp.shape[0] == self.array[self.a[key]].shape[0]:
+                self.array[self.a[key]] = temp
+            else:
+                raise ValueError(f'Incompatible input array shape!')
         else:
             raise ValueError(f'There is no variable {key}!')
 
     def __repr__(self):
-        return f'variables {list(self.v.keys())}'
+        return f'Variables (size {self.total_size}) {list(self.var_list)}'
 
     def __mul__(self, other: Union[int, float, Vars]) -> Vars:
         new_vars = deepcopy(self)
-        new_vars.link_var_and_array()
         if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = new_vars.array * other
             return new_vars
         elif isinstance(other, Vars):
-            new_vars.array[:] = new_vars.array * other.array
-            return new_vars
+            if self.a == other.a:
+                new_vars.array[:] = new_vars.array * other.array
+                return new_vars
+            else:
+                raise ValueError('Cannot multiply Vars object by another one with different variables!')
         else:
             raise TypeError(f'Input type {type(other)} invalid')
 
     def __rmul__(self, other: Union[int, float, Vars]) -> Vars:
         new_vars = deepcopy(self)
-        new_vars.link_var_and_array()
         if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = other * new_vars.array
             return new_vars
@@ -98,24 +116,15 @@ class Vars(VarsBasic):
             raise TypeError(f'Input type {type(other)} invalid')
 
     def __add__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
-        new_vars = deepcopy(self)
-        new_vars.link_var_and_array()
         if isinstance(other, int) or isinstance(other, float):
-            new_vars.array[:] = new_vars.array + other
-            return new_vars
+            return Vars(self.a, self.array+other)
         elif isinstance(other, Vars):
-            new_vars.array[:] = new_vars.array + other.array
-            return new_vars
+            return Vars(self.a, self.array+other.array)
         elif isinstance(other, np.ndarray):
-            if new_vars.total_size != other.reshape(-1, ).shape[0]:
-                raise ValueError('Incompatible array size')
-            else:
-                new_vars.array[:] = new_vars.array + other.reshape(-1, 1)
-                return new_vars
+            return Vars(self.a, self.array+other)
 
     def __radd__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
         new_vars = deepcopy(self)
-        new_vars.link_var_and_array()
         if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = other + new_vars.array
             return new_vars
@@ -126,12 +135,11 @@ class Vars(VarsBasic):
             if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = other.reshape(-1, 1) + new_vars.array
+                new_vars.array[:] = other.reshape(-1, ) + new_vars.array
                 return new_vars
 
     def __sub__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
         new_vars = deepcopy(self)
-        new_vars.link_var_and_array()
         if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = new_vars.array - other
             return new_vars
@@ -142,12 +150,11 @@ class Vars(VarsBasic):
             if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = new_vars.array - other.reshape(-1, 1)
+                new_vars.array[:] = new_vars.array - other.reshape(-1, )
                 return new_vars
 
     def __rsub__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
         new_vars = deepcopy(self)
-        new_vars.link_var_and_array()
         if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = other - new_vars.array
             return new_vars
@@ -158,12 +165,11 @@ class Vars(VarsBasic):
             if new_vars.total_size != other.reshape(-1, ).shape[0]:
                 raise ValueError('Incompatible array size')
             else:
-                new_vars.array[:] = other.reshape(-1, 1) - new_vars.array
+                new_vars.array[:] = other.reshape(-1, ) - new_vars.array
                 return new_vars
 
     def __truediv__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
         new_vars = deepcopy(self)
-        new_vars.link_var_and_array()
         if isinstance(other, int) or isinstance(other, float):
             new_vars.array[:] = new_vars.array / other
             return new_vars
@@ -177,50 +183,39 @@ class Vars(VarsBasic):
                 new_vars.array[:] = new_vars.array / other.reshape(-1, )
                 return new_vars
 
+    def __rtruediv__(self, other: Union[int, float, Vars, np.ndarray]) -> Vars:
+        new_vars = deepcopy(self)
+        if isinstance(other, int) or isinstance(other, float):
+            new_vars.array[:] = other / new_vars.array
+            return new_vars
+        elif isinstance(other, Vars):
+            new_vars.array[:] = other.array / new_vars.array
+            return new_vars
+        elif isinstance(other, np.ndarray):
+            if new_vars.total_size != other.reshape(-1, ).shape[0]:
+                raise ValueError('Incompatible array size')
+            else:
+                new_vars.array[:] = other.reshape(-1, ) / new_vars.array
+                return new_vars
+
     def derive_alias(self, suffix: str):
-        """
-        Derive a new Vars object with names of variables altered
-        :return:
-        """
-        var_ = []
-        for var_name in self.var_size.keys():
-            var_ = [*var_, Var(var_name + suffix, value=self.v[var_name])]
-        return Vars(var_)
+
+        return Vars(self.a.derive_alias(suffix), self.array)
 
 
 class TimeVars(VarsBasic):
 
     def __init__(self,
-                 time_var: Union[List[TimeVar], TimeVar],
-                 length: int = 100
+                 Vars_: Vars,
+                 length: int = 1001
                  ):
 
-        if not isinstance(time_var, list):
-            time_var = [time_var]
+        super().__init__()
 
-        var = []
+        self.a = Vars_.a
 
-        for time_var_ in time_var:
-            var = [*var, Var(name=time_var_.name, value=time_var_.v0)]
-
-        super().__init__(var)
-        self.len = length
-
-        for time_var_ in time_var:
-            if time_var_.array.ndim == 1:
-                self.v[time_var_.name] = np.zeros((1, self.len))
-                self.v[time_var_.name][0, 0:time_var_.array.shape[0]] = time_var_.array
-            else:
-                self.v[time_var_.name] = np.zeros((self.var_size[time_var_.name], self.len))
-                self.v[time_var_.name][0:self.var_size[time_var_.name], 0:time_var_.array.shape[1]] = time_var_.array
-
-        self.link_var_and_array()
-
-    def link_var_and_array(self):
-        self.array = np.zeros((self.total_size, self.len))
-        for var_name in self.var_size.keys():
-            self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, :] = self.v[var_name]
-            self.v[var_name] = self.array[self.a[var_name][0]:self.a[var_name][-1] + 1, :]
+        self.array = np.zeros((length, self.total_size))
+        self.array[0, :] = Vars_.array
 
     def __getitem__(self, item):
         """
@@ -234,19 +229,13 @@ class TimeVars(VarsBasic):
             if item > self.len:
                 raise ValueError(f'Exceed maximum indices of Time-series Variables')
             else:
-                temp_vars: List[Var] = []
-                for var_name in self.var_size.keys():
-                    temp_vars = [*temp_vars, Var(var_name, value=self.v[var_name][:, item])]
-                return Vars(temp_vars)
+                return Vars(self.a, self.array[item, 0:])
         elif isinstance(item, str):
-            return self.v[item]
+            return self.array[:, self.a[item]]
         elif isinstance(item, slice):
-            time_var = []
-            for name in self.var_size.keys():
-                time_var = [*time_var,
-                            TimeVar(name=name, value=self.v[name][:, 0:item.stop].reshape((-1, item.stop - item.start)),
-                                    length=item.stop - item.start)]
-            return TimeVars(time_var, length=item.stop - item.start)
+            temp = TimeVars(self[item.start], length=item.stop - item.start)
+            temp.array[item, 0:] = self.array[item, 0:]
+            return temp
         else:
             # not implemented
             raise NotImplementedError(f'Unsupported indices')
@@ -262,8 +251,7 @@ class TimeVars(VarsBasic):
             if key > self.len:
                 raise ValueError(f'Exceed the maximum index, which is {self.len}')
             else:
-                for var_name in self.v.keys():
-                    self.v[var_name][:, key] = value.v[var_name].copy()
+                self.array[key:key + 1, :] = value.array[:].T
         else:
             raise NotImplementedError(f'Unsupported indices')
 
@@ -275,5 +263,9 @@ class TimeVars(VarsBasic):
         """
         return self.array.T
 
+    @property
+    def len(self):
+        return self.array.shape[0]
+
     def __repr__(self):
-        return f'Time-series (size {self.len}) {list(self.v.keys())}'
+        return f'Time-series (size {self.len}×{self.total_size}) {list(self.var_list)}'

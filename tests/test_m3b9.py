@@ -1,87 +1,138 @@
-# import numpy as np
-# import pandas as pd
+import numpy as np
+import pandas as pd
+
+from Solverz import DAE, Eqn, Ode, Var, Para, idx, sin, cos, Rodas, as_Vars, Mat_Mul, \
+    implicit_trapezoid, implicit_trapezoid_numerical, Opt, TimeSeriesParam
+
+omega = Var(name='omega')
+delta = Var(name='delta')
+Ux = Var(name='Ux')
+Uy = Var(name='Uy')
+Ixg = Var(name='Ixg')
+Iyg = Var(name='Iyg')
+g = idx('g', value=[0, 1, 2])
+ng = idx('ng', value=[3, 4, 5, 6, 7, 8])
+Pm = Para(name='Pm')
+G = Para(name='G', dim=2)
+B = Para(name='B', dim=2)
+D = Para(name='D')
+Tj = Para(name='Tj')
+ra = Para(name='ra')
+omega_b = Para(name='omega_b')
+Edp = Para(name='Edp')
+Eqp = Para(name='Eqp')
+Xdp = Para(name='Xdp')
+Xqp = Para(name='Xqp')
+
+rotator_eqn = Ode(name='rotator speed',
+                  f=(Pm - (Ux[g] * Ixg + Uy[g] * Iyg + (Ixg ** 2 + Iyg ** 2) * ra) - D * (omega - 1)) / Tj,
+                  diff_var=omega)
+delta_eqn = Ode(name='delta', f=(omega - 1) * omega_b, diff_var=delta)
+Ed_prime = Eqn(name='Ed_prime', eqn=Edp - sin(delta) * (Ux[g] + ra * Ixg - Xqp * Iyg) + cos(delta) * (
+        Uy[g] + ra * Iyg + Xqp * Ixg))
+Eq_prime = Eqn(name='Eq_prime', eqn=Eqp - cos(delta) * (Ux[g] + ra * Ixg - Xdp * Iyg) - sin(delta) * (
+        Uy[g] + ra * Iyg + Xdp * Ixg))
+Ix_inject = Eqn(name='Ixg_inject', eqn=Ixg - (Mat_Mul(G[g, :], Ux) - Mat_Mul(B[g, :], Uy)))
+Iy_inject = Eqn(name='Iyg_inject', eqn=Iyg - (Mat_Mul(G[g, :], Uy) + Mat_Mul(B[g, :], Ux)))
+Ixng_inject = Eqn(name='Ixng_inject', eqn=Mat_Mul(G[ng, :], Ux) - Mat_Mul(B[ng, :], Uy))
+Iyng_inject = Eqn(name='Iyng_inject', eqn=Mat_Mul(G[ng, :], Uy) + Mat_Mul(B[ng, :], Ux))
+
+dt = np.array(0.002)
+T = np.array(10)
+
+m3b9 = DAE([delta_eqn, rotator_eqn, Ed_prime, Eq_prime, Ix_inject, Iy_inject, Ixng_inject, Iyng_inject],
+           name='m3b9')
+m3b9.update_param('Pm', [0.7164, 1.6300, 0.8500])
+m3b9.update_param('ra', [0.0000, 0.0000, 0.0000])
+m3b9.update_param('D', [10, 10, 10])
+m3b9.update_param('Tj', [47.2800, 12.8000, 6.0200])
+m3b9.update_param('omega_b', [376.991118430775])
+m3b9.update_param('g', [0, 1, 2])
+m3b9.update_param('ng', [3, 4, 5, 6, 7, 8])
+m3b9.update_param('Edp', [0.0000, 0.0000, 0.0000])
+m3b9.update_param('Eqp', [1.05636632091501, 0.788156757672709, 0.767859471854610])
+m3b9.update_param('Xdp', [0.0608, 0.1198, 0.1813])
+m3b9.update_param('Xqp', [0.0969, 0.8645, 1.2578])
+df = pd.read_excel('instances/test_m3b9.xlsx',
+                   sheet_name=None,
+                   engine='openpyxl',
+                   header=None
+                   )
+Gvalue = np.asarray(df['G'])
+m3b9.param_initializer('G', TimeSeriesParam(name='G',
+                                            v_series=[Gvalue[6, 6], 10000, 10000, Gvalue[6, 6], Gvalue[6, 6]],
+                                            time_series=[0, 0.002, 0.03, 0.032, T],
+                                            value=Gvalue,
+                                            index=(6, 6),
+                                            dim=2))
+m3b9.update_param('B', np.asarray(df['B']))
+
+delta = Var('delta', [0.0625815077879868, 1.06638275203221, 0.944865048677501])
+omega = Var('omega', [1, 1, 1])
+Ixg = Var('Ixg', [0.688836021737262, 1.57988988391346, 0.817891311823357])
+Iyg = Var('Iyg', [-0.260077644814056, 0.192406178191528, 0.173047791590276])
+Ux = Var('Ux',
+         [1.04000110267534, 1.01157932564567, 1.02160343921907,
+          1.02502063033405, 0.993215117729926, 1.01056073782038,
+          1.02360471178264, 1.01579907336413, 1.03174403980626])
+Uy = Var('Uy',
+         [9.38510394478286e-07, 0.165293826097057, 0.0833635520284917,
+          -0.0396760163416718, -0.0692587531054159, -0.0651191654677445,
+          0.0665507083524658, 0.0129050646926083, 0.0354351211556429])
+
+# T, y_trape, stats = implicit_trapezoid(m3b9,
+#                                        tspan=[0, T],
+#                                        y0=as_Vars([delta, omega, Ixg, Iyg, Ux, Uy]),
+#                                        dt=dt)
+# T1, y, stats2 = Rodas(m3b9,
+#                       tspan=np.linspace(0, 10, 5001).reshape(-1, ),  # [0, 10]
+#                       y0=as_Vars([delta, omega, Ixg, Iyg, Ux, Uy]),
+#                       opt=Opt(hinit=1e-5))
+
+from Solverz.numerical_interface.code_printer import print_F, print_J, Solverzlambdify
+from Solverz.numerical_interface.num_eqn import nDAE, parse_dae_v, parse_p
+from Solverz.solvers.daesolver import Rodas_numerical
+
+y0 = as_Vars([delta, omega, Ixg, Iyg, Ux, Uy])
+m3b9.assign_eqn_var_address(y0)
+code_g = print_F(m3b9)
+
+F = Solverzlambdify(code_g, 'F_', modules=['numpy'])
+F0 = m3b9.F(None, y0)
+Fv = F(0, y0.array, parse_p(m3b9))
+
+code_J = print_J(m3b9)
+from scipy.sparse import csc_array
+
+J = Solverzlambdify(code_J, 'J_', modules=['numpy'])
+J0 = m3b9.j(0, y0)
+Jv = J(0, y0.array, parse_p(m3b9))
+
+dae = nDAE(m3b9.vsize, m3b9.M, F, J, parse_p(m3b9))
+T1, y, stats2 = Rodas_numerical(dae=dae,
+                                tspan=np.linspace(0, 10, 5001).reshape(-1, ),  # [0, 10]
+                                y0=y0.array,
+                                opt=Opt(hinit=1e-5))
+y = parse_dae_v(y, m3b9.var_address)
+
+T, y_trape, stats = implicit_trapezoid_numerical(dae,
+                                                 tspan=[0, 10],
+                                                 y0=y0.array,
+                                                 dt=dt)
+y_trape = parse_dae_v(y_trape, m3b9.var_address)
+
+
+# import matplotlib.pyplot as plt
 #
-# from Solverz.equation.eqn import Ode, Eqn
-# from Solverz.equation.equations import DAE
-# from Solverz.event import Event
-# from Solverz.param import Param
-# from Solverz.solvers.daesolver import implicit_trapezoid
-# from Solverz.variable.var import TimeVar
-# from Solverz.variable.variables import TimeVars
-#
-# rotator = Ode(name='rotator speed', eqn='(Pm-(Uxg*Ixg+Uyg*Iyg+(Ixg**2+Iyg**2)*ra)-D*(omega-1))/Tj', diff_var='omega')
-# delta = Ode(name='delta', eqn='(omega-1)*omega_b', diff_var='delta')
-# generator_ux = Eqn(name='Generator Ux', eqn='Uxg-Ag*Ux', commutative=False)
-# generator_uy = Eqn(name='Generator Uy', eqn='Uyg-Ag*Uy', commutative=False)
-# Ed_prime = Eqn(name='Ed_prime', eqn='Edp-sin(delta)*(Uxg+ra*Ixg-Xqp*Iyg)+cos(delta)*(Uyg+ra*Iyg+Xqp*Ixg)')
-# Eq_prime = Eqn(name='Eq_prime', eqn='Eqp-cos(delta)*(Uxg+ra*Ixg-Xdp*Iyg)-sin(delta)*(Uyg+ra*Iyg+Xdp*Ixg)')
-# Ixg_inject = Eqn(name='Ixg_inject', eqn='Ixg-(Ag*G*Ux-Ag*B*Uy)', commutative=False)
-# Iyg_inject = Eqn(name='Iyg_inject', eqn='Iyg-(Ag*G*Uy+Ag*B*Ux)', commutative=False)
-# Ixng_inject = Eqn(name='Ixng_inject', eqn='Ang*G*Ux-Ang*B*Uy', commutative=False)
-# Iyng_inject = Eqn(name='Iyng_inject', eqn='Ang*G*Uy+Ang*B*Ux', commutative=False)
-#
-# param = [Param('Pm'), Param('ra'), Param('D'), Param('Tj'), Param('omega_b'), Param('Ag'), Param('Edp'), Param('Eqp'),
-#          Param('Xqp'), Param('Xdp'), Param('G'), Param('B'), Param('Ang')]
-#
-# m3b9 = DAE([rotator, delta, generator_ux, generator_uy, Ed_prime, Eq_prime, Ixg_inject, Iyg_inject,
-#             Ixng_inject, Iyng_inject],
-#            name='m3b9',
-#            param=param)
-# m3b9.update_param('Pm', [0.7164, 1.6300, 0.8500])
-# m3b9.update_param('ra', [0.0000, 0.0000, 0.0000])
-# m3b9.update_param('D', [50, 50, 50])
-# m3b9.update_param('Tj', [47.2800, 12.8000, 6.0200])
-# m3b9.update_param('omega_b', [376.991118430775])
-# Ag = np.zeros((3, 9))
-# Ag[0, 0] = 1
-# Ag[1, 1] = 1
-# Ag[2, 2] = 1
-# m3b9.update_param('Ag', Ag)
-# Ang = np.zeros((6, 9))
-# Ang[np.ix_([0, 1, 2, 3, 4, 5], [3, 4, 5, 6, 7, 8])] = np.eye(6)
-# m3b9.update_param('Ang', Ang)
-# m3b9.update_param('Edp', [0.0000, 0.0000, 0.0000])
-# m3b9.update_param('Eqp', [1.05636632091501, 0.788156757672709, 0.767859471854610])
-# m3b9.update_param('Xdp', [0.0608, 0.1198, 0.1813])
-# m3b9.update_param('Xqp', [0.0969, 0.8645, 1.2578])
-# df = pd.read_excel('instances/test_m3b9.xlsx',
-#                    sheet_name=None,
-#                    engine='openpyxl',
-#                    header=None
-#                    )
-# m3b9.update_param('G', np.asarray(df['G']))
-# m3b9.update_param('B', np.asarray(df['B']))
-# delta = TimeVar('delta')
-# delta.v0 = [0.0625815077879868, 1.06638275203221, 0.944865048677501]
-# omega = TimeVar('omega')
-# omega.v0 = [1, 1, 1]
-# Ixg = TimeVar('Ixg')
-# Ixg.v0 = [0.688836025963652, 1.57988988520965, 0.817891311270257]
-# Iyg = TimeVar('Iyg')
-# Iyg.v0 = [-0.260077649504215, 0.192406179350779, 0.173047793408992]
-# Ux = TimeVar('Ux')
-# Ux.v0 = [1.04000110485564, 1.01157932697927, 1.02160344047696, 1.02502063224420, 0.993215119385170, 1.01056073948763,
-#          1.02360471318869, 1.01579907470994, 1.03174404117073]
-# Uxg = TimeVar('Uxg')
-# Uxg.v0 = [1.04000110485564, 1.01157932697927, 1.02160344047696]
-# Uy = TimeVar('Uy')
-# Uy.v0 = [9.38266043832060e-07, 0.165293825576865, 0.0833635512998016, -0.0396760168295497, -0.0692587537381123,
-#          -0.0651191661122707, 0.0665507077512621, 0.0129050640060066, 0.0354351204593645]
-# Uyg = TimeVar('Uyg')
-# Uyg.v0 = [9.38266043832060e-07, 0.165293825576865, 0.0833635512998016]
-#
-# dt = np.array(0.003)
-# T = np.array(3)
-#
-# e1 = Event(name='three phase fault', time=[0, 0.03, T])
-# e1.add_var('G', [10000, np.asarray(df['G'])[6, 6], np.asarray(df['G'])[6, 6]], (6, 6))
-#
-# xy = implicit_trapezoid(m3b9,
-#                         TimeVars([delta, omega, Ux, Uy, Uxg, Uyg, Ixg, Iyg],
-#                                  length=int(T / dt) + 1),
-#                         tspan=[0, T], dt=dt, event=e1)
-#
-#
-# def test_m3b9():
-#     assert np.abs(np.asarray(df['omega']).transpose() - xy['omega']).max() <= 0.003969440114605538
-#     assert np.abs(np.asarray(df['delta']).transpose() - xy['delta']).max() <= 0.019164859675127266
+# plt.plot(T1, df['omega'][1], label='ode15s')
+# plt.plot(T1, y['omega'][:, 1], label='rodas', linestyle=':')
+# plt.plot(T, y_trape['omega'][:, 1], label='trapezoidal', linestyle='--', color='m', alpha=0.5)
+# plt.legend()
+# plt.grid()
+# plt.show()
+
+def test_m3b9():
+    assert np.abs(np.asarray(df['omega']) - y['omega']).max() <= 2e-5
+    assert np.abs(np.asarray(df['omega']) - y_trape['omega']).max() <= 2.48e-4
+    assert np.abs(np.asarray(df['delta']) - y['delta']).max() <= 9.6e-4
+    assert np.abs(np.asarray(df['delta']) - y_trape['delta']).max() <= 7.8e-2

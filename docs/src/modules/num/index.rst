@@ -8,3 +8,5 @@ Contents
     :maxdepth: 3
 
     numerical.rst
+    algebra.rst
+    equation.rst
