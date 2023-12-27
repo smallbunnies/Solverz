@@ -32,16 +32,16 @@ from Solverz.solvers.nlaesolver import nr_method_numerical
 code_g = print_F(gas_flow)
 g = Solverzlambdify(code_g, 'F_', modules=['numpy'])
 g0 = gas_flow.g(y0)
-gv = g(0, y0.array, parse_p(gas_flow))
+gv = g(y0.array, parse_p(gas_flow))
 
 code_J = print_J(gas_flow)
 from scipy.sparse import csc_array
 
 J = Solverzlambdify(code_J, 'J_', modules=[{'csc_array': csc_array}, 'numpy'])
 J0 = gas_flow.j(y0)
-Jv = J(0, y0.array, parse_p(gas_flow))
+Jv = J(y0.array, parse_p(gas_flow))
 
-nE = nAE(gas_flow.vsize, lambda z, p: g(0, z, p), lambda z, p: J(0, z, p), parse_p(gas_flow))
+nE = nAE(gas_flow.vsize, lambda z, p: g(z, p), lambda z, p: J(z, p), parse_p(gas_flow))
 y1, stats = nr_method_numerical(nE, y0.array, stats=True)
 y1 = parse_ae_v(y1, gas_flow.var_address)
 

@@ -20,7 +20,7 @@ from scipy.sparse import csc_array
 
 J = Solverzlambdify(code_J, 'J_', modules=[{'csc_array': csc_array}, 'numpy'])
 
-f1 = nAE(1, lambda z, p: g(0, z, p), lambda z, p: J(0, z, p), dict())
+f1 = nAE(1, lambda z, p: g(z, p), lambda z, p: J(z, p), dict())
 y1 = nr_method_numerical(f1, np.array([2]))
 y1 = parse_ae_v(y1, f.var_address)
 

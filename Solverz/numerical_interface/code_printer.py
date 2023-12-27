@@ -9,7 +9,7 @@ from sympy import pycode, symbols
 from sympy.codegen.ast import real, FunctionPrototype, FunctionDefinition, Return, FunctionCall
 from sympy.utilities.lambdify import _import, _imp_namespace, _module_present, _get_namespace
 
-from Solverz.equation.equations import Equations as SymEquations, AE as SymAE, tAE as SymtAE, DAE as SymDAE
+from Solverz.equation.equations import Equations as SymEquations, AE as SymAE, FDAE as SymFDAE, DAE as SymDAE
 from Solverz.equation.eqn import EqnDiff, Eqn
 from Solverz.equation.param import TimeSeriesParam
 from Solverz.symboli_algebra.symbols import Var, idx, SolDict, Para, AliasVar, idx
@@ -184,12 +184,16 @@ def print_trigger(ae: SymEquations):
 
 def print_func_prototype(ae: SymEquations, func_name: str):
     t, y_, p_ = symbols('t y_ p_', real=True)
+    if isinstance(ae, (SymDAE, SymFDAE)):
+        args = [t, y_, p_]
+    else:
+        args = [y_, p_]
     xtra_args = []
     if hasattr(ae, 'nstep'):
         if ae.nstep > 0:
             xtra_args.extend([symbols('y_' + f'{i}', real=True) for i in range(ae.nstep)])
 
-    fp = FunctionPrototype(real, func_name, [t, y_, p_] + xtra_args)
+    fp = FunctionPrototype(real, func_name, args + xtra_args)
     return fp
 
 

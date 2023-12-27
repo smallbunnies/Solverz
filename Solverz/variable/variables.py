@@ -11,7 +11,7 @@ from Solverz.auxiliary_service.address import Address, combine_Address
 from Solverz.numerical_interface.Array import Array
 
 
-def as_Vars(var: Union[Var, List[Var]]):
+def as_Vars(var: Union[Var, List[Var]]) -> Vars:
     var = [var] if isinstance(var, Var) else var
     a = Address()
     temp = 0
