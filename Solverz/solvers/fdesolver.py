@@ -57,7 +57,7 @@ def fdae_solver_numerical(fdae: nFDAE,
     t0 = tt
     uround = np.spacing(1.0)
 
-    u = np.zeros((10000, fdae.v_size))
+    u = np.zeros((10000, u0.shape[0]))
     u[0, :] = u0
     T = np.zeros((10000,))
 
@@ -74,8 +74,7 @@ def fdae_solver_numerical(fdae: nFDAE,
             break
 
         if fdae.nstep == 1:
-            ae = nAE(fdae.v_size,
-                     lambda y, p: fdae.F(t0 + dt, y, p, u0),
+            ae = nAE(lambda y, p: fdae.F(t0 + dt, y, p, u0),
                      lambda y, p: fdae.J(t0 + dt, y, p, u0),
                      p)
         else:

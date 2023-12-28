@@ -49,23 +49,15 @@ def _sign(arg):
 
 
 @implements_nfunc('minmod')
-def minmod(*args):
-    if len(args) != 3:
-        raise ValueError("Input arg length must be 3")
+def minmod(a, b, c):
 
-    shapes = [arg.shape[0] for arg in args]
-
-    a, b, c = args
     stacked_array = np.hstack((a, b, c))
-    if all(x == shapes[0] for x in shapes):
-        cd1 = (a > 0) & (b > 0) & (c > 0)
-        cd2 = (a < 0) & (b < 0) & (c < 0)
-        conditions = [cd1,
-                      cd2]
-        choice_list = [np.min(stacked_array, axis=1).reshape((-1, 1)),
-                       np.max(stacked_array, axis=1).reshape((-1, 1))]
-    else:
-        raise ValueError(f"Length of Input array not consistent {shapes}")
+    cd1 = (a > 0) & (b > 0) & (c > 0)
+    cd2 = (a < 0) & (b < 0) & (c < 0)
+    conditions = [cd1,
+                  cd2]
+    choice_list = [np.min(stacked_array, axis=0),
+                   np.max(stacked_array, axis=0)]
     return np.select(conditions, choice_list, 0)
 
 
@@ -83,8 +75,8 @@ def minmod_flag(*args):
         cd2 = (a < 0) & (b < 0) & (c < 0)
         conditions = [cd1,
                       cd2]
-        choice_list = [np.argmin(stacked_array, axis=1).reshape((-1, 1)),
-                       np.argmax(stacked_array, axis=1).reshape((-1, 1))]
+        choice_list = [np.argmin(stacked_array, axis=0),
+                       np.argmax(stacked_array, axis=0)]
     else:
         raise ValueError(f"Length of Input array not consistent {shapes}")
     return np.select(conditions, choice_list, 3)

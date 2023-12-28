@@ -225,6 +225,15 @@ class switch(Function):
     def _eval_derivative(self, s):
         return switch(*[arg.diff(s) for arg in self.args[0:len(self.args) - 1]], self.args[-1])
 
+    def _numpycode(self, printer, **kwargs):
+        return r'switch(' + ','.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
 
 class Sign(Function):
 
@@ -240,7 +249,6 @@ class Sign(Function):
         raise ArgumentIndexError(self, argindex)
 
     def _numpycode(self, printer, **kwargs):
-
         return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
 
     def _lambdacode(self, printer, **kwargs):

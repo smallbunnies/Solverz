@@ -177,7 +177,7 @@ J = Solverzlambdify(code_J, 'J_', modules=[parse_trigger_fun(E), {'csc_array': c
 J0 = E.j(y0)
 Jv = J(y0.array, parse_p(E))
 
-f1 = nAE(E.vsize, lambda z, p: g(z, p), lambda z, p: J(z, p), parse_p(E))
+f1 = nAE(lambda z, p: g(z, p), lambda z, p: J(z, p), parse_p(E))
 y1, ite1 = nr_method_numerical(f1, y0.array, stats=True)
 y1 = parse_ae_v(y1, E.var_address)
 

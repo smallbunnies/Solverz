@@ -24,11 +24,10 @@ def parse_dae_v(y: np.ndarray, var_address: Address):
 class nAE:
 
     def __init__(self,
-                 vsize,
                  g: Callable,
                  J: Callable,
                  p: Dict):
-        self.v_size = vsize
+
         self.g = g
         self.J = J
         self.p = p
@@ -37,12 +36,11 @@ class nAE:
 class nFDAE:
 
     def __init__(self,
-                 vsize,
                  F: callable,
                  J: callable,
                  p: dict,
                  nstep: int = 0):
-        self.v_size = vsize
+
         self.F = F
         self.J = J
         self.p = p
@@ -52,12 +50,11 @@ class nFDAE:
 class nDAE:
 
     def __init__(self,
-                 v_size,
                  M,
                  F: Callable,
                  J: Callable,
                  p: Dict):
-        self.v_size = v_size
+
         self.M = M
         self.F = F
         self.J = J
@@ -82,7 +79,7 @@ def parse_trigger_fun(ae: SymEquations):
     return func
 
 
-def made_numerical(eqn: SymEquations, *xys):
+def made_numerical(eqn: SymEquations, *xys, output_code=False):
     """
     factory method of numerical equations
     """
@@ -96,8 +93,14 @@ def made_numerical(eqn: SymEquations, *xys):
     J = Solverzlambdify(code_J, 'J_', modules=[custom_func, 'numpy'])
     p = parse_p(eqn)
     if isinstance(eqn, SymAE) and not isinstance(eqn, SymFDAE):
-        return nAE(eqn.vsize, F, J, p)
+        num_eqn = nAE(F, J, p)
     elif isinstance(eqn, SymFDAE):
-        return nFDAE(eqn.vsize, F, J, p, eqn.nstep)
+        num_eqn = nFDAE(F, J, p, eqn.nstep)
     elif isinstance(eqn, SymDAE):
-        return nDAE(eqn.vsize, eqn.M, F, J, p)
+        num_eqn = nDAE(eqn.M, F, J, p)
+    else:
+        raise ValueError(f'Unknown equation type {type(eqn)}')
+    if output_code:
+        return num_eqn, {'F': code_F, 'J': code_J}
+    else:
+        return num_eqn

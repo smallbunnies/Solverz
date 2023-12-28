@@ -178,7 +178,7 @@ def print_trigger(ae: SymEquations):
     trigger_declaration = []
     for triggered_var, trigger_var in ae.triggerable_quantity.items():
         trigger_declaration.append(
-            Assignment(Var(triggered_var), FunctionCall(triggered_var + '_trigger_func', trigger_var)))
+            Assignment(Var(triggered_var), FunctionCall(triggered_var + '_trigger_func', (trigger_var, ))))
     return trigger_declaration
 
 

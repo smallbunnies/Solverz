@@ -109,7 +109,7 @@ J = Solverzlambdify(code_J, 'J_', modules=[{'csc_array': csc_array}, 'numpy'])
 J0 = E.j(y0)
 Jv = J(y0.array, parse_p(E))
 
-nE = nAE(E.vsize, lambda z, p: g(z, p), lambda z, p: J(z, p), parse_p(E))
+nE = nAE(lambda z, p: g(z, p), lambda z, p: J(z, p), parse_p(E))
 y1 = nr_method_numerical(nE, y0.array)
 y1 = parse_ae_v(y1, E.var_address)
 

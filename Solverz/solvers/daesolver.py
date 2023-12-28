@@ -78,7 +78,7 @@ def implicit_trapezoid_numerical(dae: nDAE,
     tt = T_initial
     t0 = tt
 
-    y = np.zeros((10000, dae.v_size))
+    y = np.zeros((10000, y0.shape[0]))
     y[0, :] = y0
     T = np.zeros((10000,))
 
@@ -89,8 +89,7 @@ def implicit_trapezoid_numerical(dae: nDAE,
     while abs(tt - T_end) > abs(dt) / 10:
         My0 = dae.M @ y0
         F0 = dae.F(t0, y0, p)
-        ae = nAE(dae.v_size,
-                 lambda y, p: dt / 2 * (dae.F(t0 + dt, y, p) + F0) - dae.M @ y + My0,
+        ae = nAE(lambda y, p: dt / 2 * (dae.F(t0 + dt, y, p) + F0) - dae.M @ y + My0,
                  lambda y, p: -dae.M + dt / 2 * dae.J(t0 + dt, y, p),
                  p)
 
@@ -556,7 +555,7 @@ def Rodas_numerical(dae: nDAE,
     stats = Stats(opt.scheme)
 
     rparam = Rodas_param(opt.scheme)
-
+    vsize = y0.shape[0]
     tspan = np.array(tspan)
     tend = tspan[-1]
     t0 = tspan[0]
@@ -568,7 +567,7 @@ def Rodas_numerical(dae: nDAE,
     uround = np.spacing(1.0)
     T = np.zeros((10001,))
     T[nt] = t0
-    y = np.zeros((10000, dae.v_size))
+    y = np.zeros((10000, vsize))
     y[0, :] = y0
 
     dense_output = False
@@ -589,7 +588,7 @@ def Rodas_numerical(dae: nDAE,
     dt = np.minimum(dt, opt.hmax)
 
     M = dae.M
-
+    p = dae.p
     done = False
     reject = 0
     while not done:
@@ -610,13 +609,13 @@ def Rodas_numerical(dae: nDAE,
 
         if done:
             break
-        K = np.zeros((dae.v_size, rparam.s))
+        K = np.zeros((vsize, rparam.s))
 
         if reject == 0:
-            J = dae.J(t, y0, dae.p)
+            J = dae.J(t, y0, p)
 
         dfdt0 = dt * dfdt1(dae, t, y0)
-        rhs = dae.F(t, y0, dae.p) + rparam.g[0] * dfdt0
+        rhs = dae.F(t, y0, p) + rparam.g[0] * dfdt0
         stats.nfeval = stats.nfeval + 1
 
         lu = lu_decomposition(M - dt * rparam.gamma * J)
@@ -628,7 +627,7 @@ def Rodas_numerical(dae: nDAE,
             sum_2 = K @ rparam.gamma_tilde[:, j]
             y1 = y0 + dt * sum_1
 
-            rhs = dae.F(t + dt * rparam.a[j], y1, dae.p) + M @ sum_2 + rparam.g[j] * dfdt0
+            rhs = dae.F(t + dt * rparam.a[j], y1, p) + M @ sum_2 + rparam.g[j] * dfdt0
             stats.nfeval = stats.nfeval + 1
             sol = lu.solve(rhs)
             K[:, j] = sol - sum_2

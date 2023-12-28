@@ -41,7 +41,7 @@ J = Solverzlambdify(code_J, 'J_', modules=[{'csc_array': csc_array}, 'numpy'])
 J0 = gas_flow.j(y0)
 Jv = J(y0.array, parse_p(gas_flow))
 
-nE = nAE(gas_flow.vsize, lambda z, p: g(z, p), lambda z, p: J(z, p), parse_p(gas_flow))
+nE = nAE(lambda z, p: g(z, p), lambda z, p: J(z, p), parse_p(gas_flow))
 y1, stats = nr_method_numerical(nE, y0.array, stats=True)
 y1 = parse_ae_v(y1, gas_flow.var_address)
 

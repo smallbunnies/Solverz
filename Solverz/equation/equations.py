@@ -433,8 +433,8 @@ class FDAE(AE):
 
     def __init__(self,
                  eqn: Union[List[Eqn], Eqn],
+                 nstep: int,
                  name: str = None,
-                 nstep: int = 0,
                  matrix_container='scipy'):
         super().__init__(eqn, name, matrix_container)
 

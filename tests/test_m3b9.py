@@ -108,7 +108,7 @@ J = Solverzlambdify(code_J, 'J_', modules=['numpy'])
 J0 = m3b9.j(0, y0)
 Jv = J(0, y0.array, parse_p(m3b9))
 
-dae = nDAE(m3b9.vsize, m3b9.M, F, J, parse_p(m3b9))
+dae = nDAE(m3b9.M, F, J, parse_p(m3b9))
 T1, y, stats2 = Rodas_numerical(dae=dae,
                                 tspan=np.linspace(0, 10, 5001).reshape(-1, ),  # [0, 10]
                                 y0=y0.array,

@@ -191,7 +191,7 @@ class HyperbolicPde(Pde):
     def derive_derivative(self):
         pass
 
-    def finite_difference(self, scheme=1, direction=None):
+    def finite_difference(self, scheme=1, direction=None, M: int = 0):
         r"""
         Discretize hyperbolic PDE as AEs.
 
@@ -248,6 +248,10 @@ class HyperbolicPde(Pde):
 
             To tell which side of boundary conditions is given in scheme 2.
 
+        M : int
+
+        The total number of spatial sections.
+
         Returns
         =======
 
@@ -267,10 +271,17 @@ class HyperbolicPde(Pde):
             initial value of $\tilde{u}$, and by $M$ the last index of $\tilde{u}$.
 
         """
+        if isinstance(M, (int, np.integer)):
+            if M < 0:
+                raise ValueError(f'Total nunmber of PDE sections {M} < 0')
+        else:
+            raise TypeError(f'Do not support M of type {type(M)}')
+        if M == 0:
+            M = idx('M')
+
         if scheme == 1:
             dx = Para('dx')
             dt = Para('dt')
-            M = idx('M')
             u = self.diff_var
             u0 = AliasVar(u.name + '0')
 
@@ -297,7 +308,6 @@ class HyperbolicPde(Pde):
             if direction == 1:
                 dx = Para('dx')
                 dt = Para('dt')
-                M = idx('M')
                 u = self.diff_var
                 u0 = AliasVar(u.name + '0')
 
@@ -312,9 +322,8 @@ class HyperbolicPde(Pde):
 
                 dx = Para('dx')
                 dt = Para('dt')
-                M = idx('M')
                 u = self.diff_var
-                u0 = Var(u.name + '0')
+                u0 = AliasVar(u.name + '0')
 
                 fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
                 fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
@@ -326,7 +335,7 @@ class HyperbolicPde(Pde):
             else:
                 raise ValueError(f"Unimplemented direction {direction}!")
 
-    def semi_discretize(self, a0=None, a1=None, scheme=1):
+    def semi_discretize(self, a0=None, a1=None, scheme=1, M: int = 0, output_boundary=True) -> List[Eqn]:
         r"""
         Semi-discretize the hyperbolic PDE of nonlinear conservation law as ODEs using the Kurganov-Tadmor scheme
         (see [Kurganov2000]_). The difference stencil is as follows, with $x_{j+1}-x_{j}=\Delta x$.
@@ -364,6 +373,22 @@ class HyperbolicPde(Pde):
         scheme : int
 
             If scheme==1, 2nd scheme else, else, use 1st scheme.
+
+        M : int
+
+            The total number of spatial sections.
+
+        output_boundary : bool
+
+            If true, output equations about the boundary conditions. For example,
+
+           >>> from Solverz import HyperbolicPde, Var
+           >>> T = Var('T')
+           >>> p = HyperbolicPde(name = 'heat transfer', diff_var=T, flux=T)
+           >>> p.semi_discretize(a0=1,a2=1, scheme=2, M=2, output_boundary=True)
+           1
+           >>> p.semi_discretize(a0=1,a2=1, scheme=2, M=2, output_boundary=False)
+           2
 
         Returns
         =======
@@ -414,6 +439,13 @@ class HyperbolicPde(Pde):
         .. [Kurganov2000] Alexander Kurganov, Eitan Tadmor, New High-Resolution Central Schemes for Nonlinear Conservation Laws and Convection–Diffusion Equations, Journal of Computational Physics, Volume 160, Issue 1, 2000, Pages 241-282, `<https://doi.org/10.1006/jcph.2000.6459>`_
 
         """
+        if isinstance(M, (int, np.integer)):
+            if M < 0:
+                raise ValueError(f'Total nunmber of PDE sections {M} < 0')
+        else:
+            raise TypeError(f'Do not support M of type {type(M)}')
+        if M == 0:
+            M = idx('M')
 
         if a0 is None:
             a0 = Para('ajp12')
@@ -421,9 +453,8 @@ class HyperbolicPde(Pde):
             a1 = Para('ajm12')
 
         dx = Para('dx')
-        M = idx('M')
         u = self.diff_var
-
+        dae_list = []
         if scheme == 1:
             # j=1
             # f(u[2])
@@ -506,14 +537,12 @@ class HyperbolicPde(Pde):
                                               0,
                                               minmod_flag)
 
-            return [Ode('SDM of ' + self.name + ' 1', ode_rhs1, u[1]),
-                    Ode('SDM of ' + self.name + ' 2', ode_rhs2, u[2:M - 2]),
-                    Ode('SDM of ' + self.name + ' 3', ode_rhs3, u[M - 1]),
-                    Eqn('SDM of ' + self.name + ' 4', u[M] - 2 * Var(u.name + 'R') + u[M - 1]),
-                    Eqn('SDM of ' + self.name + ' 5', u[0] - 2 * Var(u.name + 'L') + u[1]),
-                    Eqn('minmod limiter 1 of ' + u.name, minmod_rhs),
-                    Eqn('minmod limiter 2 of ' + u.name, ux[0]),
-                    Eqn('minmod limiter 3 of ' + u.name, ux[M])]
+            dae_list.extend([Ode('SDM of ' + self.name + ' 1', ode_rhs1, u[1]),
+                             Ode('SDM of ' + self.name + ' 2', ode_rhs2, u[2:M - 2]),
+                             Ode('SDM of ' + self.name + ' 3', ode_rhs3, u[M - 1]),
+                             Eqn('minmod limiter 1 of ' + u.name, minmod_rhs),
+                             Eqn('minmod limiter 2 of ' + u.name, ux[0]),
+                             Eqn('minmod limiter 3 of ' + u.name, ux[M])])
         elif scheme == 2:
             # 1<=j<=M-1
             # f(u[j+1])
@@ -526,6 +555,10 @@ class HyperbolicPde(Pde):
                       + simplify((a0 * (u[2:M] - u[1:M - 1]) - a1 * (u[1:M - 1] - u[0:M - 2])) / (2 * dx)) \
                       + simplify(Su)
 
-            return [Ode('SDM of ' + self.name + ' 1', ode_rhs, u[1:M - 1]),
-                    Eqn('SDM of ' + self.name + ' 2', u[M] - 2 * Var(u.name + 'R') + u[M - 1]),
-                    Eqn('SDM of ' + self.name + ' 3', u[0] - 2 * Var(u.name + 'L') + u[1])]
+            dae_list.extend([Ode('SDM of ' + self.name + ' 1', ode_rhs, u[1:M - 1])])
+
+        if output_boundary:
+            dae_list.extend([Eqn('Right boundary of ' + self.name, u[M] - 2 * Var(u.name + 'R') + u[M - 1]),
+                             Eqn('Left boundary of ' + self.name + ' 5', u[0] - 2 * Var(u.name + 'L') + u[1])])
+
+        return dae_list
