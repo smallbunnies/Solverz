@@ -9,3 +9,4 @@ from Solverz.solvers.nlaesolver import nr_method, continuous_nr, nr_method_numer
 from Solverz.solvers.daesolver import Rodas, Opt, implicit_trapezoid, implicit_trapezoid_numerical, Rodas_numerical
 from Solverz.solvers.fdesolver import fde_solver, fdae_solver_numerical
 from Solverz.numerical_interface.num_eqn import made_numerical, parse_dae_v, parse_ae_v
+from Solverz.auxiliary_service.io import save, load
