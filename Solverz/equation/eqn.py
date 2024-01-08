@@ -262,9 +262,9 @@ class HyperbolicPde(Pde):
             .. math::
 
                 \begin{aligned}
-                    0=&\Delta x(\tilde{u}[1:M_]-\tilde{u}^0[1:M_]+\tilde{u}[0:M_-1]-\tilde{u}^0[0:M_-1])+\\
-                      &\Delta t(f(\tilde{u}[1:M_])-f(\tilde{u}[0:M_-1])+f(\tilde{u}^0[1:M_])-f(\tilde{u}^0[0:M_-1]))+\\
-                      &2\Delta x\Delta t\cdot S\left(\tilde{u}[1:M_]-\tilde{u}^0[1:M_]+\tilde{u}[0:M_-1]-\tilde{u}^0[0:M_-1]}{4}\right)
+                    0=&\Delta x(\tilde{u}[1:M]-\tilde{u}^0[1:M]+\tilde{u}[0:M-1]-\tilde{u}^0[0:M-1])+\\
+                      &\Delta t(f(\tilde{u}[1:M])-f(\tilde{u}[0:M-1])+f(\tilde{u}^0[1:M])-f(\tilde{u}^0[0:M-1]))+\\
+                      &2\Delta x\Delta t\cdot S\left(\tilde{u}[1:M]-\tilde{u}^0[1:M]+\tilde{u}[0:M-1]-\tilde{u}^0[0:M-1]}{4}\right)
                 \end{aligned}
 
             where we denote by vector $\tilde{u}$ the discrete spatial distribution of state $u$, by $\tilde{u}^0$ the

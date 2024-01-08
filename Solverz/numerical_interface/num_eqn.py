@@ -1,7 +1,7 @@
 from typing import Callable, Dict
 
 import numpy as np
-from Solverz.auxiliary_service.address import Address
+from Solverz.utilities.address import Address
 from Solverz.variable.variables import Vars, TimeVars
 from Solverz.equation.equations import Equations as SymEquations, AE as SymAE, tAE as SymtAE, DAE as SymDAE, \
     FDAE as SymFDAE

@@ -350,20 +350,6 @@ class SolList(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class SolArray(Function):
-
-    # @classmethod
-    # def eval(cls, *args):
-    #     if any([not isinstance(arg, Number) for arg in args]):
-    #         raise ValueError(f"Solverz' list object accepts only number inputs.")
-
-    def _numpycode(self, printer, **kwargs):
-        return r'array([' + ','.join([printer._print(arg) for arg in self.args]) + r'])'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-
 class tolist(Function):
 
     @classmethod

@@ -1,4 +1,4 @@
-from Solverz.auxiliary_service.address import Address, combine_Address
+from Solverz.utilities.address import Address, combine_Address
 
 
 def test_address():

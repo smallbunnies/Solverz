@@ -7,7 +7,7 @@ import warnings
 import numpy as np
 
 from Solverz.symboli_algebra.symbols import Var
-from Solverz.auxiliary_service.address import Address, combine_Address
+from Solverz.utilities.address import Address, combine_Address
 from Solverz.numerical_interface.Array import Array
 
 
