@@ -79,19 +79,21 @@ def parse_trigger_fun(ae: SymEquations):
     return func
 
 
-def made_numerical(eqn: SymEquations, *xys, output_code=False):
+def made_numerical(eqn: SymEquations, *xys, sparse=False, output_code=False):
     """
     factory method of numerical equations
     """
+    print(f"Printing numerical codes of {eqn.name}")
     eqn.assign_eqn_var_address(*xys)
     code_F = print_F(eqn)
-    code_J = print_J(eqn)
+    code_J = print_J(eqn, sparse)
     custom_func = dict()
     custom_func.update(numerical_interface)
     custom_func.update(parse_trigger_fun(eqn))
     F = Solverzlambdify(code_F, 'F_', modules=[custom_func, 'numpy'])
     J = Solverzlambdify(code_J, 'J_', modules=[custom_func, 'numpy'])
     p = parse_p(eqn)
+    print('Complete!')
     if isinstance(eqn, SymAE) and not isinstance(eqn, SymFDAE):
         num_eqn = nAE(F, J, p)
     elif isinstance(eqn, SymFDAE):

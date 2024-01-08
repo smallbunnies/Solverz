@@ -8,7 +8,7 @@ from numpy import abs, linalg
 from scipy.sparse import csc_array, linalg as sla
 
 from Solverz.equation.equations import DAE
-from Solverz.solvers.nlaesolver import nr_method, nr_method_numerical
+from Solverz.solvers.nlaesolver import nr_method
 from Solverz.symboli_algebra.symbols import Var
 from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
 from Solverz.numerical_interface.num_eqn import nDAE, nAE
@@ -17,58 +17,11 @@ from Solverz.solvers.option import Opt
 from Solverz.solvers.laesolver import lu_decomposition
 
 
-def implicit_trapezoid(dae: DAE,
-                       y0: Vars,
+def implicit_trapezoid(dae: nDAE,
                        tspan: Union[List, np.ndarray],
+                       y0: np.ndarray,
                        dt,
                        pbar=False):
-    ae = dae.discretize(scheme=1)
-
-    stats = Stats(scheme='Trapezoidal')
-
-    tspan = np.array(tspan)
-    T_initial = tspan[0]
-    t = Var('t', 0)
-    y0 = combine_Vars(y0, as_Vars(t))
-    T_end = tspan[-1]
-    nt = 0
-    tt = T_initial
-
-    y = TimeVars(y0, 10000)
-    T = np.zeros((10000,))
-    y0_alias = y0.derive_alias('0')
-
-    if pbar:
-        bar = tqdm.tqdm(total=T_end)
-
-    while abs(tt - T_end) > abs(dt) / 10:
-        ae.update_param('dt', dt)
-        ae.update_param(y0_alias)
-
-        y1, ite = nr_method(ae, y0, stats=True)
-        stats.ndecomp = stats.ndecomp + ite
-        stats.nfeval = stats.nfeval + ite
-
-        y0_alias.array[:] = y1.array[:]
-
-        tt = tt + dt
-        nt = nt + 1
-        y[nt] = y1
-        T[nt] = tt
-        y0 = y1
-
-    y = y[0:nt + 1]
-    T = T[0:nt + 1]
-    stats.nstep = nt
-
-    return T, y, stats
-
-
-def implicit_trapezoid_numerical(dae: nDAE,
-                                 y0: np.ndarray,
-                                 tspan: Union[List, np.ndarray],
-                                 dt,
-                                 pbar=False):
     stats = Stats(scheme='Trapezoidal')
 
     tspan = np.array(tspan)
@@ -89,11 +42,11 @@ def implicit_trapezoid_numerical(dae: nDAE,
     while abs(tt - T_end) > abs(dt) / 10:
         My0 = dae.M @ y0
         F0 = dae.F(t0, y0, p)
-        ae = nAE(lambda y, p: dt / 2 * (dae.F(t0 + dt, y, p) + F0) - dae.M @ y + My0,
-                 lambda y, p: -dae.M + dt / 2 * dae.J(t0 + dt, y, p),
+        ae = nAE(lambda y_, p_: dt / 2 * (dae.F(t0 + dt, y_, p_) + F0) - dae.M @ y_ + My0,
+                 lambda y_, p_: -dae.M + dt / 2 * dae.J(t0 + dt, y_, p_),
                  p)
 
-        y1, ite = nr_method_numerical(ae, y0, stats=True)
+        y1, ite = nr_method(ae, y0, stats=True)
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite
 
@@ -319,237 +272,10 @@ def ode15s(ode: DAE,
     pass
 
 
-# def DTsolver(eqn: DTeqn, **args):
-#     if 'x' not in args:
-#         raise ValueError("No TimeVars input")
-#     else:
-#         x_: TimeVars = args['x']
-#         K: int = args['K']
-#         x = DTcache(x_, K)
-#         xdt = DTvar(x)
-#         if 'y' in args:
-#             y_: TimeVars = args['y']
-#             y = DTcache(y_, K)
-#             x, y = eqn.lambdify(x, y)  # attach intermediate variables
-#             ydt = DTvar(y)
-#         else:
-#             y = None
-#             x, y = eqn.lambdify(x, y)  # attach intermediate variables
-#             if y is not None:
-#                 ydt = DTvar(y)
-#
-#     dt = args['dt']
-#     dt_array = np.array([[dt ** i] for i in range(K + 1)])
-#     T = args['T']
-#     i = 0
-#     t = 0
-#     done = False
-#
-#     if y is None:
-#         # ode and no intermediate variables
-#         while not done:
-#             i = i + 1
-#             # Stretch the step if within 10% of T-t.
-#             if dt >= np.abs(T - t):
-#                 dt = T - t
-#                 done = True
-#
-#             # recursive calculation
-#             for k in range(0, K):
-#                 x[:, k + 1] = eqn.F(k)
-#
-#             # store the DTs
-#             xdt[i] = x
-#             # update initial values and the coefficient matrix
-#             x[:, 0] = x @ dt_array
-#
-#             t = t + dt
-#
-#         return xdt
-#
-#     else:
-#         while not done:
-#
-#             # Stretch the step if within 10% of T-t.
-#             if dt >= np.abs(T - t):
-#                 dt = T - t
-#                 done = True
-#             A = eqn.A()
-#             Ainv = inv(A)
-#             # recursive calculation
-#             for k in range(0, K):
-#                 x[k + 1, :] = eqn.F(k)
-#                 y[k + 1, :] = Ainv @ eqn.G(k + 1)  # Ainv matrix is cached
-#
-#             # store the DTs
-#             xdt[i] = x[:, :]
-#             ydt[i] = y[:, :]
-#             # update initial values and the coefficient matrix
-#
-#             x[0, :] = (x.T @ dt_array).reshape(-1, )
-#             y[0, :] = (y.T @ dt_array).reshape(-1, )
-#
-#             t = t + dt
-#             i = i + 1
-#         return xdt, ydt
-
-
-def Rodas(dae: DAE,
+def Rodas(dae: nDAE,
           tspan: Union[List, np.ndarray],
-          y0: Vars,
-          z0: Vars = None,
+          y0: np.ndarray,
           opt: Opt = None):
-    if opt is None:
-        opt = Opt()
-    stats = Stats(opt.scheme)
-
-    rparam = Rodas_param(opt.scheme)
-
-    if z0 is not None:
-        y0 = combine_Vars(y0, z0)
-
-    tspan = np.array(tspan)
-    tend = tspan[-1]
-    t0 = tspan[0]
-    if opt.hmax is None:
-        opt.hmax = np.abs(tend - t0)
-    nt = 0
-    t = 0
-    hmin = 16 * np.spacing(t)
-    uround = np.spacing(1.0)
-    T = np.zeros((10001,))
-    T[nt] = t0
-    y = TimeVars(y0, 10000)
-
-    y0_alias = y0.derive_alias('0')
-    dae.update_param(y0_alias)
-
-    dense_output = False
-    n_tspan = len(tspan)
-    told = t0
-    if n_tspan > 2:
-        dense_output = True
-        inext = 1
-        tnext = tspan[inext]
-
-    # The initial step size
-    if opt.hinit is None:
-        dt = 1e-6 * (tend - t0)
-    else:
-        dt = opt.hinit
-
-    dt = np.maximum(dt, hmin)
-    dt = np.minimum(dt, opt.hmax)
-
-    dae.assign_eqn_var_address(y0)
-
-    M = dae.M
-
-    done = False
-    reject = 0
-    while not done:
-        # step size too small
-        # pass
-
-        if np.abs(dt) < uround:
-            print(f"Error exit of RODAS at time = {t}: step size too small h = {dt}.\n")
-
-        # Stretch the step if within 10% of T-t.
-        if t + dt >= tend:
-            dt = tend - t
-        else:
-            dt = np.minimum(dt, 0.5 * (tend - t))
-
-        if opt.fix_h:
-            dt = opt.hinit
-
-        if done:
-            break
-        K = np.zeros((dae.vsize, rparam.s))
-
-        if reject == 0:
-            J = dae.j(t, y0)
-
-        dfdt0 = dt * dfdt(dae, t, y0)
-        rhs = dae.F(t, y0) + rparam.g[0] * dfdt0
-        stats.nfeval = stats.nfeval + 1
-
-        lu = sla.splu(M - dt * rparam.gamma * J)
-        stats.ndecomp = stats.ndecomp + 1
-        K[:, 0] = lu.solve(rhs)
-
-        for j in range(1, rparam.s):
-            sum_1 = K @ rparam.alpha[:, j]
-            sum_2 = K @ rparam.gamma_tilde[:, j]
-            y1 = y0 + dt * sum_1
-
-            rhs = dae.F(t + dt * rparam.a[j], y1) + M @ sum_2 + rparam.g[j] * dfdt0
-            stats.nfeval = stats.nfeval + 1
-            sol = lu.solve(rhs)
-            K[:, j] = sol - sum_2
-
-        sum_1 = K @ (dt * rparam.b)
-        ynew = y0 + sum_1
-        if not opt.fix_h:
-            sum_2 = K @ (dt * rparam.bd)
-            SK = (opt.atol + opt.rtol * abs(ynew)).reshape((-1,))
-            err = np.max(np.abs((sum_1 - sum_2) / SK))
-            if np.any(np.isinf(ynew)) or np.any(np.isnan(ynew)):
-                err = 1.0e6
-                print('Warning Rodas: NaN or Inf occurs.')
-            err = np.maximum(err, 1.0e-6)
-            fac = opt.f_savety / (err ** (1 / rparam.pord))
-            fac = np.minimum(opt.facmax, np.maximum(opt.fac1, fac))
-            dtnew = dt * fac
-        else:
-            err = 1.0
-            dtnew = dt
-
-        if err <= 1.0:
-            reject = 0
-            told = t
-            t = t + dt
-            stats.nstep = stats.nstep + 1
-
-            if dense_output:  # dense_output
-                while t >= tnext > told:
-                    tau = (tnext - told) / dt
-                    ynext = y0 + tau * dt * K @ (rparam.b + (tau - 1) * (rparam.c + tau * (rparam.d + tau * rparam.e)))
-                    nt = nt + 1
-                    T[nt] = tnext
-                    y[nt] = ynext
-                    inext = inext + 1
-                    if inext <= n_tspan - 1:
-                        tnext = tspan[inext]
-                    else:
-                        tnext = tend + dt
-            else:
-                nt = nt + 1
-                T[nt] = t
-                y[nt] = ynew
-
-            if np.abs(tend - t) < uround:
-                done = True
-            y0 = ynew
-            opt.facmax = opt.fac2
-            y0_alias.array[:] = y0.array[:]
-            dae.update_param(y0_alias)
-
-        else:
-            reject = reject + 1
-            stats.nreject = stats.nreject + 1
-            opt.facmax = 1
-        dt = np.min([opt.hmax, np.max([hmin, dtnew])])
-
-    T = T[0:nt + 1]
-    y = y[0:nt + 1]
-    return T, y, stats
-
-
-def Rodas_numerical(dae: nDAE,
-                    tspan: Union[List, np.ndarray],
-                    y0: np.ndarray,
-                    opt: Opt = None):
     if opt is None:
         opt = Opt()
     stats = Stats(opt.scheme)
@@ -597,6 +323,7 @@ def Rodas_numerical(dae: nDAE,
 
         if np.abs(dt) < uround:
             print(f"Error exit of RODAS at time = {t}: step size too small h = {dt}.\n")
+            break
 
         # Stretch the step if within 10% of T-t.
         if t + dt >= tend:

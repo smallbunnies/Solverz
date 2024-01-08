@@ -3,69 +3,68 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
-from Solverz import idx, Var, as_Vars, Eqn, DAE, Rodas, Param, HyperbolicPde, minmod_flag, IdxParam, made_numerical, \
-    Rodas_numerical, Opt, parse_dae_v
+from Solverz import idx, Var, as_Vars, Eqn, DAE, Rodas, Param, HyperbolicPde, minmod_flag, IdxParam, made_numerical, Opt, parse_dae_v
 
 # %% non-periodical boundary condition
 # 1st-order scheme
-T = 2
-L = 2 * np.pi
-Y1_np = []  # results 1st-order non-periodical
-for ndx in [100, 200]:
-    dx = L / ndx
-
-    x = np.linspace(0 - dx / 2, L + dx / 2, ndx + 2)
-    u0 = np.sin(x)
-    u = Var('u', value=u0)
-    uL = Var('uL', value=0)
-    uR = Var('uR', value=0)
-
-    pde = HyperbolicPde("Inviscid burger's equation",
-                        diff_var=u,
-                        flux=u ** 2 / 2,
-                        two_dim_var=u)
-
-    dae0 = pde.semi_discretize(scheme=2)
-
-    aeul = Eqn('equation of ul',
-               uR - uL)
-    aeur = Eqn('equation of ur',
-               uL)
-
-    dae = DAE(dae0 + [aeul, aeur])
-    dae.param_initializer('M', IdxParam('M', value=np.array([ndx + 1])))
-
-
-    def max_func1(u, M1):
-        return np.maximum(np.abs(u[2:M1 + 1]), np.abs(u[1:M1]))
-
-
-    def max_func2(u, M1):
-        return np.maximum(np.abs(np.abs(u[1:M1])), np.abs(u[0:M1 - 1]))
-
-
-    dae.param_initializer('ajp12',
-                          Param(name='ajp12',
-                                triggerable=True,
-                                trigger_var='u',
-                                trigger_fun=partial(max_func1,
-                                                    M1=ndx + 1)))
-    dae.param_initializer('ajm12',
-                          Param(name='ajm12',
-                                triggerable=True,
-                                trigger_var='u',
-                                trigger_fun=partial(max_func2,
-                                                    M1=ndx + 1)))
-
-    dae.param_initializer('dx',
-                          Param(name='dx', value=np.array([L / ndx])))
-
-    uL = Var('uL', value=0)
-    uR = Var('uR', value=0)
-    Tp, Y1, stats1 = Rodas(dae,
-                           np.linspace(0, T, 201),
-                           as_Vars([u, uR, uL]))
-    Y1_np.append(Y1)
+# T = 2
+# L = 2 * np.pi
+# Y1_np = []  # results 1st-order non-periodical
+# for ndx in [100, 200]:
+#     dx = L / ndx
+#
+#     x = np.linspace(0 - dx / 2, L + dx / 2, ndx + 2)
+#     u0 = np.sin(x)
+#     u = Var('u', value=u0)
+#     uL = Var('uL', value=0)
+#     uR = Var('uR', value=0)
+#
+#     pde = HyperbolicPde("Inviscid burger's equation",
+#                         diff_var=u,
+#                         flux=u ** 2 / 2,
+#                         two_dim_var=u)
+#
+#     dae0 = pde.semi_discretize(scheme=2)
+#
+#     aeul = Eqn('equation of ul',
+#                uR - uL)
+#     aeur = Eqn('equation of ur',
+#                uL)
+#
+#     dae = DAE(dae0 + [aeul, aeur])
+#     dae.param_initializer('M', IdxParam('M', value=np.array([ndx + 1])))
+#
+#
+#     def max_func1(u, M1):
+#         return np.maximum(np.abs(u[2:M1 + 1]), np.abs(u[1:M1]))
+#
+#
+#     def max_func2(u, M1):
+#         return np.maximum(np.abs(np.abs(u[1:M1])), np.abs(u[0:M1 - 1]))
+#
+#
+#     dae.param_initializer('ajp12',
+#                           Param(name='ajp12',
+#                                 triggerable=True,
+#                                 trigger_var='u',
+#                                 trigger_fun=partial(max_func1,
+#                                                     M1=ndx + 1)))
+#     dae.param_initializer('ajm12',
+#                           Param(name='ajm12',
+#                                 triggerable=True,
+#                                 trigger_var='u',
+#                                 trigger_fun=partial(max_func2,
+#                                                     M1=ndx + 1)))
+#
+#     dae.param_initializer('dx',
+#                           Param(name='dx', value=np.array([L / ndx])))
+#
+#     uL = Var('uL', value=0)
+#     uR = Var('uR', value=0)
+#     Tp, Y1, stats1 = Rodas(dae,
+#                            np.linspace(0, T, 201),
+#                            as_Vars([u, uR, uL]))
+#     Y1_np.append(Y1)
 
 # 2nd-order scheme
 # Y2_np = []  # results 2nd-order non-periodical

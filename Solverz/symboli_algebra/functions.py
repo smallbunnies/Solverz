@@ -4,6 +4,13 @@ from sympy import Symbol, Function, Number, S, Integer
 from sympy.core.function import ArgumentIndexError
 
 
+class F(Function):
+    """
+    For the usage of denoting the function being differentiated in EqnDiff object only
+    """
+    pass
+
+
 class MatrixFunction(Function):
     """
     The basic Function class of matrix computation
@@ -226,7 +233,7 @@ class switch(Function):
         return switch(*[arg.diff(s) for arg in self.args[0:len(self.args) - 1]], self.args[-1])
 
     def _numpycode(self, printer, **kwargs):
-        return r'switch(' + ','.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+        return r'switch(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
@@ -265,10 +272,10 @@ class zeros(Function):
         if len(self.args) == 2:
             temp1 = printer._print(self.args[0])
             temp2 = printer._print(self.args[1])
-            return r'zeros((' + temp1 + ',' + temp2 + r'))'
+            return r'zeros((' + temp1 + ', ' + temp2 + r'))'
         elif len(self.args) == 1:
             temp = printer._print(self.args[0])
-            return r'zeros((' + temp + ',' + r'))'
+            return r'zeros((' + temp + ', ' + r'))'
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
@@ -288,20 +295,6 @@ class CSC_array(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class SolList(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if any([not isinstance(arg, Integer) for arg in args]):
-            raise ValueError(f"Solverz' list object accepts only integer inputs.")
-
-    def _numpycode(self, printer, **kwargs):
-        return r'[' + ','.join([printer._print(arg) for arg in self.args]) + r']'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-
 class Arange(Function):
     """
     Solverz' arange function
@@ -315,7 +308,7 @@ class Arange(Function):
             raise ValueError(f"Solverz' arange object takes 2 positional arguments but {len(args)} were given!")
 
     def _numpycode(self, printer, **kwargs):
-        return r'arange(' + ','.join([printer._print(arg) for arg in self.args]) + r')'
+        return r'arange(' + ', '.join([printer._print(arg) for arg in self.args]) + r')'
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)

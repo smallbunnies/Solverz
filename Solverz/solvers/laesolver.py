@@ -1,7 +1,7 @@
 from typing import Union
 
 import numpy as np
-from scipy.sparse import csc_array, linalg as sla
+from scipy.sparse import csc_array, csr_array, linalg as sla
 import scipy.linalg as dla
 
 
@@ -22,15 +22,15 @@ def lu_decomposition(A: Union[np.ndarray, csc_array]):
 class dense_decomposition:
     def __init__(self,
                  A: np.ndarray):
-        self.PL, self.U = dla.lu(A, permute_l=True)
+        self.A = A
 
     def solve(self, b):
-        return solve(self.U, solve(self.PL, b))
+        return solve(self.A, b)
 
 
 class sp_decomposition:
     def __init__(self,
-                 A: csc_array):
+                 A: Union[csc_array, csr_array]):
         self.lu = sla.splu(A)
 
     def solve(self, b):

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from Solverz import DAE, Eqn, Ode, Var, Para, idx, sin, cos, Rodas, as_Vars, Mat_Mul, \
-    implicit_trapezoid, implicit_trapezoid_numerical, Opt, TimeSeriesParam
+    implicit_trapezoid, Opt, TimeSeriesParam, made_numerical, parse_dae_v
 
 omega = Var(name='omega')
 delta = Var(name='delta')
@@ -80,45 +80,20 @@ Uy = Var('Uy',
           -0.0396760163416718, -0.0692587531054159, -0.0651191654677445,
           0.0665507083524658, 0.0129050646926083, 0.0354351211556429])
 
-# T, y_trape, stats = implicit_trapezoid(m3b9,
-#                                        tspan=[0, T],
-#                                        y0=as_Vars([delta, omega, Ixg, Iyg, Ux, Uy]),
-#                                        dt=dt)
-# T1, y, stats2 = Rodas(m3b9,
-#                       tspan=np.linspace(0, 10, 5001).reshape(-1, ),  # [0, 10]
-#                       y0=as_Vars([delta, omega, Ixg, Iyg, Ux, Uy]),
-#                       opt=Opt(hinit=1e-5))
-
-from Solverz.numerical_interface.code_printer import print_F, print_J, Solverzlambdify
-from Solverz.numerical_interface.num_eqn import nDAE, parse_dae_v, parse_p
-from Solverz.solvers.daesolver import Rodas_numerical
 
 y0 = as_Vars([delta, omega, Ixg, Iyg, Ux, Uy])
-m3b9.assign_eqn_var_address(y0)
-code_g = print_F(m3b9)
 
-F = Solverzlambdify(code_g, 'F_', modules=['numpy'])
-F0 = m3b9.F(None, y0)
-Fv = F(0, y0.array, parse_p(m3b9))
-
-code_J = print_J(m3b9)
-from scipy.sparse import csc_array
-
-J = Solverzlambdify(code_J, 'J_', modules=['numpy'])
-J0 = m3b9.j(0, y0)
-Jv = J(0, y0.array, parse_p(m3b9))
-
-dae = nDAE(m3b9.M, F, J, parse_p(m3b9))
-T1, y, stats2 = Rodas_numerical(dae=dae,
-                                tspan=np.linspace(0, 10, 5001).reshape(-1, ),  # [0, 10]
-                                y0=y0.array,
-                                opt=Opt(hinit=1e-5))
+m3b9_dae, code = made_numerical(m3b9, y0, sparse=False, output_code=True)
+T1, y, stats2 = Rodas(dae=m3b9_dae,
+                      tspan=np.linspace(0, 10, 5001).reshape(-1, ),
+                      y0=y0.array,
+                      opt=Opt(hinit=1e-5))
 y = parse_dae_v(y, m3b9.var_address)
 
-T, y_trape, stats = implicit_trapezoid_numerical(dae,
-                                                 tspan=[0, 10],
-                                                 y0=y0.array,
-                                                 dt=dt)
+T, y_trape, stats = implicit_trapezoid(m3b9_dae,
+                                       tspan=[0, 10],
+                                       y0=y0.array,
+                                       dt=dt)
 y_trape = parse_dae_v(y_trape, m3b9.var_address)
 
 

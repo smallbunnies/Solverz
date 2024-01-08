@@ -38,6 +38,7 @@ class Equations:
         self.PARAM: Dict[str, Param] = dict()
         self.triggerable_quantity: Dict[str, str] = dict()
         self.trigger_quantity_cache: Dict[str, Dict[str, np.ndarray]] = dict()
+        self.jac_element_address = Address()
 
         if isinstance(eqn, Eqn):
             eqn = [eqn]
@@ -343,10 +344,13 @@ class AE(Equations):
                 # This facilitates efficient construction of finite element matrices and the like.
                 if value.ndim == 2:  # matrix
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 2
-                elif value.ndim == 1:  # vector
+                    warnings.warn('Address assignment of matrix derivative unimplemented!')
+                elif value.ndim == 1 and value.shape[0] != 1:  # vector
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 1
+                    # self.jac_element_address.add((eqn_name, var_name, eqndiff), value.shape[0])
                 else:  # np.dim ==0  scalar in np.ndarray
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
+                    # self.jac_element_address.add((eqn_name, var_name, eqndiff), self.a.size[eqn_name])
 
     def g(self, y: Vars, eqn: str = None) -> np.ndarray:
         """
@@ -518,6 +522,7 @@ class DAE(Equations):
             fg_xy.extend(self.g_xy(0, *xys))
         for gy_tuple in fg_xy:
             eqn_name = gy_tuple[0]
+            var_name = gy_tuple[1]
             eqndiff = gy_tuple[2]
             value = gy_tuple[3]
             if isinstance(value, (np.ndarray, csc_array)):
@@ -526,10 +531,13 @@ class DAE(Equations):
                 # This facilitates efficient construction of finite element matrices and the like.
                 if value.ndim == 2:  # matrix
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 2
-                elif value.ndim == 1:  # vector
+                    warnings.warn('Address assignment of matrix derivative unimplemented!')
+                elif value.ndim == 1 and value.shape[0] != 1:  # vector
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 1
+                    # self.jac_element_address.add((eqn_name, var_name, eqndiff), value.shape[0])
                 else:  # np.dim ==0  scalar in np.ndarray
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
+                    # self.jac_element_address.add((eqn_name, var_name, eqndiff), self.a.size[eqn_name])
 
     def F(self, t, *xys) -> np.ndarray:
         """
@@ -676,7 +684,7 @@ class DAE(Equations):
                         if var_idx.start is not None:
                             temp.append(var_idx.start)
                         if var_idx.stop is not None:
-                            temp.append(var_idx.stop + 1)
+                            temp.append(var_idx.stop)
                         if var_idx.step is not None:
                             temp.append(var_idx.step)
                         temp_func = Eqn('To evaluate var_idx of variable' + diff_var.name, Slice(*temp))

@@ -1,38 +1,17 @@
 from __future__ import annotations
 
 import numpy as np
-from numpy import abs, max, min, sum, sqrt
-# from cvxopt import matrix
+from numpy import abs, max
 
-from Solverz.equation.equations import AE
 from Solverz.numerical_interface.num_eqn import nAE
 from Solverz.solvers.laesolver import solve
-from Solverz.variable.variables import Vars
+from Solverz.solvers.option import Opt
 
 
-def nr_method(eqn: AE,
-              y: Vars,
+def nr_method(eqn: nAE,
+              y: np.ndarray,
               tol: float = 1e-8,
               stats=False):
-    df = eqn.g(y)
-    ite = 0
-    while max(abs(df)) > tol:
-        ite = ite + 1
-        y = y - solve(eqn.j(y), df)
-        df = eqn.g(y)
-        if ite >= 100:
-            print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
-            break
-    if not stats:
-        return y
-    else:
-        return y, ite
-
-
-def nr_method_numerical(eqn: nAE,
-                        y: np.ndarray,
-                        tol: float = 1e-8,
-                        stats=False):
     p = eqn.p
     df = eqn.g(y, p)
     ite = 0
@@ -49,13 +28,21 @@ def nr_method_numerical(eqn: nAE,
         return y, ite
 
 
-def continuous_nr(eqn: AE,
-                  y: Vars,
+def continuous_nr(eqn: nAE,
+                  y: np.ndarray,
                   tol: float = 1e-8,
-                  dt=1,
-                  hmax=1.7):
-    def f(y) -> np.ndarray:
-        return -solve(eqn.j(y), eqn.g(y))
+                  stats=False,
+                  opt=None):
+    p = eqn.p
+    if opt is None:
+        dt = 1
+        hmax = 1.7
+    else:
+        dt = opt.hinit
+        hmax = opt.hmax
+
+    def f(y_, p_) -> np.ndarray:
+        return -solve(eqn.J(y_, p_), eqn.g(y_, p_))
 
     Pow = 1 / 5
     # c2, c3, c4, c5 = 1 / 5, 3 / 10, 4 / 5, 8 / 9 for non-autonomous equations
@@ -75,20 +62,20 @@ def continuous_nr(eqn: AE,
     hmin = 16 * np.spacing(0)
     # atol and rtol can not be too small
     ite = 0
-    df = eqn.g(y)
+    df = eqn.g(y, p)
     while max(abs(df)) > tol:
         ite = ite + 1
         err = 2
         nofailed = True
         while err > rtol:
-            k1 = f(y)
-            k2 = f(y + dt * a11 * k1)
-            k3 = f(y + dt * (a21 * k1 + a22 * k2))
-            k4 = f(y + dt * (a31 * k1 + a32 * k2 + a33 * k3))
-            k5 = f(y + dt * (a41 * k1 + a42 * k2 + a43 * k3 + a44 * k4))
-            k6 = f(y + dt * (a51 * k1 + a52 * k2 + a53 * k3 + a54 * k4 + a55 * k5))
+            k1 = f(y, p)
+            k2 = f(y + dt * a11 * k1, p)
+            k3 = f(y + dt * (a21 * k1 + a22 * k2), p)
+            k4 = f(y + dt * (a31 * k1 + a32 * k2 + a33 * k3), p)
+            k5 = f(y + dt * (a41 * k1 + a42 * k2 + a43 * k3 + a44 * k4), p)
+            k6 = f(y + dt * (a51 * k1 + a52 * k2 + a53 * k3 + a54 * k4 + a55 * k5), p)
             ynew = y + dt * (a61 * k1 + a63 * k3 + a64 * k4 + a65 * k5 + a66 * k6)  # y6 has nothing to do with k7
-            k7 = f(ynew)
+            k7 = f(ynew, p)
             kE = k1 * e1 + k3 * e3 + k4 * e4 + k5 * e5 + k6 * e6 + k7 * e7
 
             # error control
@@ -108,7 +95,7 @@ def continuous_nr(eqn: AE,
                 break
 
         y = ynew
-        df = eqn.g(y)
+        df = eqn.g(y, p)
 
         if nofailed:  # Enlarge step size if no failure is met
             temp = 1.25 * (err / rtol) ** Pow

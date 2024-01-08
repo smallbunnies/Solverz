@@ -128,12 +128,12 @@ class IdxSymBasic(Symbol):
                 step = index.step
                 if any([isinstance(arg, (idx, Expr)) for arg in [start, stop, step]]):
                     start = IndexCodePrinter(start, printer) if start is not None else None
-                    stop = IndexCodePrinter(stop + 1, printer) if stop is not None else None
+                    stop = IndexCodePrinter(stop, printer) if stop is not None else None
                     step = IndexCodePrinter(step, printer) if step is not None else None
                     return 'sol_slice({i}, {j}, {k})'.format(i=start, j=stop, k=step)
                 else:
                     start = IndexCodePrinter(start, printer) if start is not None else ''
-                    stop = IndexCodePrinter(stop + 1, printer) if stop is not None else ''
+                    stop = IndexCodePrinter(stop, printer) if stop is not None else ''
                     slice_str = '{i}:{j}'.format(i=start, j=stop)
                     slice_str += f':{IndexCodePrinter(step, printer)}' if step is not None else ''
                     return slice_str

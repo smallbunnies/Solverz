@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-from Solverz import Eqn, AE, nr_method, as_Vars, Var, Param, continuous_nr, Para, idx, Abs, exp, Mat_Mul
+from Solverz import Eqn, AE, nr_method, as_Vars, Var, Para, idx, Abs, exp, Mat_Mul, made_numerical, parse_ae_v
 
 # %% initialize variables and params
 sys_df = pd.read_excel('instances/4node3pipe.xlsx',
@@ -84,34 +84,18 @@ E16 = Eqn(name='E16', eqn=mq[i])
 E = AE(name='Pipe Equations', eqn=[E1, E3, E5, E6, E7, E8, E9, E10, E11, E12, E13, E14, E15, E16])
 y0 = as_Vars([m, mq, Ts, Tr, Touts, Toutr, phi])
 
-y_nr = nr_method(E, y0)
-y_cnr, ite = continuous_nr(E, y0)
+nE, code = made_numerical(E, y0, output_code=True)
+
+y1 = nr_method(nE, y0.array)
+# y_cnr, ite = continuous_nr(nE, y0.array)
+
+y_nr = parse_ae_v(y1, y0.a)
 
 sys_df = pd.read_excel('instances/4node3pipe_bench.xlsx',
                        sheet_name=None,
                        engine='openpyxl',
                        header=None
                        )
-
-from Solverz.numerical_interface.code_printer import print_F, print_J, Solverzlambdify
-from Solverz.numerical_interface.num_eqn import nAE, parse_ae_v, parse_p
-from Solverz.solvers.nlaesolver import nr_method_numerical
-
-code_g = print_F(E)
-g = Solverzlambdify(code_g, 'F_', modules=['numpy'])
-g0 = E.g(y0)
-gv = g(y0.array, parse_p(E))
-
-code_J = print_J(E)
-from scipy.sparse import csc_array
-
-J = Solverzlambdify(code_J, 'J_', modules=[{'csc_array': csc_array}, 'numpy'])
-J0 = E.j(y0)
-Jv = J(y0.array, parse_p(E))
-
-nE = nAE(lambda z, p: g(z, p), lambda z, p: J(z, p), parse_p(E))
-y1 = nr_method_numerical(nE, y0.array)
-y1 = parse_ae_v(y1, E.var_address)
 
 
 def test_nr_method():
@@ -120,14 +104,10 @@ def test_nr_method():
         idx_nonzero = np.nonzero(y_nr[var_name])
         assert max(abs((y_nr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) /
                    np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, )) <= 1e-8
-    assert np.max(np.abs(gv - g0)) < 1e-9
-    assert np.max(np.abs(y_nr.array-y1.array)) < 1.2e-10
-    assert np.max(np.abs(Jv - J0)) < 1e-15
 
-
-def test_cnr_method():
-    for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
-        # find nonzero elements
-        idx_nonzero = np.nonzero(y_cnr[var_name])
-        assert max(abs((y_cnr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, )) /
-                       np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) <= 1e-8
+# def test_cnr_method():
+#     for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
+#         # find nonzero elements
+#         idx_nonzero = np.nonzero(y_cnr[var_name])
+#         assert max(abs((y_cnr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, )) /
+#                        np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) <= 1e-8

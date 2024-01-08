@@ -67,17 +67,17 @@ def test_numpy_code_printer():
     k = idx('k')
     fzk = lambdify([z, k], z[1:k], modules=modules)
     assert (inspect.getsource(fzk) ==
-            "def _lambdifygenerated(z, k):\n    return z[sol_slice(1, k + 1, None)]\n")
+            "def _lambdifygenerated(z, k):\n    return z[sol_slice(1, k, None)]\n")
     z = np.array([-1, -2, -3, -7]).reshape((-1, 1))
     k = np.array([3])
-    assert np.isclose(fzk(z, k), np.array([[-2], [-3], [-7]])).all()
+    assert np.isclose(fzk(z, k), np.array([[-2], [-3]])).all()
 
     z = Var('z')
     M = idx('M')
     j = idx('j')
     fzMj = lambdify([z, M, j], z[1:M[j] + 2], modules=modules)
     assert (inspect.getsource(fzMj) ==
-            "def _lambdifygenerated(z, M, j):\n    return z[sol_slice(1, M[j] + 3, None)]\n")
+            "def _lambdifygenerated(z, M, j):\n    return z[sol_slice(1, M[j] + 2, None)]\n")
     z = np.array([-1, -2, -3, -7]).reshape((-1, 1))
     M = np.array([0, 3, 1])
     j = np.array([1])
@@ -97,7 +97,7 @@ def test_numpy_code_printer():
     j = idx('j')
     fkjG = lambdify([k, j, G], G[:, 1:k[j] - 1:2], modules=modules)
     assert (inspect.getsource(fkjG) ==
-            "def _lambdifygenerated(k, j, G):\n    return G[:,sol_slice(1, k[j], 2)]\n")
+            "def _lambdifygenerated(k, j, G):\n    return G[:,sol_slice(1, k[j] - 1, 2)]\n")
     G = np.random.randn(3, 3)
     k = np.array([0, 2])
     j = [1]

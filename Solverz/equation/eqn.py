@@ -3,14 +3,14 @@ from __future__ import annotations
 from typing import Union, List, Dict, Callable
 
 import numpy as np
-import sympy
-from sympy import Symbol, Expr, latex, Derivative, sympify, simplify
+from sympy import Symbol, Expr, latex, Derivative, sympify
 from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
 from Solverz.symboli_algebra.symbols import Var, Para, IdxVar, idx, IdxPara, AliasVar, IdxAliasVar
-from Solverz.symboli_algebra.functions import Mat_Mul, Slice, switch
+from Solverz.symboli_algebra.functions import Mat_Mul, Slice, F
 from Solverz.symboli_algebra.matrix_calculus import MixedEquationDiff
+from Solverz.symboli_algebra.transform import finite_difference, semi_descritize
 from Solverz.numerical_interface.custom_function import numerical_interface
 
 
@@ -113,13 +113,13 @@ class EqnDiff(Eqn):
                 if var_idx.start is not None:
                     temp.append(var_idx.start)
                 if var_idx.stop is not None:
-                    temp.append(var_idx.stop + 1)
+                    temp.append(var_idx.stop)
                 if var_idx.step is not None:
                     temp.append(var_idx.step)
                 self.var_idx_func = Eqn('To evaluate var_idx of variable' + self.diff_var.name, Slice(*temp))
             elif isinstance(self.var_idx, Expr):
                 self.var_idx_func = Eqn('To evaluate var_idx of variable' + self.diff_var.name, self.var_idx)
-        self.LHS = Derivative(sympy.Function('g'), diff_var)
+        self.LHS = Derivative(F, diff_var)
         self.dim = -1
 
 
@@ -191,7 +191,7 @@ class HyperbolicPde(Pde):
     def derive_derivative(self):
         pass
 
-    def finite_difference(self, scheme=1, direction=None, M: int = 0):
+    def finite_difference(self, scheme='central diff', direction=None, M: int = 0):
         r"""
         Discretize hyperbolic PDE as AEs.
 
@@ -262,9 +262,9 @@ class HyperbolicPde(Pde):
             .. math::
 
                 \begin{aligned}
-                    0=&\Delta x(\tilde{u}[1:M]-\tilde{u}^0[1:M]+\tilde{u}[0:M-1]-\tilde{u}^0[0:M-1])+\\
-                      &\Delta t(f(\tilde{u}[1:M])-f(\tilde{u}[0:M-1])+f(\tilde{u}^0[1:M])-f(\tilde{u}^0[0:M-1]))+\\
-                      &2\Delta x\Delta t\cdot S\left(\frac{u_{i+1}^{j+1}+u_{i}^{j+1}+u_{i+1}^{j}+u_{i}^{j}}{4}\right)
+                    0=&\Delta x(\tilde{u}[1:M_]-\tilde{u}^0[1:M_]+\tilde{u}[0:M_-1]-\tilde{u}^0[0:M_-1])+\\
+                      &\Delta t(f(\tilde{u}[1:M_])-f(\tilde{u}[0:M_-1])+f(\tilde{u}^0[1:M_])-f(\tilde{u}^0[0:M_-1]))+\\
+                      &2\Delta x\Delta t\cdot S\left(\tilde{u}[1:M_]-\tilde{u}^0[1:M_]+\tilde{u}[0:M_-1]-\tilde{u}^0[0:M_-1]}{4}\right)
                 \end{aligned}
 
             where we denote by vector $\tilde{u}$ the discrete spatial distribution of state $u$, by $\tilde{u}^0$ the
@@ -279,63 +279,25 @@ class HyperbolicPde(Pde):
         if M == 0:
             M = idx('M')
 
-        if scheme == 1:
-            dx = Para('dx')
-            dt = Para('dt')
-            u = self.diff_var
-            u0 = AliasVar(u.name + '0')
+        if scheme == 'central diff':
+            return Eqn('FDM of ' + self.name + 'w.r.t.' + self.diff_var.name + 'using central diff',
+                       finite_difference(self.diff_var,
+                                         self.flux,
+                                         self.source,
+                                         self.two_dim_var,
+                                         M,
+                                         'central diff'))
+        elif scheme == 'euler':
+            return Eqn('FDM of ' + self.name + 'w.r.t.' + self.diff_var.name + 'using Euler',
+                       finite_difference(self.diff_var,
+                                         self.flux,
+                                         self.source,
+                                         self.two_dim_var,
+                                         M,
+                                         'euler',
+                                         direction=direction))
 
-            fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
-            fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
-            fui1j = self.flux.subs([(a, AliasVar(a.name + '0')[1:M]) for a in self.two_dim_var])
-            fuij = self.flux.subs([(a, AliasVar(a.name + '0')[0:M - 1]) for a in self.two_dim_var])
-
-            S = self.source.subs(
-                [(a, (a[1:M] + a[0:M - 1] + AliasVar(a.name + '0')[1:M] + AliasVar(a.name + '0')[0:M - 1]) / 4) for a in
-                 self.two_dim_var])
-
-            ae = dx * (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) \
-                 + simplify(dt * (fui1j1 - fuij1 + fui1j - fuij)) \
-                 - simplify(2 * dx * dt * S)
-
-            # ae = (u[1:M] - u0[1:M] + u[0:M - 1] - u0[0:M - 1]) / dt \
-            #      + simplify((fui1j1 - fuij1 + fui1j - fuij))/dx\
-            #      - simplify(2 * S)
-
-            return Eqn('FDM of ' + self.name, ae)
-
-        elif scheme == 2:
-            if direction == 1:
-                dx = Para('dx')
-                dt = Para('dt')
-                u = self.diff_var
-                u0 = AliasVar(u.name + '0')
-
-                fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
-                fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
-                S = self.source.subs([(a, a[1:M]) for a in self.two_dim_var])
-                ae = dx * (u[1:M] - u0[1:M]) + simplify(dt * (fui1j1 - fuij1)) - simplify(dx * dt * S)
-
-                return Eqn('FDM of ' + self.name, ae)
-
-            elif direction == -1:
-
-                dx = Para('dx')
-                dt = Para('dt')
-                u = self.diff_var
-                u0 = AliasVar(u.name + '0')
-
-                fui1j1 = self.flux.subs([(a, a[1:M]) for a in self.two_dim_var])
-                fuij1 = self.flux.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
-                S = self.source.subs([(a, a[0:M - 1]) for a in self.two_dim_var])
-                ae = dx * (u[0:M - 1] - u0[0:M - 1]) + simplify(dt * (fui1j1 - fuij1)) - simplify(dx * dt * S)
-
-                return Eqn('FDM of ' + self.name, ae)
-
-            else:
-                raise ValueError(f"Unimplemented direction {direction}!")
-
-    def semi_discretize(self, a0=None, a1=None, scheme=1, M: int = 0, output_boundary=True) -> List[Eqn]:
+    def semi_discretize(self, a0=None, a1=None, scheme='TVD1', M: int = 0, output_boundary=True) -> List[Eqn]:
         r"""
         Semi-discretize the hyperbolic PDE of nonlinear conservation law as ODEs using the Kurganov-Tadmor scheme
         (see [Kurganov2000]_). The difference stencil is as follows, with $x_{j+1}-x_{j}=\Delta x$.
@@ -370,7 +332,7 @@ class HyperbolicPde(Pde):
 
                 a_{j-1/2}=\max\qty{\rho\qty(\pdv{f}{u}\qty(u^+_{j-1/2})),\rho\qty(\pdv{f}{u}\qty(u^-_{j-1/2}))}.
 
-        scheme : int
+        scheme : str
 
             If scheme==1, 2nd scheme else, else, use 1st scheme.
 
@@ -446,119 +408,49 @@ class HyperbolicPde(Pde):
             raise TypeError(f'Do not support M of type {type(M)}')
         if M == 0:
             M = idx('M')
-
-        if a0 is None:
-            a0 = Para('ajp12')
-        if a1 is None:
-            a1 = Para('ajm12')
-
-        dx = Para('dx')
         u = self.diff_var
         dae_list = []
-        if scheme == 1:
-            # j=1
-            # f(u[2])
-            fu2 = self.flux.subs([(var, var[2]) for var in self.two_dim_var])
-            # f(u[0])=f(2*uL-u[1])
-            fu0 = self.flux.subs([(var, var[0]) for var in self.two_dim_var])
-            # S(u[1])
-            Su1 = self.source.subs([(var, var[1]) for var in self.two_dim_var])
-            ode_rhs1 = -simplify((fu2 - fu0) / (2 * dx)) \
-                       + simplify((a0[0] * (u[2] - u[1]) - a1[0] * (u[1] - u[0])) / (2 * dx)) \
-                       + simplify(Su1)
-
-            # j=M-1
-            # f(u[M])=f(2*uR-u[M-1])
-            fum = self.flux.subs([(var, var[M]) for var in self.two_dim_var])
-            # f(u[M-2])
-            fum2 = self.flux.subs([(var, var[M - 2]) for var in self.two_dim_var])
-            # S(u[M-1])
-            SuM1 = self.source.subs([(var, var[M - 1]) for var in self.two_dim_var])
-            ode_rhs3 = -simplify((fum - fum2) / (2 * dx)) \
-                       + simplify((a0[-1] * (u[M] - u[M - 1]) - a1[-1] * (u[M - 1] - u[M - 2])) / (2 * dx)) \
-                       + simplify(SuM1)
-
-            # 2<=j<=M-2
-            def ujprime(U: IdxVar, v: int):
-                # for given u_j,
-                # returns
-                # u^+_{j+1/2} case v==0,
-                # u^-_{j+1/2} case 1,
-                # u^+_{j-1/2} case 2,
-                # u^-_{j-1/2} case 3
-                if not isinstance(U.index, slice):
-                    raise TypeError("Index of IdxVar must be slice object")
-                start = U.index.start
-                stop = U.index.stop
-                step = U.index.step
-                U = U.symbol0
-                Ux = Var(U.name + 'x')
-
-                # u_j
-                Uj = U[start:stop:step]
-                # (u_x)_j
-                Uxj = Ux[start:stop:step]
-                # u_{j+1}
-                Ujp1 = U[start + 1:stop + 1:step]
-                # (u_x)_{j+1}
-                Uxjp1 = Ux[start + 1:stop + 1:step]
-                # u_{j-1}
-                Ujm1 = U[start - 1:stop - 1:step]
-                # (u_x)_{j-1}
-                Uxjm1 = Ux[start - 1:stop - 1:step]
-
-                if v == 0:
-                    return Ujp1 - dx / 2 * Uxjp1
-                elif v == 1:
-                    return Uj + dx / 2 * Uxj
-                elif v == 2:
-                    return Uj - dx / 2 * Uxj
-                elif v == 3:
-                    return Ujm1 + dx / 2 * Uxjm1
-                else:
-                    raise ValueError("v=0 or 1 or 2 or 3!")
-
-            # j\in [2:M-2]
-            Suj = self.source.subs([(var, var[2:M - 2]) for var in self.two_dim_var])
-            Hp = (self.flux.subs([(var, ujprime(var[2:M - 2], 0)) for var in self.two_dim_var]) +
-                  self.flux.subs([(var, ujprime(var[2:M - 2], 1)) for var in self.two_dim_var])) / 2 \
-                 - a0[2:M - 2] / 2 * (ujprime(u[2:M - 2], 0) - ujprime(u[2:M - 2], 1))
-            Hm = (self.flux.subs([(var, ujprime(var[2:M - 2], 2)) for var in self.two_dim_var]) +
-                  self.flux.subs([(var, ujprime(var[2:M - 2], 3)) for var in self.two_dim_var])) / 2 \
-                 - a1[2:M - 2] / 2 * (ujprime(u[2:M - 2], 2) - ujprime(u[2:M - 2], 3))
-            ode_rhs2 = -simplify(Hp - Hm) / dx + Suj
-
-            theta = Para('theta')
-            ux = Var(u.name + 'x')
-            minmod_flag = Para('minmod_flag_of_' + ux.name)
-            minmod_rhs = ux[1:M - 1] - switch(theta * (u[1:M - 1] - u[0:M - 2]) / dx,
-                                              (u[2:M] - u[0:M - 2]) / (2 * dx),
-                                              theta * (u[2:M] - u[1:M - 1]) / dx,
-                                              0,
-                                              minmod_flag)
-
-            dae_list.extend([Ode('SDM of ' + self.name + ' 1', ode_rhs1, u[1]),
-                             Ode('SDM of ' + self.name + ' 2', ode_rhs2, u[2:M - 2]),
-                             Ode('SDM of ' + self.name + ' 3', ode_rhs3, u[M - 1]),
-                             Eqn('minmod limiter 1 of ' + u.name, minmod_rhs),
-                             Eqn('minmod limiter 2 of ' + u.name, ux[0]),
-                             Eqn('minmod limiter 3 of ' + u.name, ux[M])])
-        elif scheme == 2:
-            # 1<=j<=M-1
-            # f(u[j+1])
-            fu1 = self.flux.subs([(var, var[2:M]) for var in self.two_dim_var])
-            # f(u[j-1])
-            fu2 = self.flux.subs([(var, var[0:M - 2]) for var in self.two_dim_var])
-            # S(u[j])
-            Su = self.source.subs([(var, var[1:M - 1]) for var in self.two_dim_var])
-            ode_rhs = -simplify((fu1 - fu2) / (2 * dx)) \
-                      + simplify((a0 * (u[2:M] - u[1:M - 1]) - a1 * (u[1:M - 1] - u[0:M - 2])) / (2 * dx)) \
-                      + simplify(Su)
-
-            dae_list.extend([Ode('SDM of ' + self.name + ' 1', ode_rhs, u[1:M - 1])])
+        if scheme == 'TVD2':
+            eqn_dict = semi_descritize(self.diff_var,
+                                       self.flux,
+                                       self.source,
+                                       self.two_dim_var,
+                                       M,
+                                       scheme='TVD2',
+                                       a0=a0,
+                                       a1=a1)
+            dae_list.extend([Ode('SDM of ' + self.name + ' 1',
+                                 eqn_dict['Ode'][0][0],
+                                 eqn_dict['Ode'][0][1]),
+                             Ode('SDM of ' + self.name + ' 2',
+                                 eqn_dict['Ode'][1][0],
+                                 eqn_dict['Ode'][1][1]),
+                             Ode('SDM of ' + self.name + ' 3',
+                                 eqn_dict['Ode'][2][0],
+                                 eqn_dict['Ode'][2][1]),
+                             Eqn('minmod limiter 1 of ' + u.name,
+                                 eqn_dict['Eqn'][0]),
+                             Eqn('minmod limiter 2 of ' + u.name,
+                                 eqn_dict['Eqn'][1]),
+                             Eqn('minmod limiter 3 of ' + u.name,
+                                 eqn_dict['Eqn'][2])])
+        elif scheme == 'TVD1':
+            eqn_dict = semi_descritize(self.diff_var,
+                                       self.flux,
+                                       self.source,
+                                       self.two_dim_var,
+                                       M,
+                                       scheme='TVD1',
+                                       a0=a0,
+                                       a1=a1)
+            dae_list.extend([Ode('SDM of ' + self.name + 'using',
+                                 eqn_dict['Ode'][0],
+                                 eqn_dict['Ode'][1])])
+        else:
+            raise NotImplementedError(f'Scheme {scheme} not implemented')
 
         if output_boundary:
-            dae_list.extend([Eqn('Right boundary of ' + self.name, u[M] - 2 * Var(u.name + 'R') + u[M - 1]),
-                             Eqn('Left boundary of ' + self.name + ' 5', u[0] - 2 * Var(u.name + 'L') + u[1])])
+            dae_list.extend([Eqn(f'Equation of {u[M]}', u[M] - 2 * Var(u.name + 'R') + u[M - 1]),
+                             Eqn(f'Equation of {u[0]}', u[0] - 2 * Var(u.name + 'L') + u[1])])
 
         return dae_list

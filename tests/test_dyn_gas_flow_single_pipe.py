@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from Solverz import idx, Var, Para, as_Vars, HyperbolicPde, tAE, fde_solver, Eqn, Param, IdxParam, FDAE, \
-    fdae_solver_numerical
+from Solverz import idx, Var, Para, as_Vars, HyperbolicPde, fdae_solver, Eqn, Param, IdxParam, FDAE, made_numerical, \
+    parse_dae_v
 
 results = pd.read_excel('instances/dynamic_gas_flow_single_pipe.xlsx',
                         sheet_name=None,
@@ -35,22 +35,20 @@ ae2 = gas_pde2.finite_difference()
 ae3 = Eqn(name='boundary condition Pie', eqn=Pie[0] - pb)
 ae4 = Eqn(name='boundary condition q', eqn=q[M] - qb)
 
-gas_FDE = tAE([ae1, ae2, ae3, ae4], name='gas FDE')
+gas_FDE = FDAE([ae1, ae2, ae3, ae4], name='gas FDE', nstep=1)
 u0 = as_Vars([Pie, q])
+gas_FDE.update_param(u0.derive_alias('_tag_0'))
 
-T = 3600
 gas_FDE.param_initializer('M', IdxParam('M', value=np.array(10)))
 gas_FDE.param_initializer('dx', Param('dx', value=np.array(300)))
-u = fde_solver(gas_FDE, u0, [0, 3600], 5, tol=1e-3)
+gas_FDE.param_initializer('dt', Param('dt', value=5))
 
-from Solverz.numerical_interface.num_eqn import made_numerical, parse_dae_v
-
-fdae = FDAE([ae1, ae2, ae3, ae4], nstep=1)
-fdae.PARAM = gas_FDE.PARAM
-nfdae = made_numerical(fdae, u0)
-
-T1, u1, stats = fdae_solver_numerical(nfdae, u0.array, [0, 3600], 5, tol=1e-3)
-u1 = parse_dae_v(u1, fdae.var_address)
+ngas = made_numerical(gas_FDE, u0)
+T, u, stats = fdae_solver(ngas, [0, 3600], u0.array, 5, tol=1e-3)
+u = parse_dae_v(u, u0.a)
+ngas_sparse = made_numerical(gas_FDE, u0, sparse=True)
+T1, u1, stats1 = fdae_solver(ngas_sparse, [0, 3600], u0.array, 5, tol=1e-3)
+u1 = parse_dae_v(u1, u0.a)
 
 
 def test_fde_solver():

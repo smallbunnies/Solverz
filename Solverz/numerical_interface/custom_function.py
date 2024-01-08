@@ -4,12 +4,12 @@ from functools import reduce
 
 import numpy as np
 from numpy import linalg
-from scipy.sparse import diags, csc_array, linalg as sla
+from scipy.sparse import diags, csc_array, coo_array, linalg as sla
 
 # from cvxopt.umfpack import linsolve
 # from cvxopt import matrix, spmatrix
 
-numerical_interface = {}
+numerical_interface = {'coo_array': coo_array, 'csc_array': csc_array}
 
 
 def implements_nfunc(nfunc_name: str):

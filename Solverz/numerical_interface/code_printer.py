@@ -1,21 +1,19 @@
 from __future__ import annotations
-from typing import Callable
+from typing import Callable, Union, List
 import builtins
 from datetime import datetime
+from numbers import Number
 
 import numpy as np
-from sympy.codegen.ast import Assignment, AddAugmentedAssignment, Variable
-from sympy import pycode, symbols
+from sympy.codegen.ast import Assignment, AddAugmentedAssignment
+from sympy import pycode, symbols, Function, Symbol, Number as SymNumber, Expr
 from sympy.codegen.ast import real, FunctionPrototype, FunctionDefinition, Return, FunctionCall
-from sympy.utilities.lambdify import _import, _imp_namespace, _module_present, _get_namespace
+from sympy.utilities.lambdify import _import, _module_present, _get_namespace
 
-from Solverz.equation.equations import Equations as SymEquations, AE as SymAE, FDAE as SymFDAE, DAE as SymDAE
-from Solverz.equation.eqn import EqnDiff, Eqn
+from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDAE, DAE as SymDAE
 from Solverz.equation.param import TimeSeriesParam
-from Solverz.symboli_algebra.symbols import Var, idx, SolDict, Para, AliasVar, idx
+from Solverz.symboli_algebra.symbols import Var, SolDict, Para, idx
 from Solverz.symboli_algebra.functions import zeros, CSC_array, Arange
-from Solverz.auxiliary_service.address import Address
-from Solverz.variable.variables import Vars
 
 
 # %%
@@ -90,12 +88,13 @@ def print_var(ae: SymEquations):
     for i in suffix:
         y = Var('y_' + i, internal_use=True)
         for var_name in ae.var_address.v.keys():
-            var_address_range = ae.var_address.v[var_name]
-            if len(var_address_range.tolist()) > 1:
-                var_address = slice(var_address_range[0], var_address_range[-1])
+            var_address = ae.var_address[var_name]
+            if var_address.stop - var_address.start == 1:
+                var_address = var_address.start
+            if i == '':
+                var_declaration.extend([Assignment(Var(var_name + i), y[var_address])])
             else:
-                var_address = var_address_range.tolist()
-            var_declaration.extend([Assignment(Var(var_name + i), y[var_address])])
+                var_declaration.extend([Assignment(Var(var_name + '_tag_' + i), y[var_address])])
     return var_declaration
 
 
@@ -116,69 +115,150 @@ def print_eqn_assignment(ae: SymEquations):
     temp = Var('F_', internal_use=True)
     eqn_declaration = [Assignment(temp, zeros(ae.eqn_size, ))]
     for eqn_name in ae.EQNs.keys():
-        eqn_address_range = ae.a.v[eqn_name]
-        if len(eqn_address_range.tolist()) > 1:
-            eqn_address = slice(eqn_address_range[0], eqn_address_range[-1])
-        else:
-            eqn_address = eqn_address_range.tolist()
+        eqn_address = ae.a[eqn_name]
+        if eqn_address.stop - eqn_address.start == 1:
+            eqn_address = eqn_address.start
         eqn_declaration.append(Assignment(temp[eqn_address], ae.EQNs[eqn_name].RHS))
     return eqn_declaration
 
 
-def print_J_block(ae: SymEquations):
-    temp = Var('J_', internal_use=True)
+def _parse_jac_eqn_address(eqn_address: slice, derivative_dim, sparse):
+    if eqn_address.stop - eqn_address.start == 1:
+        if derivative_dim == 1 or derivative_dim == 0:
+            eqn_address = eqn_address.start if not sparse else SolList(eqn_address.start)
+        else:
+            if sparse:
+                raise NotImplementedError("2-Dimensional sparse jac block not implemented!")
+    else:
+        if derivative_dim == 1 or derivative_dim == 0:
+            eqn_address = Arange(eqn_address.start, eqn_address.stop)
+        else:
+            if sparse:
+                raise NotImplementedError("2-Dimensional sparse jac block not implemented!")
+    return eqn_address
+
+
+def _parse_jac_var_address(var_address_slice: slice, derivative_dim, var_idx, sparse):
+    if var_idx is not None:
+        try:  # try to simplify the variable address in cases such as [1:10][0,1,2,3]
+            temp = np.arange(var_address_slice.start, var_address_slice.stop)[var_idx]
+            if isinstance(temp, (Number, SymNumber)):  # number a
+                var_address = temp if not sparse else SolList(temp)
+            else:  # np.ndarray
+                if np.all(np.diff(temp) == 1):  # list such as [1,2,3,4] can be viewed as slice [1:5]
+                    if derivative_dim == 2:
+                        if sparse:
+                            raise NotImplementedError("2-Dimensional sparse jac block not implemented!")
+                        else:
+                            var_address = slice(temp[0], temp[-1] + 1)
+                    elif derivative_dim == 1 or derivative_dim == 0:
+                        var_address = Arange(temp[0], temp[-1] + 1)
+                else:  # arbitrary list such as [1,3,4,5,6,9]
+                    var_address = SolList(*temp)
+        except (TypeError, IndexError):
+            if isinstance(var_idx, str):
+                var_idx = idx(var_idx)
+            var_address = Var(f"arange({var_address_slice.start}, {var_address_slice.stop})")[var_idx]
+    else:
+        if var_address_slice.stop - var_address_slice.start == 1:
+            var_address = var_address_slice.start if not sparse else SolList(var_address_slice.start)
+        else:
+            if derivative_dim == 2:
+                if sparse:
+                    raise NotImplementedError("2-Dimensional sparse jac block not implemented!")
+                else:
+                    var_address = var_address_slice
+            elif derivative_dim == 1 or derivative_dim == 0:
+                var_address = Arange(var_address_slice.start, var_address_slice.stop)
+    return var_address
+
+
+def _parse_jac_data(data_length, derivative_dim: int, rhs: Union[Expr, Number, SymNumber]):
+    if derivative_dim == 2:
+        raise NotImplementedError("2-Dimensional sparse jac block not implemented!")
+    elif derivative_dim == 1:
+        return rhs
+    elif derivative_dim == 0:
+        if isinstance(rhs, (Number, SymNumber)):  # if rhs is a number, then return length*[rhs]
+            return data_length * SolList(rhs)
+        else:  # if rhs produces np.ndarray then return length*(rhs).tolist()
+            return data_length * tolist(rhs)
+
+
+def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx, rhs, sparse) -> List:
+    if sparse:
+        eqn_address = _parse_jac_eqn_address(eqn_address_slice,
+                                             derivative_dim,
+                                             True)
+        var_address = _parse_jac_var_address(var_address_slice,
+                                             derivative_dim,
+                                             var_idx,
+                                             True)
+        # assign elements to sparse matrix can not be easily broadcast, so we have to parse the data
+        data = _parse_jac_data(eqn_address_slice.stop - eqn_address_slice.start,
+                               derivative_dim,
+                               rhs)
+        return [extend(Var('row'), eqn_address),
+                extend(Var('col'), var_address),
+                extend(Var('data'), data)]
+    else:
+        eqn_address = _parse_jac_eqn_address(eqn_address_slice,
+                                             derivative_dim,
+                                             False)
+        var_address = _parse_jac_var_address(var_address_slice,
+                                             derivative_dim,
+                                             var_idx,
+                                             False)
+        return [AddAugmentedAssignment(Var('J_', internal_use=True)[eqn_address, var_address], rhs)]
+
+
+def print_J_dense(ae: SymEquations):
     eqn_declaration = []
     for eqn_name, eqn in ae.EQNs.items():
-        eqn_address_range = ae.a.v[eqn_name]
+        eqn_address_slice = ae.a[eqn_name]
         for var_name, eqndiff in eqn.derivatives.items():
             derivative_dim = eqndiff.dim
             if derivative_dim < 0:
                 raise ValueError("Derivative dimension not assigned")
-            if len(eqn_address_range.tolist()) > 1:
-                if derivative_dim == 2:
-                    eqn_address = slice(eqn_address_range[0], eqn_address_range[-1])
-                elif derivative_dim == 1 or derivative_dim == 0:
-                    eqn_address = Arange(eqn_address_range[0], eqn_address_range[-1] + 1)
-                else:
-                    raise ValueError("Unsupported derivative dimension!")
-            else:
-                eqn_address = eqn_address_range.tolist()
-            var_address_range = ae.var_address.v[eqndiff.diff_var_name]
+            var_address_slice = ae.var_address[eqndiff.diff_var_name]
             var_idx = eqndiff.var_idx
-            if isinstance(var_idx, str):
-                var_idx = idx(var_idx)
-            if var_idx is not None:
-                var_address = Var(f"arange({var_address_range[0]}, {var_address_range[-1] + 1})")[var_idx]
-            else:
-                if len(var_address_range.tolist()) > 1:
-                    if derivative_dim == 2:
-                        var_address = slice(var_address_range[0], var_address_range[-1])
-                    elif derivative_dim == 1 or derivative_dim == 0:
-                        var_address = Arange(var_address_range[0], var_address_range[-1] + 1)
-                    else:
-                        raise ValueError("Unsupported derivative dimension!")
-                else:
-                    var_address = var_address_range.tolist()
-            # derivative is matrix or vector?
-            eqn_declaration.append(AddAugmentedAssignment(temp[eqn_address, var_address], eqndiff.RHS))
+            rhs = eqndiff.RHS
+            eqn_declaration.extend(print_J_block(eqn_address_slice,
+                                                 var_address_slice,
+                                                 derivative_dim,
+                                                 var_idx,
+                                                 rhs,
+                                                 False))
     return eqn_declaration
 
 
-# def print_var_address(ae):
-#     v_address_dec = []
-#     for var_name, address in ae.var_address.v.items():
-#         if len(address) > 1:
-#             v_address_dec.append(Variable('a_' + var_name).as_Declaration(value=ae.var_address[var_name]))
-#         else:
-#             v_address_dec.append(Variable('a_' + var_name).as_Declaration(value=address.tolist()))
-#     return v_address_dec
+def print_J_sparse(ae: SymEquations):
+    eqn_declaration = []
+    for eqn_name, eqn in ae.EQNs.items():
+        eqn_address_slice = ae.a[eqn_name]
+        for var_name, eqndiff in eqn.derivatives.items():
+            derivative_dim = eqndiff.dim
+            if derivative_dim < 0:
+                raise ValueError("Derivative dimension not assigned")
+            if derivative_dim == 2:
+                raise NotImplementedError("Not implemented")
+            var_address_slice = ae.var_address[eqndiff.diff_var_name]
+            var_idx = eqndiff.var_idx
+            rhs = eqndiff.RHS
+            eqn_declaration.extend(print_J_block(eqn_address_slice,
+                                                 var_address_slice,
+                                                 derivative_dim,
+                                                 var_idx,
+                                                 rhs,
+                                                 True))
+    return eqn_declaration
 
 
 def print_trigger(ae: SymEquations):
     trigger_declaration = []
     for triggered_var, trigger_var in ae.triggerable_quantity.items():
         trigger_declaration.append(
-            Assignment(Var(triggered_var), FunctionCall(triggered_var + '_trigger_func', (trigger_var, ))))
+            Assignment(Var(triggered_var), FunctionCall(triggered_var + '_trigger_func', (trigger_var,))))
     return trigger_declaration
 
 
@@ -210,18 +290,103 @@ def print_F(ae: SymEquations):
     return pycode(fd, fully_qualified_modules=False)
 
 
-def print_J(ae: SymEquations):
+def print_J(ae: SymEquations, sparse=False):
     fp = print_func_prototype(ae, 'J_')
     # initialize temp
     temp = Var('J_', internal_use=True)
-    body = [Assignment(temp, zeros(ae.eqn_size, ae.vsize))]
+    body = list()
     body.extend(print_var(ae))
     body.extend(print_param(ae))
     body.extend(print_trigger(ae))
-    body.extend(print_J_block(ae))
-    body.append(Return(temp))
+    if not sparse:
+        body.append(Assignment(temp, zeros(ae.eqn_size, ae.vsize)))
+        body.extend(print_J_dense(ae))
+        body.append(Return(temp))
+    else:
+        body.extend([Assignment(Var('row'), SolList()),
+                     Assignment(Var('col'), SolList()),
+                     Assignment(Var('data'), SolList())])
+        body.extend(print_J_sparse(ae))
+        body.append(Return(coo_2_csc(ae)))
     Jd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(Jd, fully_qualified_modules=False)
 
 
+class coo_2_csc(Symbol):
 
+    def __new__(cls, ae: SymEquations):
+        obj = Symbol.__new__(cls, f'coo_2_csc: {ae.name}')
+        obj.eqn_size = ae.eqn_size
+        obj.vsize = ae.vsize
+        return obj
+
+    def _numpycode(self, printer, **kwargs):
+        return f'coo_array((data, (row,col)), ({self.eqn_size}, {self.vsize})).tocsc()'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class extend(Function):
+
+    def _numpycode(self, printer, **kwargs):
+        return f'{printer._print(self.args[0])}.extend({printer._print(self.args[1])})'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class SolList(Function):
+
+    # @classmethod
+    # def eval(cls, *args):
+    #     if any([not isinstance(arg, Number) for arg in args]):
+    #         raise ValueError(f"Solverz' list object accepts only number inputs.")
+
+    def _numpycode(self, printer, **kwargs):
+        return r'[' + ', '.join([printer._print(arg) for arg in self.args]) + r']'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class SolArray(Function):
+
+    # @classmethod
+    # def eval(cls, *args):
+    #     if any([not isinstance(arg, Number) for arg in args]):
+    #         raise ValueError(f"Solverz' list object accepts only number inputs.")
+
+    def _numpycode(self, printer, **kwargs):
+        return r'array([' + ','.join([printer._print(arg) for arg in self.args]) + r'])'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class tolist(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 1:
+            raise ValueError(f"Solverz' tolist function accepts only one input.")
+
+    def _numpycode(self, printer, **kwargs):
+        return r'((' + printer._print(self.args[0]) + r').tolist())'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class inner_F(Symbol):
+
+    def __new__(cls, ae: SymEquations, *args):
+        obj = Symbol.__new__(cls, f'innerF: {ae.name}')
+        obj.inner_F_args = args
+        return obj
+
+    def _numpycode(self, printer, **kwargs):
+        return r'inner_F(' + ',\n '.join([printer._print(arg) for arg in self.inner_F_args]) + r')'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
