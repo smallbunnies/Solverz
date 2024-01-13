@@ -198,7 +198,7 @@ class HyperbolicPde(Pde):
         Parameters
         ==========
 
-        scheme : int
+        scheme : str
 
             1 - Central difference
 

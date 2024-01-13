@@ -1,6 +1,7 @@
 from typing import List, Union
 
 import numpy as np
+import tqdm
 
 from Solverz.numerical_interface.num_eqn import nFDAE, nAE
 from Solverz.solvers.nlaesolver import nr_method
@@ -11,20 +12,27 @@ def fdae_solver(fdae: nFDAE,
                 tspan: Union[List, np.ndarray],
                 u0: np.ndarray,
                 dt,
-                tol=1e-5):
+                tol=1e-5,
+                pbar=False):
     stats = Stats(scheme='FDE solver')
 
     tspan = np.array(tspan)
     T_initial = tspan[0]
     tend = tspan[-1]
+    if (tend/dt) > 10000:
+        nstep = np.ceil(tend/dt).astype(int)+1000
+    else:
+        nstep = int(10000)
     nt = 0
     tt = T_initial
     t0 = tt
     uround = np.spacing(1.0)
 
-    u = np.zeros((10000, u0.shape[0]))
+    u = np.zeros((nstep, u0.shape[0]))
     u[0, :] = u0
-    T = np.zeros((10000,))
+    T = np.zeros((nstep,))
+    if pbar:
+        bar = tqdm.tqdm(total=tend)
 
     done = False
     p = fdae.p
@@ -53,6 +61,8 @@ def fdae_solver(fdae: nFDAE,
         nt = nt + 1
         u[nt] = u1
         T[nt] = tt
+        if pbar:
+            bar.update(dt)
         t0 = tt
         u0 = u1
 
@@ -62,5 +72,6 @@ def fdae_solver(fdae: nFDAE,
     u = u[0:nt + 1]
     T = T[0:nt + 1]
     stats.nstep = nt
-
+    if pbar:
+        bar.close()
     return T, u, stats

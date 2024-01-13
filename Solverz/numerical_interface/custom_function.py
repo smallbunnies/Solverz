@@ -27,7 +27,7 @@ def sol_slice(*args):
     """
     This is used to convert the slice arguments to int
     """
-    return slice(*[int(arg_) if isinstance(arg_, np.ndarray) else arg_ for arg_ in args])
+    return slice(*[int(arg_[0]) if isinstance(arg_, np.ndarray) else arg_ for arg_ in args])
 
 
 @implements_nfunc('Slice')

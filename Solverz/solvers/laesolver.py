@@ -2,7 +2,6 @@ from typing import Union
 
 import numpy as np
 from scipy.sparse import csc_array, csr_array, linalg as sla
-import scipy.linalg as dla
 
 
 def solve(A, b):
