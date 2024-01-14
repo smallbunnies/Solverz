@@ -1,7 +1,7 @@
 from sympy import symbols, pycode, Integer
 
 from Solverz.numerical_interface.code_printer import _parse_jac_eqn_address, _parse_jac_var_address, _parse_jac_data, \
-    print_J_block
+    print_J_block, _print_F_assignment
 from Solverz.symboli_algebra.symbols import idx, Var, Para
 
 
@@ -46,6 +46,13 @@ def test_address_parser():
     assert pycode(_parse_jac_data(5, 1, x * y)) == 'x*y'
     assert pycode(_parse_jac_data(5, 0, x * y)) == '5*((x*y).tolist())'
     assert pycode(_parse_jac_data(5, 0, 3)) == '5*[3]'
+
+
+def test_F_printer():
+    F = _print_F_assignment(slice(20, 21), Var('x'))
+    assert pycode(F) == 'F_[20:21] = x'
+    F = _print_F_assignment(slice(20, 23), Var('x'))
+    assert pycode(F) == 'F_[20:23] = x'
 
 
 def test_J_block_printer():

@@ -66,7 +66,7 @@ def SymbolExtractor(index) -> Dict:
     return temp
 
 
-Solverz_internal_name = ['y_', 'F_', 'p_', 'J_']
+Solverz_internal_name = ['y_', 'F_', 'p_', 'J_', 'row', 'col', 'data']
 
 
 class SolSymBasic(Symbol):

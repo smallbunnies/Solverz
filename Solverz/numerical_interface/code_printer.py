@@ -111,14 +111,17 @@ def print_param(ae: SymEquations):
     return param_declaration
 
 
+def _print_F_assignment(eqn_address, rhs):
+    F_ = Var('F_', internal_use=True)
+    return Assignment(F_[eqn_address], rhs)
+
+
 def print_eqn_assignment(ae: SymEquations):
     temp = Var('F_', internal_use=True)
     eqn_declaration = [Assignment(temp, zeros(ae.eqn_size, ))]
     for eqn_name in ae.EQNs.keys():
         eqn_address = ae.a[eqn_name]
-        if eqn_address.stop - eqn_address.start == 1:
-            eqn_address = eqn_address.start
-        eqn_declaration.append(Assignment(temp[eqn_address], ae.EQNs[eqn_name].RHS))
+        eqn_declaration.append(_print_F_assignment(eqn_address, ae.EQNs[eqn_name].RHS))
     return eqn_declaration
 
 
@@ -198,9 +201,9 @@ def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx,
         data = _parse_jac_data(eqn_address_slice.stop - eqn_address_slice.start,
                                derivative_dim,
                                rhs)
-        return [extend(Var('row'), eqn_address),
-                extend(Var('col'), var_address),
-                extend(Var('data'), data)]
+        return [extend(Var('row', internal_use=True), eqn_address),
+                extend(Var('col', internal_use=True), var_address),
+                extend(Var('data', internal_use=True), data)]
     else:
         eqn_address = _parse_jac_eqn_address(eqn_address_slice,
                                              derivative_dim,
@@ -303,9 +306,9 @@ def print_J(ae: SymEquations, sparse=False):
         body.extend(print_J_dense(ae))
         body.append(Return(temp))
     else:
-        body.extend([Assignment(Var('row'), SolList()),
-                     Assignment(Var('col'), SolList()),
-                     Assignment(Var('data'), SolList())])
+        body.extend([Assignment(Var('row', internal_use=True), SolList()),
+                     Assignment(Var('col', internal_use=True), SolList()),
+                     Assignment(Var('data', internal_use=True), SolList())])
         body.extend(print_J_sparse(ae))
         body.append(Return(coo_2_csc(ae)))
     Jd = FunctionDefinition.from_FunctionPrototype(fp, body)
