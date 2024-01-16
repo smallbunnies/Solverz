@@ -1,17 +1,17 @@
 from typing import Union
 
 import numpy as np
-from scipy.sparse import csc_array, csr_array, linalg as sla
+from scipy.sparse import csc_array, csc_matrix, csr_array, csr_matrix, linalg as sla
 
 
 def solve(A, b):
-    if isinstance(A, csc_array):
+    if isinstance(A, (csc_array, csc_matrix, csr_array, csr_matrix)):
         return sla.spsolve(A, b)
     else:
         return np.linalg.solve(A, b)
 
 
-def lu_decomposition(A: Union[np.ndarray, csc_array]):
+def lu_decomposition(A: Union[np.ndarray, csc_array, csc_matrix]):
     if isinstance(A, np.ndarray):
         return dense_decomposition(A)
     else:
@@ -29,7 +29,7 @@ class dense_decomposition:
 
 class sp_decomposition:
     def __init__(self,
-                 A: Union[csc_array, csr_array]):
+                 A: Union[(csc_array, csc_matrix)]):
         self.lu = sla.splu(A)
 
     def solve(self, b):

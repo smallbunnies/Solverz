@@ -1,5 +1,4 @@
-from typing import Callable
-from typing import Optional, Union
+from typing import Callable, Optional, Union, List
 from numbers import Number
 
 import numpy as np
@@ -16,7 +15,7 @@ class Param:
                  info: Optional[str] = None,
                  value: Union[np.ndarray, list, Number] = None,
                  triggerable: bool = False,
-                 trigger_var: str = None,
+                 trigger_var: Union[str, List[str]] = None,
                  trigger_fun: Callable = None,
                  dim: int = 1,
                  dtype=float,
@@ -26,7 +25,7 @@ class Param:
         self.unit = unit
         self.info = info
         self.triggerable = triggerable
-        self.trigger_var = trigger_var
+        self.trigger_var = [trigger_var] if isinstance(trigger_var, str) else trigger_var
         self.trigger_fun = trigger_fun
         self.dim = dim
         self.dtype = dtype
@@ -102,7 +101,7 @@ class TimeSeriesParam(Param):
         self.v_series = Array(v_series, dim=1)
         self.v_series = np.append(self.v_series, np.array(self.v_series[-1]))
         self.time_series = Array(time_series, dim=1)
-        self.time_series = np.append(self.time_series, self.time_series[-1]+0.00001)
+        self.time_series = np.append(self.time_series, self.time_series[-1] + 0.00001)
         if len(self.v_series) != len(self.time_series):
             raise ValueError("Incompatible length between value series and time series!")
         if not np.all(np.diff(self.time_series) > 0):

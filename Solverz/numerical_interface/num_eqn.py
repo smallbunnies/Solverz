@@ -73,8 +73,8 @@ def parse_p(ae: SymEquations):
 
 def parse_trigger_fun(ae: SymEquations):
     func = dict()
-    for triggered_var, trigger_var in ae.triggerable_quantity.items():
-        func.update({triggered_var + '_trigger_func': ae.PARAM[triggered_var].trigger_fun})
+    for para_name, param in ae.PARAM.items():
+        func.update({para_name + '_trigger_func': param.trigger_fun})
 
     return func
 

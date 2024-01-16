@@ -78,6 +78,15 @@ def Solverzlambdify(funcstr, funcname, modules=None):
     return func
 
 
+def _print_var_parser(var_name, suffix: str, var_address):
+    y = Var('y_' + suffix, internal_use=True)
+    if suffix == '':
+        return Assignment(Var(var_name + suffix), y[var_address])
+    else:
+        return Assignment(Var(var_name + '_tag_' + suffix), y[var_address])
+    pass
+
+
 def print_var(ae: SymEquations):
     var_declaration = []
     if hasattr(ae, 'nstep'):
@@ -86,15 +95,9 @@ def print_var(ae: SymEquations):
         nstep = 0
     suffix = [''] + [f'{i}' for i in range(nstep)]
     for i in suffix:
-        y = Var('y_' + i, internal_use=True)
         for var_name in ae.var_address.v.keys():
             var_address = ae.var_address[var_name]
-            if var_address.stop - var_address.start == 1:
-                var_address = var_address.start
-            if i == '':
-                var_declaration.extend([Assignment(Var(var_name + i), y[var_address])])
-            else:
-                var_declaration.extend([Assignment(Var(var_name + '_tag_' + i), y[var_address])])
+            var_declaration.append(_print_var_parser(var_name, i, var_address))
     return var_declaration
 
 
@@ -131,13 +134,13 @@ def _parse_jac_eqn_address(eqn_address: slice, derivative_dim, sparse):
             eqn_address = eqn_address.start if not sparse else SolList(eqn_address.start)
         else:
             if sparse:
-                raise NotImplementedError("2-Dimensional sparse jac block not implemented!")
+                return Var(f'arange({eqn_address.start}, {eqn_address.stop})')[idx('value_coo.row')]
     else:
         if derivative_dim == 1 or derivative_dim == 0:
             eqn_address = Arange(eqn_address.start, eqn_address.stop)
         else:
             if sparse:
-                raise NotImplementedError("2-Dimensional sparse jac block not implemented!")
+                return Var(f'arange({eqn_address.start}, {eqn_address.stop})')[idx('value_coo.row')]
     return eqn_address
 
 
@@ -146,39 +149,48 @@ def _parse_jac_var_address(var_address_slice: slice, derivative_dim, var_idx, sp
         try:  # try to simplify the variable address in cases such as [1:10][0,1,2,3]
             temp = np.arange(var_address_slice.start, var_address_slice.stop)[var_idx]
             if isinstance(temp, (Number, SymNumber)):  # number a
-                var_address = temp if not sparse else SolList(temp)
+                if not sparse:
+                    var_address = temp
+                else:
+                    if derivative_dim == 0 or derivative_dim == 1:
+                        var_address = SolList(temp)
+                    else:
+                        var_address = Var('array([' + str(temp) + '])')[idx('value_coo.col')]
             else:  # np.ndarray
                 if np.all(np.diff(temp) == 1):  # list such as [1,2,3,4] can be viewed as slice [1:5]
                     if derivative_dim == 2:
                         if sparse:
-                            raise NotImplementedError("2-Dimensional sparse jac block not implemented!")
+                            return Var(f'arange({temp[0]}, {temp[-1] + 1})')[idx('value_coo.col')]
                         else:
                             var_address = slice(temp[0], temp[-1] + 1)
                     elif derivative_dim == 1 or derivative_dim == 0:
                         var_address = Arange(temp[0], temp[-1] + 1)
                 else:  # arbitrary list such as [1,3,4,5,6,9]
-                    var_address = SolList(*temp)
+                    if not sparse or derivative_dim<2:
+                        var_address = SolList(*temp)
+                    else:
+                        var_address = Var('array(['+','.join([str(ele) for ele in temp])+'])')[idx('value_coo.col')]
         except (TypeError, IndexError):
             if isinstance(var_idx, str):
                 var_idx = idx(var_idx)
-            var_address = Var(f"arange({var_address_slice.start}, {var_address_slice.stop})")[var_idx]
+            if not sparse or derivative_dim < 2:
+                var_address = Var(f"arange({var_address_slice.start}, {var_address_slice.stop})")[var_idx]
+            else:
+                var_address = Var(f"arange({var_address_slice.start}, {var_address_slice.stop})")[var_idx[idx('value_coo.col')]]
     else:
-        if var_address_slice.stop - var_address_slice.start == 1:
-            var_address = var_address_slice.start if not sparse else SolList(var_address_slice.start)
-        else:
-            if derivative_dim == 2:
-                if sparse:
-                    raise NotImplementedError("2-Dimensional sparse jac block not implemented!")
-                else:
-                    var_address = var_address_slice
-            elif derivative_dim == 1 or derivative_dim == 0:
-                var_address = Arange(var_address_slice.start, var_address_slice.stop)
+        if derivative_dim == 2:
+            if sparse:
+                return Var(f'arange({var_address_slice.start}, {var_address_slice.stop})')[idx('value_coo.col')]
+            else:
+                var_address = var_address_slice
+        elif derivative_dim == 1 or derivative_dim == 0:
+            var_address = Arange(var_address_slice.start, var_address_slice.stop)
     return var_address
 
 
 def _parse_jac_data(data_length, derivative_dim: int, rhs: Union[Expr, Number, SymNumber]):
     if derivative_dim == 2:
-        raise NotImplementedError("2-Dimensional sparse jac block not implemented!")
+        return Var('value_coo.data')
     elif derivative_dim == 1:
         return rhs
     elif derivative_dim == 0:
@@ -201,9 +213,15 @@ def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx,
         data = _parse_jac_data(eqn_address_slice.stop - eqn_address_slice.start,
                                derivative_dim,
                                rhs)
-        return [extend(Var('row', internal_use=True), eqn_address),
-                extend(Var('col', internal_use=True), var_address),
-                extend(Var('data', internal_use=True), data)]
+        if derivative_dim < 2:
+            return [extend(Var('row', internal_use=True), eqn_address),
+                    extend(Var('col', internal_use=True), var_address),
+                    extend(Var('data', internal_use=True), data)]
+        else:
+            return [Assignment(Var('value_coo'), coo_array(rhs)),
+                    extend(Var('row', internal_use=True), eqn_address),
+                    extend(Var('col', internal_use=True), var_address),
+                    extend(Var('data', internal_use=True), data)]
     else:
         eqn_address = _parse_jac_eqn_address(eqn_address_slice,
                                              derivative_dim,
@@ -243,8 +261,8 @@ def print_J_sparse(ae: SymEquations):
             derivative_dim = eqndiff.dim
             if derivative_dim < 0:
                 raise ValueError("Derivative dimension not assigned")
-            if derivative_dim == 2:
-                raise NotImplementedError("Not implemented")
+            # if derivative_dim == 2:
+            #     raise NotImplementedError("Not implemented")
             var_address_slice = ae.var_address[eqndiff.diff_var_name]
             var_idx = eqndiff.var_idx
             rhs = eqndiff.RHS
@@ -257,11 +275,17 @@ def print_J_sparse(ae: SymEquations):
     return eqn_declaration
 
 
+def _print_trigger_func(para_name, trigger_var: List[str]):
+    return Assignment(Para(para_name),
+                      FunctionCall(para_name + '_trigger_func', tuple(trigger_var)))
+
+
 def print_trigger(ae: SymEquations):
     trigger_declaration = []
-    for triggered_var, trigger_var in ae.triggerable_quantity.items():
-        trigger_declaration.append(
-            Assignment(Var(triggered_var), FunctionCall(triggered_var + '_trigger_func', (trigger_var,))))
+    for name, param in ae.PARAM.items():
+        if param.triggerable:
+            trigger_declaration.append(_print_trigger_func(name,
+                                                           param.trigger_var))
     return trigger_declaration
 
 
@@ -330,6 +354,20 @@ class coo_2_csc(Symbol):
         return self._numpycode(printer, **kwargs)
 
 
+class coo_array(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) > 1:
+            raise ValueError(f"Solverz' coo_array object accepts only one inputs.")
+
+    def _numpycode(self, printer, **kwargs):
+        return f'coo_array({printer._print(self.args[0])})'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
 class extend(Function):
 
     def _numpycode(self, printer, **kwargs):
@@ -352,6 +390,14 @@ class SolList(Function):
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
 
+class Array(Function):
+
+
+    def _numpycode(self, printer, **kwargs):
+        return r'array([' + ', '.join([printer._print(arg) for arg in self.args]) + r'])'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
 
 class tolist(Function):
 

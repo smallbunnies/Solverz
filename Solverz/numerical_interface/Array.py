@@ -6,7 +6,7 @@ from scipy.sparse import csc_array
 
 
 def type_checker(dtype):
-    if not np.issubdtype(dtype, np.integer) and not np.issubdtype(dtype, np.floating):
+    if not np.issubdtype(dtype, np.integer) and not np.issubdtype(dtype, np.floating) and not np.issubdtype(dtype, np.complexfloating):
         raise TypeError(f"Unsupported data type {dtype}")
 
 

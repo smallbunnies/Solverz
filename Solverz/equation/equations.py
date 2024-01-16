@@ -37,7 +37,6 @@ class Equations:
         self.matrix_container = matrix_container
         self.PARAM: Dict[str, Param] = dict()
         self.triggerable_quantity: Dict[str, str] = dict()
-        self.trigger_quantity_cache: Dict[str, Dict[str, np.ndarray]] = dict()
         self.jac_element_address = Address()
 
         if isinstance(eqn, Eqn):
@@ -91,7 +90,6 @@ class Equations:
             self.PARAM[name] = param
             if param.triggerable:
                 self.triggerable_quantity[param.name] = param.trigger_var
-                self.trigger_quantity_cache[param.name] = dict()
         else:
             raise TypeError(f"Unsupported parameter type {type(param)}")
 
@@ -123,36 +121,24 @@ class Equations:
         return self.EQNs[eqn_name].NUM_EQN(*args)
 
     def trigger_param_updater(self, eqn: Eqn, *xys):
-        # taq -- triggerable_quantity that is being triggered by parameters or variables
-        # tq -- trigger_quantity that is triggering parameters
-        for taq, tq in self.triggerable_quantity.items():
-            if taq in eqn.SYMBOLS.keys():
-                if tq in self.PARAM.keys():
-                    if tq not in self.trigger_quantity_cache[taq]:
-                        # tq value is None then initialize cache
-                        self.PARAM[taq].v = self.PARAM[taq].trigger_fun(self.PARAM[tq].v)
-                        self.trigger_quantity_cache[taq][tq] = np.copy(self.PARAM[tq].v)
+        # update/initialize triggerable params
+        for para_name, trigger_var in self.triggerable_quantity.items():
+            if self.PARAM[para_name].v is None:
+                trigger_func = self.PARAM[para_name].trigger_fun
+                args = []
+                for var in trigger_var:
+                    var_value = None
+                    if var in self.PARAM:
+                        var_value = self.PARAM[var].v
                     else:
-                        # If tq value is not None, then compare current value with cache.
-                        if not np.allclose(self.trigger_quantity_cache[taq][tq],
-                                           self.PARAM[tq].v,
-                                           rtol=1e-8):
-                            self.PARAM[taq].v = self.PARAM[taq].trigger_fun(self.PARAM[tq].v)
-                            self.trigger_quantity_cache[taq][tq] = np.copy(self.PARAM[tq].v)
-                else:
-                    for y in xys:
-                        if tq in y.var_list:
-                            if tq not in self.trigger_quantity_cache[taq]:
-                                # tq value is None then initialize cache
-                                self.PARAM[taq].v = self.PARAM[taq].trigger_fun(y[tq])
-                                self.trigger_quantity_cache[taq][tq] = np.copy(y[tq])
-                            else:
-                                # If tq value is not None, then compare current value with cache.
-                                if not np.allclose(self.trigger_quantity_cache[taq][tq],
-                                                   y[tq],
-                                                   rtol=1e-8):
-                                    self.PARAM[taq].v = self.PARAM[taq].trigger_fun(y[tq])
-                                    self.trigger_quantity_cache[taq][tq] = np.copy(y[tq])
+                        for y in xys:
+                            if var in y.var_list:
+                                var_value = y[var]
+                    if var_value is None:
+                        raise ValueError(f'Para/Var {Var} not defined')
+                    else:
+                        args.append(var_value)
+                self.PARAM[para_name].v = trigger_func(*args)
 
     def obtain_eqn_args(self, eqn: Eqn, t=None, *xys: Vars) -> List[np.ndarray]:
         """
@@ -344,7 +330,7 @@ class AE(Equations):
                 # This facilitates efficient construction of finite element matrices and the like.
                 if value.ndim == 2:  # matrix
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 2
-                    warnings.warn('Address assignment of matrix derivative unimplemented!')
+
                 elif value.ndim == 1 and value.shape[0] != 1:  # vector
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 1
                     # self.jac_element_address.add((eqn_name, var_name, eqndiff), value.shape[0])
@@ -531,7 +517,7 @@ class DAE(Equations):
                 # This facilitates efficient construction of finite element matrices and the like.
                 if value.ndim == 2:  # matrix
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 2
-                    warnings.warn('Address assignment of matrix derivative unimplemented!')
+
                 elif value.ndim == 1 and value.shape[0] != 1:  # vector
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 1
                     # self.jac_element_address.add((eqn_name, var_name, eqndiff), value.shape[0])
