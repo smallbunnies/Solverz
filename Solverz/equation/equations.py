@@ -284,6 +284,11 @@ class Equations:
                         col.extend(variable_address.tolist())
             return coo_array((data, (row, col)), (self.eqn_size, self.vsize)).tocsc()
 
+    def evalf(self, expr: Expr, t, *xys: Vars) -> np.ndarray:
+        eqn = Eqn('Solverz evalf temporal equation', expr)
+        args = self.obtain_eqn_args(eqn, t, *xys)
+        return eqn.NUM_EQN(*args)
+
 
 class AE(Equations):
 
