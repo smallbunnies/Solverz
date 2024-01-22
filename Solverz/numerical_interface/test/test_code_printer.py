@@ -59,7 +59,7 @@ def test_address_parser():
     x, y = symbols('x, y')
     assert pycode(_parse_jac_data(5, 1, x * y)) == 'x*y'
     assert pycode(_parse_jac_data(5, 0, x * y)) == '5*((x*y).tolist())'
-    assert pycode(_parse_jac_data(5, 0, 3)) == '5*[3]'
+    assert pycode(_parse_jac_data(5, 0, 3, rhs_v_type='Number')) == '5*[3]'
     assert pycode(_parse_jac_data(5, 2, 3)) == 'value_coo.data'
 
 
@@ -120,7 +120,8 @@ def test_J_block_printer():
                        0,
                        [0, 1, 2, 3, 4, 5, 9, 10],
                        Integer(1),
-                       True)
+                       True,
+                       rhs_v_dtpe='Number')
     assert pycode(
         Jb) == '[row.extend(arange(39, 47)), col.extend([15, 16, 17, 18, 19, 20, 24, 25]), data.extend(8*[1])]'
 

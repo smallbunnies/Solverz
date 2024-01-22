@@ -55,7 +55,7 @@ def fdae_solver(fdae: nFDAE,
 
         u1, ite = nr_method(ae, u0, tol=tol, stats=True)
         stats.ndecomp = stats.ndecomp + ite
-        stats.nfeval = stats.nfeval + ite
+        stats.nfeval = stats.nfeval + ite + 1
 
         tt = tt + dt
         nt = nt + 1

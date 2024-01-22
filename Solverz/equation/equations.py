@@ -6,7 +6,7 @@ from typing import Union, List, Dict, Tuple
 from copy import deepcopy
 
 import numpy as np
-from sympy import Symbol, Expr
+from sympy import Symbol, Expr, Number as SymNumber
 from scipy.sparse import csc_array, coo_array
 # from cvxopt import spmatrix, matrix
 
@@ -199,90 +199,6 @@ class Equations:
 
         return equation_address, variable_address
 
-    def form_jac(self, gy, t=None, *xys):
-
-        if self.matrix_container == 'cvxopt':
-
-            jac = spmatrix([], [], [], (self.eqn_size, self.vsize))
-
-            for gy_tuple in gy:
-                eqn_name = gy_tuple[0]
-                var_name = gy_tuple[1]
-                eqndiff = gy_tuple[2]
-                value = gy_tuple[3]
-                equation_address, variable_address = self.parse_address(eqn_name,
-                                                                        var_name,
-                                                                        eqndiff,
-                                                                        t,
-                                                                        *xys)
-
-                if isinstance(value, (np.ndarray, csc_array)):
-                    # we use `+=` instead of `=` here because sometimes, Var `e` and IdxVar `e[0]` exists in the same equation
-                    # in which case we have to add the jacobian element of Var `e` if it is not zero.
-
-                    ## cvxopt.spmatrix
-                    if value.ndim > 1:
-                        if value.shape[1] > 1:  # np.ix_() creates a mesh for matrix
-                            if not isinstance(value, np.ndarray):
-                                value1 = value.tocoo()
-                            else:
-                                value1 = coo_array(value)
-                            I = matrix(equation_address)
-                            J = matrix(variable_address)
-                            jac[I, J] = \
-                                jac[I, J] + spmatrix(value1.data, value1.row, value1.col, value1.shape, 'd')
-                        else:  # equation and variable lists constitute a address tuple for vector
-                            I = (equation_address + variable_address * self.vsize).tolist()
-                            jac[I] = jac[I] + matrix(value)
-                    else:
-                        I = (equation_address + variable_address * self.vsize).tolist()
-                        jac[I] = jac[I] + matrix(value.tolist())
-            return jac
-        elif self.matrix_container == 'scipy':
-
-            row = []
-            col = []
-            data = []
-
-            for gy_tuple in gy:
-                eqn_name = gy_tuple[0]
-                var_name = gy_tuple[1]
-                eqndiff = gy_tuple[2]
-                value = gy_tuple[3]
-                equation_address, variable_address = self.parse_address(eqn_name,
-                                                                        var_name,
-                                                                        eqndiff,
-                                                                        t,
-                                                                        *xys)
-
-                if isinstance(value, (np.ndarray, csc_array)):
-                    # We use coo_array here because by default when converting to CSR or CSC format,
-                    # duplicate (i,j) entries will be summed together.
-                    # This facilitates efficient construction of finite element matrices and the like.
-
-                    if value.ndim == 2:  # matrix
-                        if isinstance(value, csc_array):
-                            coo_ = value.tocoo()
-                        else:
-                            coo_ = coo_array(value)
-                        data.extend(coo_.data.tolist())
-                        # map local addresses of coo_ to equation_address and variable address
-                        row.extend(equation_address[coo_.row].tolist())
-                        col.extend(variable_address[coo_.col].tolist())
-                    elif value.ndim == 1:  # vector
-                        if value.shape[0] < len(equation_address):
-                            # two dimensional scalar as vector todo: this should be avoided
-                            data.extend(value.reshape(-1).tolist() * len(equation_address))
-                        else:  # vector
-                            data.extend(value.reshape(-1).tolist())
-                        row.extend(equation_address.tolist())
-                        col.extend(variable_address.tolist())
-                    else:  # np.dim ==0  scalar in np.ndarray
-                        value = np.squeeze(value)  # In inviscid burger test there is scalar like np.array([1])
-                        data.extend([value.tolist()] * len(equation_address))
-                        row.extend(equation_address.tolist())
-                        col.extend(variable_address.tolist())
-            return coo_array((data, (row, col)), (self.eqn_size, self.vsize)).tocsc()
 
     def evalf(self, expr: Expr, t, *xys: Vars) -> np.ndarray:
         eqn = Eqn('Solverz evalf temporal equation', expr)
@@ -339,9 +255,17 @@ class AE(Equations):
                 elif value.ndim == 1 and value.shape[0] != 1:  # vector
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 1
                     # self.jac_element_address.add((eqn_name, var_name, eqndiff), value.shape[0])
-                else:  # np.dim ==0  scalar in np.ndarray
+                elif value.ndim == 1 and value.shape[0] == 1:  # scalar in np.ndarray for example array([0.0])
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
                     # self.jac_element_address.add((eqn_name, var_name, eqndiff), self.a.size[eqn_name])
+                else:
+                    raise ValueError("Unknown derivative value dimension type!")
+                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].v_type = 'array'
+            elif isinstance(value, (Number, SymNumber)):
+                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
+                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].v_type = 'Number'
+            else:
+                raise ValueError(f"Unknown derivative data type {type(value)}!")
 
     def g(self, y: Vars, eqn: str = None) -> np.ndarray:
         """
@@ -384,8 +308,6 @@ class AE(Equations):
                     if var_name == value.diff_var_name:  # f is viewed as f[k]
                         args = self.obtain_eqn_args(eqn_diffs[key], None, y)
                         temp = self.eval_diffs(eqn_name, key, *args)
-                        if not isinstance(temp, csc_array):
-                            temp = np.array(temp)
                         gy = [*gy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gy
 
@@ -526,9 +448,17 @@ class DAE(Equations):
                 elif value.ndim == 1 and value.shape[0] != 1:  # vector
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 1
                     # self.jac_element_address.add((eqn_name, var_name, eqndiff), value.shape[0])
-                else:  # np.dim ==0  scalar in np.ndarray
+                elif value.ndim == 1 and value.shape[0] == 1:  # scalar in np.ndarray for example array([0.0])
                     self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
                     # self.jac_element_address.add((eqn_name, var_name, eqndiff), self.a.size[eqn_name])
+                else:
+                    raise ValueError("Unknown derivative value dimension type!")
+                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].v_type = 'array'
+            elif isinstance(value, (Number, SymNumber)):
+                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
+                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].v_type = 'Number'
+            else:
+                raise ValueError(f"Unknown derivative data type {type(value)}!")
 
     def F(self, t, *xys) -> np.ndarray:
         """
@@ -599,8 +529,6 @@ class DAE(Equations):
                     if var_name == value.diff_var_name:
                         args = self.obtain_eqn_args(eqn_diffs[key], t, *xys)
                         temp = self.eval_diffs(eqn_name, key, *args)
-                        if not isinstance(temp, csc_array):
-                            temp = np.array(temp)
                         fxy = [*fxy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return fxy
 
@@ -626,8 +554,6 @@ class DAE(Equations):
                     if var_name == value.diff_var_name:
                         args = self.obtain_eqn_args(eqn_diffs[key], t, *xys)
                         temp = self.eval_diffs(eqn_name, key, *args)
-                        if not isinstance(temp, csc_array):
-                            temp = np.array(temp)
                         gxy = [*gxy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gxy
 

@@ -121,6 +121,7 @@ class EqnDiff(Eqn):
                 self.var_idx_func = Eqn('To evaluate var_idx of variable' + self.diff_var.name, self.var_idx)
         self.LHS = Derivative(F, diff_var)
         self.dim = -1
+        self.v_type = ''
 
 
 class Ode(Eqn):

@@ -166,17 +166,18 @@ def _parse_jac_var_address(var_address_slice: slice, derivative_dim, var_idx, sp
                     elif derivative_dim == 1 or derivative_dim == 0:
                         var_address = Arange(temp[0], temp[-1] + 1)
                 else:  # arbitrary list such as [1,3,4,5,6,9]
-                    if not sparse or derivative_dim<2:
+                    if not sparse or derivative_dim < 2:
                         var_address = SolList(*temp)
                     else:
-                        var_address = Var('array(['+','.join([str(ele) for ele in temp])+'])')[idx('value_coo.col')]
+                        var_address = Var('array([' + ','.join([str(ele) for ele in temp]) + '])')[idx('value_coo.col')]
         except (TypeError, IndexError):
             if isinstance(var_idx, str):
                 var_idx = idx(var_idx)
             if not sparse or derivative_dim < 2:
                 var_address = Var(f"arange({var_address_slice.start}, {var_address_slice.stop})")[var_idx]
             else:
-                var_address = Var(f"arange({var_address_slice.start}, {var_address_slice.stop})")[var_idx[idx('value_coo.col')]]
+                var_address = Var(f"arange({var_address_slice.start}, {var_address_slice.stop})")[
+                    var_idx[idx('value_coo.col')]]
     else:
         if derivative_dim == 2:
             if sparse:
@@ -188,19 +189,19 @@ def _parse_jac_var_address(var_address_slice: slice, derivative_dim, var_idx, sp
     return var_address
 
 
-def _parse_jac_data(data_length, derivative_dim: int, rhs: Union[Expr, Number, SymNumber]):
+def _parse_jac_data(data_length, derivative_dim: int, rhs: Union[Expr, Number, SymNumber], rhs_v_type='array'):
     if derivative_dim == 2:
         return Var('value_coo.data')
     elif derivative_dim == 1:
         return rhs
     elif derivative_dim == 0:
-        if isinstance(rhs, (Number, SymNumber)):  # if rhs is a number, then return length*[rhs]
+        if rhs_v_type == 'Number':  # if rhs is a number, then return length*[rhs]
             return data_length * SolList(rhs)
-        else:  # if rhs produces np.ndarray then return length*(rhs).tolist()
+        elif rhs_v_type == 'array':  # if rhs produces np.ndarray then return length*rhs.tolist()
             return data_length * tolist(rhs)
 
 
-def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx, rhs, sparse) -> List:
+def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx, rhs, sparse, rhs_v_dtpe='array') -> List:
     if sparse:
         eqn_address = _parse_jac_eqn_address(eqn_address_slice,
                                              derivative_dim,
@@ -212,7 +213,8 @@ def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx,
         # assign elements to sparse matrix can not be easily broadcast, so we have to parse the data
         data = _parse_jac_data(eqn_address_slice.stop - eqn_address_slice.start,
                                derivative_dim,
-                               rhs)
+                               rhs,
+                               rhs_v_dtpe)
         if derivative_dim < 2:
             return [extend(Var('row', internal_use=True), eqn_address),
                     extend(Var('col', internal_use=True), var_address),
@@ -261,17 +263,17 @@ def print_J_sparse(ae: SymEquations):
             derivative_dim = eqndiff.dim
             if derivative_dim < 0:
                 raise ValueError("Derivative dimension not assigned")
-            # if derivative_dim == 2:
-            #     raise NotImplementedError("Not implemented")
             var_address_slice = ae.var_address[eqndiff.diff_var_name]
             var_idx = eqndiff.var_idx
             rhs = eqndiff.RHS
+            rhs_v_type = eqndiff.v_type
             eqn_declaration.extend(print_J_block(eqn_address_slice,
                                                  var_address_slice,
                                                  derivative_dim,
                                                  var_idx,
                                                  rhs,
-                                                 True))
+                                                 True,
+                                                 rhs_v_type))
     return eqn_declaration
 
 
@@ -390,14 +392,15 @@ class SolList(Function):
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
 
-class Array(Function):
 
+class Array(Function):
 
     def _numpycode(self, printer, **kwargs):
         return r'array([' + ', '.join([printer._print(arg) for arg in self.args]) + r'])'
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
+
 
 class tolist(Function):
 
