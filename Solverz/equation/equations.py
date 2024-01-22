@@ -199,7 +199,6 @@ class Equations:
 
         return equation_address, variable_address
 
-
     def evalf(self, expr: Expr, t, *xys: Vars) -> np.ndarray:
         eqn = Eqn('Solverz evalf temporal equation', expr)
         args = self.obtain_eqn_args(eqn, t, *xys)
@@ -310,14 +309,6 @@ class AE(Equations):
                         temp = self.eval_diffs(eqn_name, key, *args)
                         gy = [*gy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gy
-
-    def j(self, y: Vars):
-        if not self.eqn_size:
-            self.assign_eqn_var_address(y)
-
-        gy = self.g_y(y)
-
-        return self.form_jac(gy, None, y)
 
     def __repr__(self):
         if not self.eqn_size:
@@ -556,19 +547,6 @@ class DAE(Equations):
                         temp = self.eval_diffs(eqn_name, key, *args)
                         gxy = [*gxy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gxy
-
-    def j(self, t, *xys: Vars):
-        """
-        Derive Jacobian matrices of the RHS side
-        """
-        if not self.eqn_size:
-            self.assign_eqn_var_address(*xys)
-
-        fg_xy = self.f_xy(t, *xys)
-        if len(self.g_list) > 0:
-            fg_xy.extend(self.g_xy(t, *xys))
-
-        return self.form_jac(fg_xy, t, *xys)
 
     @property
     def M(self):
