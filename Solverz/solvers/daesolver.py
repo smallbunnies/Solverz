@@ -21,8 +21,10 @@ def implicit_trapezoid(dae: nDAE,
                        tspan: Union[List, np.ndarray],
                        y0: np.ndarray,
                        dt,
-                       pbar=False):
+                       opt: Opt = None):
     stats = Stats(scheme='Trapezoidal')
+    if opt is None:
+        opt = Opt()
 
     tspan = np.array(tspan)
     T_initial = tspan[0]
@@ -35,9 +37,6 @@ def implicit_trapezoid(dae: nDAE,
     y[0, :] = y0
     T = np.zeros((10000,))
 
-    if pbar:
-        bar = tqdm.tqdm(total=T_end)
-
     p = dae.p
     while abs(tt - T_end) > abs(dt) / 10:
         My0 = dae.M @ y0
@@ -46,7 +45,7 @@ def implicit_trapezoid(dae: nDAE,
                  lambda y_, p_: -dae.M + dt / 2 * dae.J(t0 + dt, y_, p_),
                  p)
 
-        y1, ite = nr_method(ae, y0, stats=True)
+        y1, ite = nr_method(ae, y0, stats=True, tol=opt.ite_tol)
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite
 
@@ -68,8 +67,10 @@ def backward_euler(dae: nDAE,
                    tspan: Union[List, np.ndarray],
                    y0: np.ndarray,
                    dt,
-                   pbar=False):
+                   opt: Opt = None):
     stats = Stats(scheme='Backward Euler')
+    if opt is None:
+        opt = Opt()
 
     tspan = np.array(tspan)
     T_initial = tspan[0]
@@ -82,9 +83,6 @@ def backward_euler(dae: nDAE,
     y[0, :] = y0
     T = np.zeros((10000,))
 
-    if pbar:
-        bar = tqdm.tqdm(total=T_end)
-
     p = dae.p
     while abs(tt - T_end) > abs(dt) / 10:
         My0 = dae.M @ y0
@@ -92,7 +90,7 @@ def backward_euler(dae: nDAE,
                  lambda y_, p_: dae.M - dt * dae.J(t0 + dt, y_, p_),
                  p)
 
-        y1, ite = nr_method(ae, y0, stats=True)
+        y1, ite = nr_method(ae, y0, stats=True, tol=opt.ite_tol)
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite
 

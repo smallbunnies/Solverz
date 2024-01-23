@@ -6,21 +6,23 @@ import tqdm
 from Solverz.numerical_interface.num_eqn import nFDAE, nAE
 from Solverz.solvers.nlaesolver import nr_method
 from Solverz.solvers.stats import Stats
+from Solverz.solvers.option import Opt
 
 
 def fdae_solver(fdae: nFDAE,
                 tspan: Union[List, np.ndarray],
                 u0: np.ndarray,
                 dt,
-                tol=1e-5,
-                pbar=False):
+                opt: Opt = None):
     stats = Stats(scheme='FDE solver')
+    if opt is None:
+        opt = Opt()
 
     tspan = np.array(tspan)
     T_initial = tspan[0]
     tend = tspan[-1]
-    if (tend/dt) > 10000:
-        nstep = np.ceil(tend/dt).astype(int)+1000
+    if (tend / dt) > 10000:
+        nstep = np.ceil(tend / dt).astype(int) + 1000
     else:
         nstep = int(10000)
     nt = 0
@@ -31,7 +33,7 @@ def fdae_solver(fdae: nFDAE,
     u = np.zeros((nstep, u0.shape[0]))
     u[0, :] = u0
     T = np.zeros((nstep,))
-    if pbar:
+    if opt.pbar:
         bar = tqdm.tqdm(total=tend)
 
     done = False
@@ -53,7 +55,7 @@ def fdae_solver(fdae: nFDAE,
         else:
             raise NotImplementedError("Multistep FDAE not implemented!")
 
-        u1, ite = nr_method(ae, u0, tol=tol, stats=True)
+        u1, ite = nr_method(ae, u0, tol=opt.ite_tol, stats=True)
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite + 1
 
@@ -61,7 +63,7 @@ def fdae_solver(fdae: nFDAE,
         nt = nt + 1
         u[nt] = u1
         T[nt] = tt
-        if pbar:
+        if opt.pbar:
             bar.update(dt)
         t0 = tt
         u0 = u1
@@ -72,6 +74,6 @@ def fdae_solver(fdae: nFDAE,
     u = u[0:nt + 1]
     T = T[0:nt + 1]
     stats.nstep = nt
-    if pbar:
+    if opt.pbar:
         bar.close()
     return T, u, stats
