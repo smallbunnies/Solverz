@@ -70,9 +70,9 @@ def test_var_parser():
 
 def test_F_printer():
     F = _print_F_assignment(slice(20, 21), Var('x'))
-    assert pycode(F) == 'F_[20:21] = x'
+    assert pycode(F) == '_F_[20:21] = x'
     F = _print_F_assignment(slice(20, 23), Var('x'))
-    assert pycode(F) == 'F_[20:23] = x'
+    assert pycode(F) == '_F_[20:23] = x'
 
 
 def test_J_block_printer():

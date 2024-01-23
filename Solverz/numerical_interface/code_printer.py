@@ -1,27 +1,138 @@
 from __future__ import annotations
-from typing import Callable, Union, List
+from typing import Callable, Union, List, Dict
 import builtins
 from datetime import datetime
 from numbers import Number
+import re
+import os
 
 import numpy as np
 from sympy.codegen.ast import Assignment, AddAugmentedAssignment
-from sympy import pycode, symbols, Function, Symbol, Number as SymNumber, Expr
+from sympy import pycode, symbols, Function, Symbol, Number as SymNumber, Expr, Number as SymNumber
 from sympy.codegen.ast import real, FunctionPrototype, FunctionDefinition, Return, FunctionCall
 from sympy.utilities.lambdify import _import, _module_present, _get_namespace
+from scipy.sparse import sparray
+from numbers import Number
 
-from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDAE, DAE as SymDAE
+from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDAE, DAE as SymDAE, AE as SymAE
+from Solverz.variable.variables import Vars
 from Solverz.equation.param import TimeSeriesParam
-from Solverz.symboli_algebra.symbols import Var, SolDict, Para, idx
+from Solverz.symboli_algebra.symbols import Var, SolDict, Para, idx, IdxSymBasic
 from Solverz.symboli_algebra.functions import zeros, CSC_array, Arange
+from Solverz.utilities.address import Address
+from Solverz.utilities.io import save
 
 
 # %%
-def Solverzlambdify(funcstr, funcname, modules=None):
-    """Convert a Solverz numerical f/g/F/J evaluation expression into a function that allows for fast
-        numeric evaluation.
-        """
+def is_valid_python_module_name(module_name):
+    pattern = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+    return bool(pattern.match(module_name))
 
+
+def create_python_module(module_name, initiate_code, module_code, dependency_code, auxiliary):
+    # Create the parent directory if it doesn't exist
+    os.makedirs(module_name, exist_ok=True)
+
+    # Create an empty __init__.py file
+    init_path = os.path.join(module_name, "__init__.py")
+    with open(init_path, "w") as file:
+        file.write(initiate_code)
+
+    # Create the file with the dependency code
+    module_path = os.path.join(module_name, "dependency.py")
+    with open(module_path, "w") as file:
+        file.write(dependency_code)
+
+    # Create the file with the module code
+    module_path = os.path.join(module_name, "num_func.py")
+    with open(module_path, "w") as file:
+        file.write(module_code)
+
+    save(auxiliary, f'{module_name}/param_and_setting.pkl')
+
+
+def print_init_code(eqn_type: str, module_name, eqn_param):
+    code = 'from .num_func import F_, J_\n'
+    code += 'from .dependency import setting, p, y\n'
+    code += 'import time\n'
+    match eqn_type:
+        case 'AE':
+            code += 'from Solverz.numerical_interface.num_eqn import nAE\n'
+            code += 'mdl = nAE(F_, J_, p)\n'
+            code_compile = 'mdl.F(y.array, p)\nmdl.J(y.array, p)\n'
+        case 'FDAE':
+            try:
+                nstep = eqn_param['nstep']
+            except KeyError as e:
+                raise ValueError("Cannot parse nstep attribute for FDAE object printing!")
+            code += 'from Solverz.numerical_interface.num_eqn import nFDAE\n'
+            code += 'mdl = nFDAE(F_, J_, p, setting["nstep"])\n'
+            args_str = ', '.join(['y.array' for i in range(nstep)])
+            code_compile = f'mdl.F(0, y.array, p, {args_str})\nmdl.J(0, y.array, p, {args_str})\n'
+        case 'DAE':
+            code += 'from Solverz.numerical_interface.num_eqn import nDAE\n'
+            code += 'mdl = nDAE(setting["M"], F_, J_, p)\n'
+            code_compile = 'mdl.F(0, y.array, p)\nmdl.J(0, y.array, p)\n'
+        case _:
+            raise ValueError(f'Unknown equation type {eqn_type}')
+    code += f'print("Compiling model {module_name}...")\n'
+    code += f'start = time.perf_counter()\n'
+    code += code_compile
+    code += f'end = time.perf_counter()\n'
+    code += "print(f'Compiling time elapsed {end-start}s')\n"
+    return code
+
+
+def print_module_code(code_dict: Dict[str, str]):
+    code = 'from .dependency import *\n'
+    code += '\r\n'
+    code += code_dict['F']
+    code += '\n\r\n'
+    code += '@njit(cache=True)\n'
+    code += code_dict['inner_F']
+    code += '\n\r\n'
+    code += code_dict['J']
+    code += '\n\r\n'
+    code += '@njit(cache=True)\n'
+    code += code_dict['inner_J']
+    code += '\n'
+    return code
+
+
+def print_dependency_code(modules):
+    code = "import os\n"
+    code += "current_module_dir = os.path.dirname(os.path.abspath(__file__))\n"
+    code += 'from Solverz import load\n'
+    code += 'auxiliary = load(f"{current_module_dir}\\param_and_setting.pkl")\n'
+    code += 'from numpy import *\n'
+    code += 'from scipy.sparse import *\n'
+    code += 'from numba import njit\n'
+    code += 'setting = auxiliary["eqn_param"]\n'
+    code += 'row = setting["row"]\n'
+    code += 'col = setting["col"]\n'
+    code += 'p = auxiliary["p"]\n'
+    code += 'y = auxiliary["vars"]\n'
+    return code
+
+
+def render_as_modules(name, code_dict: Dict[str, str], eqn_type: str, p: dict, eqn_param: dict, variables: Vars, modules=None):
+    if is_valid_python_module_name(name):
+        module_name = name
+    else:
+        raise ValueError("Invalid python module name!")
+
+    init_code = print_init_code(eqn_type, module_name, eqn_param)
+    module_code = print_module_code(code_dict)
+    dependency_code = print_dependency_code(modules)
+
+    create_python_module(module_name,
+                         init_code,
+                         module_code,
+                         dependency_code,
+                         {'p': p, 'eqn_param': eqn_param, 'vars': variables})
+
+
+def parse_name_space(modules=None):
     # If the user hasn't specified any modules, use what is available.
     if modules is None:
         try:
@@ -58,6 +169,14 @@ def Solverzlambdify(funcstr, funcname, modules=None):
 
     # Provide lambda expression with builtins, and compatible implementation of range
     namespace.update({'builtins': builtins, 'range': range})
+    return namespace
+
+
+def Solverzlambdify(funcstr, funcname, modules=None):
+    """Convert a Solverz numerical f/g/F/J evaluation expression into a function that allows for fast
+        numeric evaluation.
+        """
+    namespace = parse_name_space(modules)
 
     funclocals = {}
     current_time = datetime.now()
@@ -87,43 +206,59 @@ def _print_var_parser(var_name, suffix: str, var_address):
     pass
 
 
-def print_var(ae: SymEquations):
+def print_var(ae: SymEquations, numba_printer=False):
     var_declaration = []
     if hasattr(ae, 'nstep'):
         nstep = ae.nstep
     else:
         nstep = 0
     suffix = [''] + [f'{i}' for i in range(nstep)]
+    var_list = []
     for i in suffix:
         for var_name in ae.var_address.v.keys():
             var_address = ae.var_address[var_name]
-            var_declaration.append(_print_var_parser(var_name, i, var_address))
-    return var_declaration
+            var_assign = _print_var_parser(var_name, i, var_address)
+            var_declaration.append(var_assign)
+            var_list.append(var_assign.lhs)
+    if not numba_printer:
+        return var_declaration
+    else:
+        return var_declaration, var_list
 
 
-def print_param(ae: SymEquations):
+def print_param(ae: SymEquations, numba_printer=False):
     param_declaration = []
     p = SolDict('p_')
+    param_list = []
     for symbol_name, symbol in ae.SYMBOLS.items():
         if isinstance(symbol, (Para, idx)):
             if isinstance(ae.PARAM[symbol_name], TimeSeriesParam):
-                param_declaration.append(
-                    Assignment(Para(symbol_name), FunctionCall(f'p_["{symbol_name}"].get_v_t', 't')))
+                param_assign = Assignment(Para(symbol_name), FunctionCall(f'p_["{symbol_name}"].get_v_t', 't'))
             else:
-                param_declaration.append(Assignment(Para(symbol_name), p[symbol_name]))
-    return param_declaration
+                param_assign = Assignment(Para(symbol_name), p[symbol_name])
+            param_declaration.append(param_assign)
+            param_list.append(param_assign.lhs)
+    if not numba_printer:
+        return param_declaration
+    else:
+        return param_declaration, param_list
 
 
 def _print_F_assignment(eqn_address, rhs):
-    F_ = Var('F_', internal_use=True)
+    F_ = Var('_F_', internal_use=True)
     return Assignment(F_[eqn_address], rhs)
 
 
-def print_eqn_assignment(ae: SymEquations):
-    temp = Var('F_', internal_use=True)
+def print_eqn_assignment(ae: SymEquations, numba_printer=False):
+    temp = Var('_F_', internal_use=True)
     eqn_declaration = [Assignment(temp, zeros(ae.eqn_size, ))]
     for eqn_name in ae.EQNs.keys():
         eqn_address = ae.a[eqn_name]
+        if numba_printer:
+            for var in list(ae.EQNs[eqn_name].expr.free_symbols):
+                if isinstance(var, IdxSymBasic):
+                    if isinstance(var.index, (idx, list)):
+                        raise ValueError(f"Numba printer does not accept idx or list index {var.index}")
         eqn_declaration.append(_print_F_assignment(eqn_address, ae.EQNs[eqn_name].RHS))
     return eqn_declaration
 
@@ -201,7 +336,8 @@ def _parse_jac_data(data_length, derivative_dim: int, rhs: Union[Expr, Number, S
             return data_length * tolist(rhs)
 
 
-def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx, rhs, sparse, rhs_v_dtpe='array') -> List:
+def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx, rhs, sparse,
+                  rhs_v_dtpe='array') -> List:
     if sparse:
         eqn_address = _parse_jac_eqn_address(eqn_address_slice,
                                              derivative_dim,
@@ -313,7 +449,7 @@ def print_F(ae: SymEquations):
     body.extend(print_param(ae))
     body.extend(print_trigger(ae))
     body.extend(print_eqn_assignment(ae))
-    temp = Var('F_', internal_use=True)
+    temp = Var('_F_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
@@ -339,6 +475,138 @@ def print_J(ae: SymEquations, sparse=False):
         body.append(Return(coo_2_csc(ae)))
     Jd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(Jd, fully_qualified_modules=False)
+
+
+def print_J_numba(ae: SymEquations):
+    fp = print_func_prototype(ae, 'J_')
+    body = []
+    var_assignments, var_list = print_var(ae, numba_printer=True)
+    body.extend(var_assignments)
+    param_assignments, param_list = print_param(ae, numba_printer=True)
+    body.extend(param_assignments)
+    body.extend(print_trigger(ae))
+    p = SolDict('p_')
+    # body.extend([Assignment(Var('row', internal_use=True), p['row'])])
+    # body.extend([Assignment(Var('col', internal_use=True), p['col'])])
+    body.extend([Assignment(Var('data', internal_use=True),
+                            FunctionCall('inner_J', [arg.name for arg in var_list + param_list]))])
+    body.extend([Return(coo_2_csc(ae))])
+    fd = FunctionDefinition.from_FunctionPrototype(fp, body)
+    return pycode(fd, fully_qualified_modules=False)
+
+
+def print_inner_J(ae: SymEquations, *xys):
+    var_assignments, var_list = print_var(ae, numba_printer=True)
+    param_assignments, param_list = print_param(ae, numba_printer=True)
+    args = []
+    for var in var_list + param_list:
+        args.append(symbols(var.name, real=True))
+    fp = FunctionPrototype(real, 'inner_J', args)
+    body = []
+    row, col, jac_address = parse_jac_address(ae, *xys)
+    temp = Var('data_', internal_use=True)
+    body.extend([Assignment(temp, zeros(jac_address.total_size, ))])
+    for jac_ in jac_address.object_list:
+        eqn_name, var_name = jac_.split("@@@")
+        rhs = ae.EQNs[eqn_name].derivatives[var_name].RHS
+        body.extend([_print_inner_J_block_assignment(rhs, jac_address[jac_])])
+    temp = Var('data_', internal_use=True)
+    body.extend([Return(temp)])
+    fd = FunctionDefinition.from_FunctionPrototype(fp, body)
+    return pycode(fd, fully_qualified_modules=False), row, col
+
+
+def _print_inner_J_block_assignment(rhs, address: slice):
+    data = Var('data_', internal_use=True)
+    return Assignment(data[address], rhs)
+
+
+def print_F_numba(ae: SymEquations):
+    fp = print_func_prototype(ae, 'F_')
+    body = []
+    var_assignments, var_list = print_var(ae, numba_printer=True)
+    body.extend(var_assignments)
+    param_assignments, param_list = print_param(ae, numba_printer=True)
+    body.extend(param_assignments)
+    body.extend(print_trigger(ae))
+    body.extend([Return(FunctionCall('inner_F', [arg.name for arg in var_list + param_list]))])
+    fd = FunctionDefinition.from_FunctionPrototype(fp, body)
+    return pycode(fd, fully_qualified_modules=False)
+
+
+def print_inner_F(ae: SymEquations):
+    var_assignments, var_list = print_var(ae, numba_printer=True)
+    param_assignments, param_list = print_param(ae, numba_printer=True)
+    args = []
+    for var in var_list + param_list:
+        args.append(symbols(var.name, real=True))
+    fp = FunctionPrototype(real, 'inner_F', args)
+    body = []
+    body.extend(print_eqn_assignment(ae, True))
+    temp = Var('_F_', internal_use=True)
+    body.extend([Return(temp)])
+    fd = FunctionDefinition.from_FunctionPrototype(fp, body)
+    return pycode(fd, fully_qualified_modules=False)
+
+
+def parse_jac_address(eqns: SymEquations, *xys):
+    if isinstance(eqns, SymAE):
+        gy = eqns.g_y(*xys)
+    elif isinstance(eqns, SymDAE):
+        gy = eqns.f_xy(0, *xys)
+        if len(eqns.g_list) > 0:
+            gy.extend(eqns.g_xy(0, *xys))
+    else:
+        raise NotImplementedError(f"Unknown equation type {type(eqns)}")
+
+    row = np.array([], dtype=int)
+    col = np.array([], dtype=int)
+    jac_block_address = Address()
+    for gy_tuple in gy:
+        eqn_name = gy_tuple[0]
+        # eqn_diffs: Dict[str, EqnDiff] = eqns.EQNs[eqn_name].derivatives
+        var_name = gy_tuple[1]
+        eqndiff = gy_tuple[2]
+        diff_var = eqndiff.diff_var
+        diff_var_name = eqndiff.diff_var.name
+        value = gy_tuple[3]
+        eqn_address = eqns.a[eqn_name]
+        var_address = eqns.var_address[var_name]
+        if isinstance(value, (np.ndarray, sparray)):
+            if value.ndim == 2:  # matrix
+                raise TypeError("Two-dimensional array not applicable for numba printer!\n  Try rewrite the Equations!")
+            elif value.ndim == 1 and value.shape[0] != 1:  # vector
+                num_jac_element = value.shape[0]
+                if num_jac_element != eqn_address.stop - eqn_address.start:
+                    raise ValueError("Number of jac block elements not compatible with equation length!")
+            elif value.ndim == 1 and value.shape[0] == 1:  # scalar in np.ndarray for example array([0.0])
+                num_jac_element = eqn_address.stop - eqn_address.start
+            else:
+                raise ValueError("Unknown derivative value dimension type!")
+        elif isinstance(value, (Number, SymNumber)):
+            num_jac_element = eqn_address.stop - eqn_address.start
+        else:
+            raise ValueError(f"Unknown derivative data type {type(value)}!")
+        eqn_address_range = np.arange(eqn_address.start, eqn_address.stop)
+        row = np.append(row, eqn_address_range)
+        if isinstance(diff_var, IdxSymBasic):
+            index = diff_var.index
+            if not isinstance(index, (int, slice, np.integer)):
+                raise TypeError(
+                    f"Index type {type(diff_var.index)} not applicable for numba printer!\n Try rewrite the Variable!")
+            else:
+                # reshape is to convert float/integer to 1-dim numpy.ndarray
+                var_address_range = np.array(np.arange(var_address.start, var_address.stop)[index]).reshape((-1,))
+        elif isinstance(diff_var, Var):
+            var_address_range = np.arange(var_address.start, var_address.stop)
+        if len(var_address_range) != len(eqn_address_range):
+            raise ValueError('Equation address range is different from variable address range')
+        col = np.append(col, var_address_range)
+        jac_block_address.add(f'{eqn_name}@@@{diff_var_name}', num_jac_element)
+
+    assert len(row) == len(col) == jac_block_address.total_size
+
+    return row, col, jac_block_address
 
 
 class coo_2_csc(Symbol):
@@ -411,20 +679,6 @@ class tolist(Function):
 
     def _numpycode(self, printer, **kwargs):
         return r'((' + printer._print(self.args[0]) + r').tolist())'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-
-class inner_F(Symbol):
-
-    def __new__(cls, ae: SymEquations, *args):
-        obj = Symbol.__new__(cls, f'innerF: {ae.name}')
-        obj.inner_F_args = args
-        return obj
-
-    def _numpycode(self, printer, **kwargs):
-        return r'inner_F(' + ',\n '.join([printer._print(arg) for arg in self.inner_F_args]) + r')'
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)

@@ -13,12 +13,12 @@ def nr_method(eqn: nAE,
               tol: float = 1e-8,
               stats=False):
     p = eqn.p
-    df = eqn.g(y, p)
+    df = eqn.F(y, p)
     ite = 0
     while max(abs(df)) > tol:
         ite = ite + 1
         y = y - solve(eqn.J(y, p), df)
-        df = eqn.g(y, p)
+        df = eqn.F(y, p)
         if ite >= 100:
             print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
             break

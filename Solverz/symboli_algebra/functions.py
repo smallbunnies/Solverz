@@ -1,6 +1,6 @@
 from functools import reduce
 
-from sympy import Symbol, Function, Number, S, Integer
+from sympy import Symbol, Function, Number, S, Integer, sin as Symsin, cos as Symcos
 from sympy.core.function import ArgumentIndexError
 
 
@@ -175,15 +175,7 @@ class exp(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class sin(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 1:
-            raise TypeError(f'Supports one operand while {len(args)} input!')
-
-    def fdiff(self, argindex=1):
-        return cos(*self.args)
+class sin(Symsin):
 
     def _numpycode(self, printer, **kwargs):
         return r'sin(' + printer._print(self.args[0]) + r')'
@@ -192,15 +184,7 @@ class sin(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class cos(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 1:
-            raise TypeError(f'Supports one operand while {len(args)} input!')
-
-    def fdiff(self, argindex=1):
-        return -sin(*self.args)
+class cos(Symcos):
 
     def _numpycode(self, printer, **kwargs):
         return r'cos(' + printer._print(self.args[0]) + r')'
