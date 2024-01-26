@@ -30,7 +30,7 @@ class dense_decomposition:
 class sp_decomposition:
     def __init__(self,
                  A: Union[(csc_array, csc_matrix)]):
-        self.lu = sla.splu(A)
+        self.lu_solve = sla.factorized(A)
 
     def solve(self, b):
-        return self.lu.solve(b)
+        return self.lu_solve(b)

@@ -79,7 +79,7 @@ def print_init_code(eqn_type: str, module_name, eqn_param):
     code += f'start = time.perf_counter()\n'
     code += code_compile
     code += f'end = time.perf_counter()\n'
-    code += "print(f'Compiling time elapsed {end-start}s')\n"
+    code += "print(f'Compiling time elapsed: {end-start}s')\n"
     return code
 
 

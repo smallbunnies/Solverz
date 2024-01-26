@@ -6,7 +6,7 @@ class Opt:
                  facmax=6,
                  fac1=0.2,
                  fac2=6,
-                 scheme='rodas',
+                 scheme='rodas4',
                  ite_tol=1e-5,
                  fix_h: bool = False,
                  hinit=None,
