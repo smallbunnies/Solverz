@@ -101,7 +101,11 @@ class TimeSeriesParam(Param):
         self.v_series = Array(v_series, dim=1)
         self.v_series = np.append(self.v_series, np.array(self.v_series[-1]))
         self.time_series = Array(time_series, dim=1)
+
+        # Using 1000 is to prevent, in rodas solver, t + dt * rparam.a[j]>T so that the interpolation fails.
+        # This is hacky and should be resolved in the future.
         self.time_series = np.append(self.time_series, self.time_series[-1] + 1000)
+
         if len(self.v_series) != len(self.time_series):
             raise ValueError("Incompatible length between value series and time series!")
         if not np.all(np.diff(self.time_series) > 0):
