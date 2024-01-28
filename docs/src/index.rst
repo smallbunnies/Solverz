@@ -12,7 +12,7 @@ models based on partial differential equations (PDEs), ordinary differential equ
 And a diverse set of mature simulation algorithms are provided to solve these models.
 What's more, Solverz also grants you the freedom to design and compare your tailored algorithms through the provided numerical/symbolic interfaces.
 
-If you are new to Solverz, start with the :ref:`introductory tutorial <intro-tutorial>`.
+If you are new to Solverz, start with the .
 
 This is the central page for all of Solverz's documentation.
 
@@ -23,8 +23,8 @@ This is the central page for all of Solverz's documentation.
 
 Instructions on how to install Solverz.
 
-:ref:`Explanations <explanations>`
-----------------------------------
+:ref:`Quick Start <quick-start>`
+-----------------------------------
 
 Explanations provide in-depth discussions about select SymPy features. These
 topic guides talk about things like the motivation behind design decisions,
@@ -48,6 +48,6 @@ function does.
    :hidden:
 
    install.md
-   explanation/index.rst
+   quick-start/intro-tutorial.rst
    cookbook/index.rst
    reference/index.rst

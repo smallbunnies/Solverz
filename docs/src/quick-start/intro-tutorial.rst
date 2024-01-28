@@ -1,7 +1,7 @@
-.. _intro-tutorial:
+.. _quick-start:
 
-Introduction to Solverz
-=======================
+Quick Start to Solverz
+======================
 
 Solverz helps you to **solve equations numerically** in a versatile way.
 
@@ -25,31 +25,30 @@ We, or more likely a computer, keeps increasing $k$ and deriving $x_k$ until for
 Though the above solution does not seem to be burdensome, it may take you several minutes to code and debug the numerical computation programmes.
 Here, with the aid of Solverz, you can solve the equation as easily as follows
 
-1. Declare your equations using strings
+    .. testcode::
 
-   >>> from Solverz.eqn import Eqn
-   >>> from Solverz.equations import AE
-   >>> E = Eqn(name='E', eqn='exp(x)+x-3')
-   >>> g = AE(name='g', eqn=E)
+       >>> from Solverz import Var, as_Vars, exp, Eqn, nr_method, parse_ae_v
+       >>> # Declare the unknown variables and give the initial values.
+       >>> x = Var('x', 0)
+       >>> # Declare your equations
+       >>> E = Eqn(name='E', eqn=exp(x)+x-3)
+       >>> g = AE(name='g', eqn=E)
+       >>> y0 = as_Vars(x)
+       >>> # Convert symbolic models to numerical functions
+       >>> ng = made_numerical(g, y0)
+       >>> # Solve the equation with Solverz' built-in Newton Solver
+       >>> y = nr_method(ng, y0.array)
+       >>> y
 
-2. Declare the unknown variables and give the initial values.
+The solution of the equation is
 
-   >>> from Solverz.var import Var
-   >>> from Solverz.variables import Vars
-   >>> x = Var(name='x')
-   >>> x.v = [0]
-   >>> x = Vars([x])
+    .. testoutput::
 
-3. Solve the equation with Solverz' built-in Newton Solver
-
-   >>> from Solverz.solvers.aesolver import nr_method
-   >>> x = nr_method(g, x)
-   >>> x['x']
-   array([0.79205997])
+       array([0.79205997])
 
 To explain how this happened, let's get an insight into the Newton method function, which is
 
-    .. literalinclude:: ../../../Solverz/solvers/aesolver.py
+    .. literalinclude:: ../../../Solverz/solvers/nlaesolver.py
         :language: python
         :pyobject: nr_method
 
@@ -92,23 +91,25 @@ It is easily implemented in Solverz as well:
        :format: doctest
        :include-source: True
 
-       >>> from Solverz import Ode, Eqn, DAE, TimeVar, TimeVars, implicit_trapezoid
+       >>> from Solverz import Ode, Eqn, DAE, Var, implicit_trapezoid, as_Vars, parse_dae_v, made_numerical
        >>> import matplotlib.pyplot as plt
        >>> import numpy as np
-       >>> # Declare your equations using strings
-       >>> f = Ode(name='f', eqn='-x**3+0.5*y**2', diff_var='x')
-       >>> g = Eqn(name='g', eqn='x**2+y**2-2')
+       >>> # Declare the variables and give the initial values.
+       >>> x1 = Var('x1', 1)
+       >>> x2 = Var('x2', 1)
+       >>> y0 = as_Vars([x1, x2])
+       >>> # Declare your equations
+       >>> f = Ode(name='f', f=-x1**3+0.5*x2**2, diff_var=x1)
+       >>> g = Eqn(name='g', eqn=x1**2+x2**2-2)
        >>> dae = DAE([f, g])
-       >>> # Declare the time-serise variables and give the initial values.
-       >>> x = TimeVar('x')
-       >>> x.v0 = [1]
-       >>> y = TimeVar('y')
-       >>> y.v0 = [1]
+       >>> ndae = made_numerical(dae, y0)
        >>> # Solve the equation with Solverz' built-in trapezoidal Solver and plot
-       >>> xy = implicit_trapezoid(dae, TimeVars([x, y], length=201), 0.1, 20)
+       >>> T, y, stats = implicit_trapezoid(ndae, [0, 20], y0.array, 0.1)
+       >>> y = parse_dae_v(y, y0.a)
        >>> # plot
-       >>> plt.plot(np.arange(0, 20.1, 0.1), xy.T)
-       >>> labels=['x','y']
+       >>> plt.plot(T, y['x1'])
+       >>> plt.plot(T, y['x2'])
+       >>> labels=['x1','x2']
        >>> plt.legend(labels)
        >>> plt.xlabel('t/s', fontsize=15)
        >>> plt.show()
@@ -120,7 +121,7 @@ Let's take a look at the inside of `implicit_trapezoid()` function
         :pyobject: implicit_trapezoid
 
 In Solverz, one can easily define a numerical integration scheme and use it to discrete the differential algebraic equations
-with the `discretize()` function. And we can use `nr_method()' to iteratively solve the derived equations just the same as
+with the `discretize()` function. And we can use `nr_method()` to iteratively solve the derived equations just the same as
 the above example.
 
 We can conclude that Solverz behaves just as what we did in mathematics, omitting the unimportant implementation details.
@@ -137,6 +138,6 @@ For more complex usage of Solverz (e.g. event setting, trigger parameter and mix
 please refer to the :ref:`Solverz' cookbook <cookbook>`
 
 Literature
-==========
+----------
 
 .. [Haierer1996] Ernst Hairer and Gerhard Wanner, Solving Ordinary Differential Equations II, 1996, `<https://link.springer.com/book/10.1007/978-3-642-05221-7>`_
