@@ -1,7 +1,10 @@
 .. _quick-start:
 
-Quick Start to Solverz
-======================
+Quick Start
+===========
+
+Modeling and Solution
+---------------------
 
 Solverz helps you to **solve equations numerically** in a versatile way.
 
@@ -136,6 +139,14 @@ and develop easily-implemented symbolic-numerical interfaces for methods extensi
 
 For more complex usage of Solverz (e.g. event setting, trigger parameter and mixed matrix-vector models),
 please refer to the :ref:`Solverz' cookbook <cookbook>`
+
+Render Python Modules
+---------------------
+1
+
+Using Numba for acceleration
+----------------------------
+1
 
 Literature
 ----------

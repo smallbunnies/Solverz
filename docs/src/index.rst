@@ -30,6 +30,13 @@ Explanations provide in-depth discussions about select SymPy features. These
 topic guides talk about things like the motivation behind design decisions,
 technical implementation details, and opinionated recommendations.
 
+:ref:`Manual <manual>`
+-----------------------------------
+
+Explanations provide in-depth discussions about select SymPy features. These
+topic guides talk about things like the motivation behind design decisions,
+technical implementation details, and opinionated recommendations.
+
 :ref:`Cookbook <cookbook>`
 --------------------------------
 
@@ -44,10 +51,19 @@ The API reference is a detailed description of the Solverz API. Every Solverz
 function and class is enumerated here with detailed information on what each
 function does.
 
+:ref:`Contributing <contributing>`
+----------------------------------
+
+The API reference is a detailed description of the Solverz API. Every Solverz
+function and class is enumerated here with detailed information on what each
+function does.
+
 .. toctree::
    :hidden:
 
    install.md
    quick-start/intro-tutorial.rst
+   manual/index.rst
    cookbook/index.rst
    reference/index.rst
+   contributing/index.rst

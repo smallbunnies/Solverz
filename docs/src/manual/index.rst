@@ -1,8 +1,8 @@
-.. _explanations:
+.. _manual:
 
-==============
- Explanations
-==============
+========
+ Manual
+========
 
 
 Explanations provide in-depth discussions about select SymPy features. These
@@ -17,5 +17,6 @@ Contents
 .. toctree::
     :maxdepth: 3
 
-    sas_behind.rst
-
+    model.rst
+    code_printer.rst
+    solution.rst
