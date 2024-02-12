@@ -1,11 +1,18 @@
 import numpy as np
 
 from Solverz.variable.variables import as_Vars, combine_Vars, Vars, TimeVars
-from Solverz.symboli_algebra.symbols import Var
+from Solverz.symboli_algebra.symbols import Var, Para
 
 
 def test_Vars():
     # as_Vars
+    a = Var('a', [1, 2, 3])
+    b = Para('b', [4, 5, 6])
+    try:
+        y = as_Vars([a, b])
+    except TypeError as e:
+        assert e.args[0] == "Type <class 'Solverz.symboli_algebra.symbols.Para'> cannot be parsed as Var object"
+
     a = Var('a', [1, 2, 3])
     b = Var('b', [4, 5, 6])
     y = as_Vars([a, b])

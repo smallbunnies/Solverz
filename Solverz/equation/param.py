@@ -99,12 +99,8 @@ class TimeSeriesParam(Param):
                          dtype=dtype,
                          sparse=sparse)
         self.v_series = Array(v_series, dim=1)
-        self.v_series = np.append(self.v_series, np.array(self.v_series[-1]))
         self.time_series = Array(time_series, dim=1)
-
-        # Using 1000 is to prevent, in rodas solver, t + dt * rparam.a[j]>T so that the interpolation fails.
-        # This is hacky and should be resolved in the future.
-        self.time_series = np.append(self.time_series, self.time_series[-1] + 1000)
+        self.tend = self.time_series[-1]
 
         if len(self.v_series) != len(self.time_series):
             raise ValueError("Incompatible length between value series and time series!")
@@ -117,9 +113,19 @@ class TimeSeriesParam(Param):
         if t is None:
             return self.v
 
+        if t < self.tend:
+            # input of interp1d is zero-dimensional, we need to reshape
+            # [0] is to eliminate the numpy DeprecationWarning in m3b9 test: Conversion of an array with ndim > 0 to a scalar is
+            # deprecated, and will error in the future, which should be resolved.
+            vt = self.vt(t).reshape((-1, ))[0]
+        else:
+            vt = self.v_series[-1]
+
         if self.index is not None:
             temp = self.v.copy()
-            temp[self.index] = self.vt(t)
+
+            temp[self.index] = vt
+
             return temp
         else:
-            return self.vt(t).reshape((-1,))  # input of interp1d is zero-dimensional, we need to reshape
+            return vt

@@ -332,8 +332,8 @@ def Rodas(dae: nDAE,
     if opt.hmax is None:
         opt.hmax = np.abs(tend - t0)
     nt = 0
-    t = 0
-    hmin = 16 * np.spacing(t)
+    t = t0
+    hmin = 16 * np.spacing(t0)
     uround = np.spacing(1.0)
     T = np.zeros((10001,))
     T[nt] = t0
@@ -367,6 +367,10 @@ def Rodas(dae: nDAE,
 
         if np.abs(dt) < uround:
             print(f"Error exit of RODAS at time = {t}: step size too small h = {dt}.\n")
+            break
+
+        if reject > 100:
+            print("Step rejected over 100 times.\n")
             break
 
         # Stretch the step if within 10% of T-t.

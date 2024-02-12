@@ -57,7 +57,7 @@ def test_Param():
                          v_series=[0, 10, 100],
                          time_series=[0, 10, 20],
                          value=0)
-    assert Pb.get_v_t(5).__str__() == '[5.]'
+    assert Pb.get_v_t(5).__str__() == '5.0'
 
     try:
         Pb = TimeSeriesParam(name='Pb',
