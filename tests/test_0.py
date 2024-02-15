@@ -9,8 +9,7 @@ f = AE(name='F',
        eqn=e)
 y = as_Vars(x)
 nf = made_numerical(f, y)
-y1 = nr_method(nf, y.array)
-y = parse_ae_v(y1, y.a)
+y = nr_method(nf, y)
 
 
 def test_nr_method():

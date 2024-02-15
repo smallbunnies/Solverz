@@ -1,20 +1,25 @@
-from __future__ import annotations
-
 import numpy as np
 from numpy import abs, max
 
 from Solverz.numerical_interface.num_eqn import nAE
 from Solverz.solvers.laesolver import solve
+from Solverz.variable.variables import Vars
 from Solverz.solvers.option import Opt
+from Solverz.solvers.parser import io_parser
 
 
+@io_parser
 def nr_method(eqn: nAE,
               y: np.ndarray,
-              tol: float = 1e-8,
-              stats=False):
+              opt: Opt = None):
+    if opt is None:
+        opt = Opt(ite_tol=1e-8)
+
+    tol = opt.ite_tol
     p = eqn.p
     df = eqn.F(y, p)
     ite = 0
+    # main loop
     while max(abs(df)) > tol:
         ite = ite + 1
         y = y - solve(eqn.J(y, p), df)
@@ -22,16 +27,16 @@ def nr_method(eqn: nAE,
         if ite >= 100:
             print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
             break
-    if not stats:
+
+    if not opt.stats:
         return y
     else:
         return y, ite
 
 
+@io_parser
 def continuous_nr(eqn: nAE,
                   y: np.ndarray,
-                  tol: float = 1e-8,
-                  stats=False,
                   opt=None):
     p = eqn.p
     if opt is None:
@@ -40,6 +45,8 @@ def continuous_nr(eqn: nAE,
     else:
         dt = opt.hinit
         hmax = opt.hmax
+
+    tol = opt.ite_tol
 
     def f(y_, p_) -> np.ndarray:
         return -solve(eqn.J(y_, p_), eqn.g(y_, p_))

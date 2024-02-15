@@ -16,7 +16,7 @@ def fdae_solver(fdae: nFDAE,
                 opt: Opt = None):
     stats = Stats(scheme='FDE solver')
     if opt is None:
-        opt = Opt()
+        opt = Opt(stats=True)
 
     tspan = np.array(tspan)
     T_initial = tspan[0]
@@ -55,7 +55,7 @@ def fdae_solver(fdae: nFDAE,
         else:
             raise NotImplementedError("Multistep FDAE not implemented!")
 
-        u1, ite = nr_method(ae, u0, tol=opt.ite_tol, stats=True)
+        u1, ite = nr_method(ae, u0, Opt(ite_tol=opt.ite_tol, stats=True))
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite + 1
 

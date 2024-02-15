@@ -24,7 +24,7 @@ def implicit_trapezoid(dae: nDAE,
                        opt: Opt = None):
     stats = Stats(scheme='Trapezoidal')
     if opt is None:
-        opt = Opt()
+        opt = Opt(stats=True)
 
     tspan = np.array(tspan)
     T_initial = tspan[0]
@@ -45,7 +45,7 @@ def implicit_trapezoid(dae: nDAE,
                  lambda y_, p_: -dae.M + dt / 2 * dae.J(t0 + dt, y_, p_),
                  p)
 
-        y1, ite = nr_method(ae, y0, stats=True, tol=opt.ite_tol)
+        y1, ite = nr_method(ae, y0, opt)
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite
 

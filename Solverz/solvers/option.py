@@ -11,7 +11,8 @@ class Opt:
                  fix_h: bool = False,
                  hinit=None,
                  hmax=None,
-                 pbar=False):
+                 pbar=False,
+                 stats=False):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety
@@ -24,3 +25,4 @@ class Opt:
         self.scheme = scheme
         self.pbar = pbar
         self.ite_tol = ite_tol  # tol for iterative solver
+        self.stats = stats
