@@ -14,18 +14,19 @@ from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
 from Solverz.numerical_interface.num_eqn import nDAE, nAE
 from Solverz.solvers.stats import Stats
 from Solverz.solvers.option import Opt
+from Solverz.solvers.parser import dae_io_parser
 from Solverz.solvers.laesolver import lu_decomposition
 
 
+@dae_io_parser
 def implicit_trapezoid(dae: nDAE,
-                       tspan: Union[List, np.ndarray],
+                       tspan: List | np.ndarray,
                        y0: np.ndarray,
-                       dt,
                        opt: Opt = None):
     stats = Stats(scheme='Trapezoidal')
     if opt is None:
         opt = Opt(stats=True)
-
+    dt = opt.hinit
     tspan = np.array(tspan)
     T_initial = tspan[0]
     T_end = tspan[-1]
@@ -45,7 +46,7 @@ def implicit_trapezoid(dae: nDAE,
                  lambda y_, p_: -dae.M + dt / 2 * dae.J(t0 + dt, y_, p_),
                  p)
 
-        y1, ite = nr_method(ae, y0, opt)
+        y1, ite = nr_method(ae, y0, Opt(stats=True))
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite
 
@@ -316,8 +317,9 @@ def ode15s(ode: DAE,
     pass
 
 
+@dae_io_parser
 def Rodas(dae: nDAE,
-          tspan: Union[List, np.ndarray],
+          tspan: List| np.ndarray,
           y0: np.ndarray,
           opt: Opt = None):
     if opt is None:
@@ -556,10 +558,10 @@ class Rodas_param:
                 self.beta[3, 0:3] = [0.69775271462407906, 0.056490613592447572, -0.32705938821652658]
                 self.b = np.zeros((self.s,))
                 self.b[0:3] = self.beta[3, 0:3]
-                self.b[self.s-1] = self.gamma
+                self.b[self.s - 1] = self.gamma
                 self.bd = np.zeros((self.s,))
                 self.bd[0:2] = self.beta[2, 0:2]
-                self.bd[self.s-2] = self.gamma
+                self.bd[self.s - 2] = self.gamma
                 # self.c = np.array([-4.786970949443344e+00, -6.966969867338157e-01, 4.491962205414260e+00,
                 #                    1.247990161586704e+00, -2.562844308238056e-01, 0])
                 # self.d = np.array([1.274202171603216e+01, -1.894421984691950e+00, -1.113020959269748e+01,

@@ -80,31 +80,19 @@ Uy = Var('Uy',
           -0.0396760163416718, -0.0692587531054159, -0.0651191654677445,
           0.0665507083524658, 0.0129050646926083, 0.0354351211556429])
 
-
 y0 = as_Vars([delta, omega, Ixg, Iyg, Ux, Uy])
 
 m3b9_dae, code = made_numerical(m3b9, y0, sparse=False, output_code=True)
-T1, y, stats2 = Rodas(dae=m3b9_dae,
-                      tspan=np.linspace(0, 10, 5001).reshape(-1, ),
-                      y0=y0.array,
-                      opt=Opt(hinit=1e-5))
-y = parse_dae_v(y, m3b9.var_address)
+T1, y, stats2 = Rodas(m3b9_dae,
+                      np.linspace(0, 10, 5001).reshape(-1, ),
+                      y0,
+                      Opt(hinit=1e-5))
 
 T, y_trape, stats = implicit_trapezoid(m3b9_dae,
-                                       tspan=[0, 10],
-                                       y0=y0.array,
-                                       dt=dt)
-y_trape = parse_dae_v(y_trape, m3b9.var_address)
+                                       [0, 10],
+                                       y0,
+                                       Opt(hinit=dt))
 
-
-# import matplotlib.pyplot as plt
-#
-# plt.plot(T1, df['omega'][1], label='ode15s')
-# plt.plot(T1, y['omega'][:, 1], label='rodas', linestyle=':')
-# plt.plot(T, y_trape['omega'][:, 1], label='trapezoidal', linestyle='--', color='m', alpha=0.5)
-# plt.legend()
-# plt.grid()
-# plt.show()
 
 def test_m3b9():
     assert np.abs(np.asarray(df['omega']) - y['omega']).max() <= 2e-5

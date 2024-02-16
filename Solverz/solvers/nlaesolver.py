@@ -5,10 +5,10 @@ from Solverz.numerical_interface.num_eqn import nAE
 from Solverz.solvers.laesolver import solve
 from Solverz.variable.variables import Vars
 from Solverz.solvers.option import Opt
-from Solverz.solvers.parser import io_parser
+from Solverz.solvers.parser import ae_io_parser
 
 
-@io_parser
+@ae_io_parser
 def nr_method(eqn: nAE,
               y: np.ndarray,
               opt: Opt = None):
@@ -34,7 +34,7 @@ def nr_method(eqn: nAE,
         return y, ite
 
 
-@io_parser
+@ae_io_parser
 def continuous_nr(eqn: nAE,
                   y: np.ndarray,
                   opt=None):

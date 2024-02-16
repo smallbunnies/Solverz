@@ -7,17 +7,18 @@ from Solverz.numerical_interface.num_eqn import nFDAE, nAE
 from Solverz.solvers.nlaesolver import nr_method
 from Solverz.solvers.stats import Stats
 from Solverz.solvers.option import Opt
+from Solverz.solvers.parser import fdae_io_parser
 
 
+@fdae_io_parser
 def fdae_solver(fdae: nFDAE,
-                tspan: Union[List, np.ndarray],
+                tspan: List | np.ndarray,
                 u0: np.ndarray,
-                dt,
                 opt: Opt = None):
     stats = Stats(scheme='FDE solver')
     if opt is None:
         opt = Opt(stats=True)
-
+    dt = opt.hinit
     tspan = np.array(tspan)
     T_initial = tspan[0]
     tend = tspan[-1]

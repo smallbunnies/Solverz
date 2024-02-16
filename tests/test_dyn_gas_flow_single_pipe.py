@@ -44,12 +44,11 @@ gas_FDE.param_initializer('dx', Param('dx', value=np.array(300)))
 gas_FDE.param_initializer('dt', Param('dt', value=5))
 
 ngas = made_numerical(gas_FDE, u0)
-T, u, stats = fdae_solver(ngas, [0, 3600], u0.array, 5, Opt(ite_tol=1e-3))
+T, u, stats = fdae_solver(ngas, [0, 3600], u0.array, Opt(hinit=5, ite_tol=1e-3))
 u = parse_dae_v(u, u0.a)
 ngas_sparse, code = made_numerical(gas_FDE, u0, sparse=True, output_code=True)
 
-T1, u1, stats1 = fdae_solver(ngas_sparse, [0, 3600], u0.array, 5, Opt(ite_tol=1e-3))
-u1 = parse_dae_v(u1, u0.a)
+T1, u1, stats1 = fdae_solver(ngas_sparse, [0, 3600], u0, Opt(hinit=5, ite_tol=1e-3))
 
 
 def test_fde_solver():
