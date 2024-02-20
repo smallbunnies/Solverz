@@ -1,7 +1,8 @@
 from typing import Callable, Any, List
 import numpy as np
-from Solverz.variable.variables import Vars
-from Solverz.numerical_interface.num_eqn import nAE, nDAE, nFDAE, parse_dae_v
+from Solverz.variable.variables import Vars, TimeVars
+from Solverz.utilities.address import Address
+from Solverz.num_api.num_eqn import nAE, nDAE, nFDAE
 from Solverz.solvers.option import Opt
 
 
@@ -32,7 +33,7 @@ def ae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
 
         # Wrap the output in Vars if the original y0 was a Vars instance
         if original_y0_is_vars:
-            y = Vars(y0.a, y)  # Assume y0.a is accessible and relevant
+            y = parse_ae_v(y, y0.a)  # Assume y0.a is accessible and relevant
 
         # Return results, with stats if they were provided
         return (y, stats) if stats is not None else y
@@ -94,3 +95,14 @@ def dae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
         return T, y, stats
 
     return wrapper
+
+
+def parse_ae_v(y: np.ndarray, var_address: Address):
+    return Vars(var_address, y)
+
+
+def parse_dae_v(y: np.ndarray, var_address: Address):
+    temp = Vars(var_address, y[0, :])
+    temp = TimeVars(temp, y.shape[0])
+    temp.array[:, :] = y
+    return temp

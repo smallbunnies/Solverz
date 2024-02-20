@@ -11,7 +11,7 @@ from Solverz.sym_algebra.symbols import Var, Para, IdxVar, idx, IdxPara, AliasVa
 from Solverz.sym_algebra.functions import Mat_Mul, Slice, F
 from Solverz.sym_algebra.matrix_calculus import MixedEquationDiff
 from Solverz.sym_algebra.transform import finite_difference, semi_descritize
-from Solverz.numerical_interface.custom_function import numerical_interface
+from Solverz.num_api.custom_function import numerical_interface
 
 
 class Eqn:

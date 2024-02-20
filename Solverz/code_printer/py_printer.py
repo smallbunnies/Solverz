@@ -14,15 +14,125 @@ from scipy.sparse import sparray
 from numbers import Number
 
 from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDAE, DAE as SymDAE, AE as SymAE
-from Solverz.variable.variables import Vars
+from Solverz.variable.variables import Vars, TimeVars
 from Solverz.equation.param import TimeSeriesParam
 from Solverz.sym_algebra.symbols import Var, SolDict, Para, idx, IdxSymBasic
 from Solverz.sym_algebra.functions import zeros, CSC_array, Arange
 from Solverz.utilities.address import Address
 from Solverz.utilities.io import save
-
+from Solverz.variable.variables import combine_Vars
+from Solverz.num_api.custom_function import numerical_interface
+from Solverz.num_api.num_eqn import nAE, nFDAE, nDAE
 
 # %%
+
+
+def parse_p(ae: SymEquations):
+    p = dict()
+    for param_name, param in ae.PARAM.items():
+        if isinstance(param, TimeSeriesParam):
+            p.update({param_name: param})
+        else:
+            p.update({param_name: param.v})
+    return p
+
+
+def parse_trigger_fun(ae: SymEquations):
+    func = dict()
+    for para_name, param in ae.PARAM.items():
+        func.update({para_name + '_trigger_func': param.trigger_fun})
+
+    return func
+
+
+def made_numerical(eqn: SymEquations, *xys, sparse=False, output_code=False):
+    """
+    factory method of numerical equations
+    """
+    print(f"Printing numerical codes of {eqn.name}")
+    eqn.assign_eqn_var_address(*xys)
+    code_F = print_F(eqn)
+    code_J = print_J(eqn, sparse)
+    custom_func = dict()
+    custom_func.update(numerical_interface)
+    custom_func.update(parse_trigger_fun(eqn))
+    F = Solverzlambdify(code_F, 'F_', modules=[custom_func, 'numpy'])
+    J = Solverzlambdify(code_J, 'J_', modules=[custom_func, 'numpy'])
+    p = parse_p(eqn)
+    print('Complete!')
+    if isinstance(eqn, SymAE) and not isinstance(eqn, SymFDAE):
+        num_eqn = nAE(F, J, p)
+    elif isinstance(eqn, SymFDAE):
+        num_eqn = nFDAE(F, J, p, eqn.nstep)
+    elif isinstance(eqn, SymDAE):
+        num_eqn = nDAE(eqn.M, F, J, p)
+    else:
+        raise ValueError(f'Unknown equation type {type(eqn)}')
+    if output_code:
+        return num_eqn, {'F': code_F, 'J': code_J}
+    else:
+        return num_eqn
+
+
+def render_modules(eqn: SymEquations, *xys, name, directory=None, numba=False):
+    """
+    factory method of numerical equations
+    """
+    print(f"Printing python codes of {eqn.name}...")
+    eqn.assign_eqn_var_address(*xys)
+    p = parse_p(eqn)
+    code_F = print_F_numba(eqn)
+    code_inner_F = print_inner_F(eqn)
+    code_sub_inner_F = print_sub_inner_F(eqn)
+    code_J = print_J_numba(eqn)
+    codes = print_inner_J(eqn, *xys)
+    code_inner_J = codes['code_inner_J']
+    code_sub_inner_J = codes['code_sub_inner_J']
+    custom_func = dict()
+    custom_func.update(numerical_interface)
+    custom_func.update(parse_trigger_fun(eqn))
+
+    print('Complete!')
+
+    eqn_parameter = {}
+    if isinstance(eqn, SymAE) and not isinstance(eqn, SymFDAE):
+        eqn_type = 'AE'
+    elif isinstance(eqn, SymFDAE):
+        eqn_type = 'FDAE'
+        eqn_parameter.update({'nstep': eqn.nstep})
+    elif isinstance(eqn, SymDAE):
+        eqn_type = 'DAE'
+        eqn_parameter.update({'M': eqn.M})
+    else:
+        raise ValueError(f'Unknown equation type {type(eqn)}')
+
+    if len(xys) == 1:
+        y = xys[0]
+    else:
+        y = xys[0]
+        for arg in xys[1:]:
+            y = combine_Vars(y, arg)
+
+    code_dict = {'F': code_F,
+                 'inner_F': code_inner_F,
+                 'sub_inner_F': code_sub_inner_F,
+                 'J': code_J,
+                 'inner_J': code_inner_J,
+                 'sub_inner_J': code_sub_inner_J}
+    eqn_parameter.update({'row': codes['row'], 'col': codes['col'], 'data': codes['data']})
+    print(f"Rendering python modules!")
+    render_as_modules(name,
+                      code_dict,
+                      eqn_type,
+                      p,
+                      eqn_parameter,
+                      y,
+                      [custom_func, 'numpy'],
+                      numba,
+                      directory)
+    print('Complete!')
+
+
 def is_valid_python_module_name(module_name):
     pattern = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
     return bool(pattern.match(module_name))
@@ -58,7 +168,7 @@ def print_init_code(eqn_type: str, module_name, eqn_param):
     code += 'import time\n'
     match eqn_type:
         case 'AE':
-            code += 'from Solverz.numerical_interface.num_eqn import nAE\n'
+            code += 'from Solverz.num_api.num_eqn import nAE\n'
             code += 'mdl = nAE(F_, J_, p)\n'
             code_compile = 'mdl.F(y.array, p)\nmdl.J(y.array, p)\n'
         case 'FDAE':
@@ -66,12 +176,12 @@ def print_init_code(eqn_type: str, module_name, eqn_param):
                 nstep = eqn_param['nstep']
             except KeyError as e:
                 raise ValueError("Cannot parse nstep attribute for FDAE object printing!")
-            code += 'from Solverz.numerical_interface.num_eqn import nFDAE\n'
+            code += 'from Solverz.num_api.num_eqn import nFDAE\n'
             code += 'mdl = nFDAE(F_, J_, p, setting["nstep"])\n'
             args_str = ', '.join(['y.array' for i in range(nstep)])
             code_compile = f'mdl.F(0, y.array, p, {args_str})\nmdl.J(0, y.array, p, {args_str})\n'
         case 'DAE':
-            code += 'from Solverz.numerical_interface.num_eqn import nDAE\n'
+            code += 'from Solverz.num_api.num_eqn import nDAE\n'
             code += 'mdl = nDAE(setting["M"], F_, J_, p)\n'
             code_compile = 'mdl.F(0, y.array, p)\nmdl.J(0, y.array, p)\n'
         case _:
@@ -516,7 +626,8 @@ def print_J_numba(ae: SymEquations):
     body.extend(param_assignments)
     body.extend(print_trigger(ae))
     body.extend([Assignment(Var('data', internal_use=True),
-                            FunctionCall('inner_J', [symbols('_data_', real=True)] + [arg.name for arg in var_list + param_list]))])
+                            FunctionCall('inner_J', [symbols('_data_', real=True)] + [arg.name for arg in
+                                                                                      var_list + param_list]))])
     body.extend([Return(coo_2_csc(ae))])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
@@ -577,7 +688,8 @@ def print_F_numba(ae: SymEquations):
     param_assignments, param_list = print_param(ae, numba_printer=True)
     body.extend(param_assignments)
     body.extend(print_trigger(ae))
-    body.extend([Return(FunctionCall('inner_F', [symbols('_F_', real=True)] + [arg.name for arg in var_list + param_list]))])
+    body.extend(
+        [Return(FunctionCall('inner_F', [symbols('_F_', real=True)] + [arg.name for arg in var_list + param_list]))])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
 

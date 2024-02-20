@@ -1,6 +1,6 @@
 from sympy import symbols, pycode, Integer
 
-from Solverz.numerical_interface.code_printer import _parse_jac_eqn_address, _parse_jac_var_address, _parse_jac_data, \
+from Solverz.code_printer.py_printer import _parse_jac_eqn_address, _parse_jac_var_address, _parse_jac_data, \
     print_J_block, _print_F_assignment, _print_var_parser
 from Solverz.sym_algebra.symbols import idx, Var, Para
 

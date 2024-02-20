@@ -1,6 +1,6 @@
 import numpy as np
 
-from Solverz import idx, Var, Para, Sign, as_Vars, nr_method, Eqn, AE, Mat_Mul, made_numerical, parse_ae_v
+from Solverz import idx, Var, Para, Sign, as_Vars, nr_method, Eqn, AE, Mat_Mul, made_numerical
 
 k = idx('k', value=[0, 1, 2])
 i = idx('i', value=[0, 0, 3])

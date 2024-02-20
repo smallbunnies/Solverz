@@ -3,7 +3,7 @@ from sympy import lambdify
 import inspect
 
 from Solverz.sym_algebra.symbols import Var, Para, idx, IdxVar, IdxPara, Idxidx
-from Solverz.numerical_interface.custom_function import sol_slice
+from Solverz.num_api.custom_function import sol_slice
 
 
 # test of IndexPrinter

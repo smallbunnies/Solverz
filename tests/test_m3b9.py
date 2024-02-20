@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from Solverz import DAE, Eqn, Ode, Var, Para, idx, sin, cos, Rodas, as_Vars, Mat_Mul, \
-    implicit_trapezoid, Opt, TimeSeriesParam, made_numerical, parse_dae_v
+    implicit_trapezoid, Opt, TimeSeriesParam, made_numerical
 
 omega = Var(name='omega')
 delta = Var(name='delta')

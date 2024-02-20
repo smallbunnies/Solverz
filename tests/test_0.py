@@ -1,6 +1,6 @@
 import numpy as np
 
-from Solverz import Eqn, AE, nr_method, as_Vars, Var, made_numerical, parse_ae_v
+from Solverz import Eqn, AE, nr_method, as_Vars, Var, made_numerical
 
 x = Var(name='x', value=2)
 

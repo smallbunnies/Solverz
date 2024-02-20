@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.sparse import csc_array
 
-from Solverz.numerical_interface.Array import Array
+from Solverz.num_api.Array import Array
 
 
 def test_Array():

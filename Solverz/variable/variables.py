@@ -8,7 +8,7 @@ import numpy as np
 
 from Solverz.sym_algebra.symbols import Var
 from Solverz.utilities.address import Address, combine_Address
-from Solverz.numerical_interface.Array import Array
+from Solverz.num_api.Array import Array
 
 
 def as_Vars(var: Union[Var, List[Var]]) -> Vars:

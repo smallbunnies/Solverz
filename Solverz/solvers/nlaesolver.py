@@ -1,7 +1,7 @@
 import numpy as np
 from numpy import abs, max
 
-from Solverz.numerical_interface.num_eqn import nAE
+from Solverz.num_api.num_eqn import nAE
 from Solverz.solvers.laesolver import solve
 from Solverz.variable.variables import Vars
 from Solverz.solvers.option import Opt

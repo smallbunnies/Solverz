@@ -11,7 +11,7 @@ from Solverz.equation.equations import DAE
 from Solverz.solvers.nlaesolver import nr_method
 from Solverz.sym_algebra.symbols import Var
 from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
-from Solverz.numerical_interface.num_eqn import nDAE, nAE
+from Solverz.num_api.num_eqn import nDAE, nAE
 from Solverz.solvers.stats import Stats
 from Solverz.solvers.option import Opt
 from Solverz.solvers.parser import dae_io_parser

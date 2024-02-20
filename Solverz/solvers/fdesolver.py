@@ -3,7 +3,7 @@ from numbers import Number
 import numpy as np
 import tqdm
 
-from Solverz.numerical_interface.num_eqn import nFDAE, nAE
+from Solverz.num_api.num_eqn import nFDAE, nAE
 from Solverz.solvers.nlaesolver import nr_method
 from Solverz.solvers.stats import Stats
 from Solverz.solvers.option import Opt

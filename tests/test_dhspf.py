@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-from Solverz import Eqn, AE, nr_method, as_Vars, Var, Para, idx, Abs, exp, Mat_Mul, made_numerical, parse_ae_v
+from Solverz import Eqn, AE, nr_method, as_Vars, Var, Para, idx, Abs, exp, Mat_Mul, made_numerical
 
 # %% initialize variables and params
 sys_df = pd.read_excel('instances/4node3pipe.xlsx',
