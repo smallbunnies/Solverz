@@ -7,10 +7,10 @@ from sympy import Symbol, Expr, latex, Derivative, sympify
 from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
-from Solverz.symboli_algebra.symbols import Var, Para, IdxVar, idx, IdxPara, AliasVar, IdxAliasVar
-from Solverz.symboli_algebra.functions import Mat_Mul, Slice, F
-from Solverz.symboli_algebra.matrix_calculus import MixedEquationDiff
-from Solverz.symboli_algebra.transform import finite_difference, semi_descritize
+from Solverz.sym_algebra.symbols import Var, Para, IdxVar, idx, IdxPara, AliasVar, IdxAliasVar
+from Solverz.sym_algebra.functions import Mat_Mul, Slice, F
+from Solverz.sym_algebra.matrix_calculus import MixedEquationDiff
+from Solverz.sym_algebra.transform import finite_difference, semi_descritize
 from Solverz.numerical_interface.custom_function import numerical_interface
 
 

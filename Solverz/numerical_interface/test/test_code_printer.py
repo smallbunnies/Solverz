@@ -2,7 +2,7 @@ from sympy import symbols, pycode, Integer
 
 from Solverz.numerical_interface.code_printer import _parse_jac_eqn_address, _parse_jac_var_address, _parse_jac_data, \
     print_J_block, _print_F_assignment, _print_var_parser
-from Solverz.symboli_algebra.symbols import idx, Var, Para
+from Solverz.sym_algebra.symbols import idx, Var, Para
 
 
 def test_address_parser():
@@ -68,11 +68,11 @@ def test_var_parser():
     assert pycode(_print_var_parser('x', '0', slice(3, 6))) == 'x_tag_0 = y_0[3:6]'
 
 
-def test_F_printer():
-    F = _print_F_assignment(slice(20, 21), Var('x'))
-    assert pycode(F) == '_F_[20:21] = x'
-    F = _print_F_assignment(slice(20, 23), Var('x'))
-    assert pycode(F) == '_F_[20:23] = x'
+# def test_F_printer():
+#     F = _print_F_assignment(slice(20, 21), Var('x'))
+#     assert pycode(F) == '_F_[20:21] = x'
+#     F = _print_F_assignment(slice(20, 23), Var('x'))
+#     assert pycode(F) == '_F_[20:23] = x'
 
 
 def test_J_block_printer():

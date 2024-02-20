@@ -1,7 +1,7 @@
 import numpy as np
 
 from Solverz.variable.variables import as_Vars, combine_Vars, Vars, TimeVars
-from Solverz.symboli_algebra.symbols import Var, Para
+from Solverz.sym_algebra.symbols import Var, Para
 
 
 def test_Vars():
@@ -11,12 +11,16 @@ def test_Vars():
     try:
         y = as_Vars([a, b])
     except TypeError as e:
-        assert e.args[0] == "Type <class 'Solverz.symboli_algebra.symbols.Para'> cannot be parsed as Var object"
+        assert e.args[0] == "Type <class 'Solverz.sym_algebra.symbols.Para'> cannot be parsed as Var object"
 
     a = Var('a', [1, 2, 3])
     b = Var('b', [4, 5, 6])
     y = as_Vars([a, b])
     assert np.all(np.isclose(y.array, [1, 2, 3, 4, 5, 6]))
+    assert y[0] == 1
+    assert y[2:4].tolist() == [3, 4]
+    assert y[:-1].tolist() == [1, 2, 3, 4, 5]
+    assert y[::2].tolist() == [1, 3, 5]
 
     c = Var('c', [0, -2, 3.0])
     d = Var('d', [100, 5, 6])

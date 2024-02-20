@@ -1,7 +1,7 @@
 from sympy import pycode, Integer
 
-from Solverz.symboli_algebra.transform import finite_difference, semi_descritize
-from Solverz.symboli_algebra.symbols import Var, Para
+from Solverz.sym_algebra.transform import finite_difference, semi_descritize
+from Solverz.sym_algebra.symbols import Var, Para
 
 pi = Var('pi')
 qi = Var('qi')

@@ -4,7 +4,7 @@ import numpy as np
 
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import DAE, AE
-from Solverz.symboli_algebra.symbols import Var, idx, Para
+from Solverz.sym_algebra.symbols import Var, idx, Para
 from Solverz.variable.variables import combine_Vars, as_Vars
 
 

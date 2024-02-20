@@ -4,8 +4,8 @@ import pandas as pd
 import numpy as np
 import sympy as sp
 
-from Solverz.symboli_algebra.symbols import Var, idx, Para
-from Solverz.symboli_algebra.functions import Abs
+from Solverz.sym_algebra.symbols import Var, idx, Para
+from Solverz.sym_algebra.functions import Abs
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import DAE, AE
 from Solverz.variable.variables import combine_Vars, as_Vars

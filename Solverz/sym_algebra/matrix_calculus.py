@@ -8,8 +8,8 @@ import numpy as np
 import sympy as sp
 from sympy import Expr, Mul, Add, S, Number, Integer, Symbol
 
-from Solverz.symboli_algebra.symbols import IdxVar, IdxPara, Var, Para
-from Solverz.symboli_algebra.functions import Mat_Mul, Diag, transpose, Abs, Sign
+from Solverz.sym_algebra.symbols import IdxVar, IdxPara, Var, Para
+from Solverz.sym_algebra.functions import Mat_Mul, Diag, transpose, Abs, Sign
 
 
 class TMatrix:

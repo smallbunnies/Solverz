@@ -6,7 +6,7 @@ from Solverz.equation.equations import Equations as SymEquations, AE as SymAE, D
     FDAE as SymFDAE
 from Solverz.equation.param import TimeSeriesParam
 from Solverz.numerical_interface.code_printer import print_J, print_F, Solverzlambdify, print_F_numba, print_J_numba, \
-    print_inner_F, print_inner_J, render_as_modules
+    print_inner_F, print_inner_J, render_as_modules, print_sub_inner_F
 from Solverz.numerical_interface.custom_function import numerical_interface
 from Solverz.utilities.address import Address
 from Solverz.variable.variables import Vars, TimeVars, combine_Vars
@@ -78,77 +78,89 @@ def parse_trigger_fun(ae: SymEquations):
     return func
 
 
-def made_numerical(eqn: SymEquations, *xys, sparse=False, output_code=False, numba=False):
+def made_numerical(eqn: SymEquations, *xys, sparse=False, output_code=False):
     """
     factory method of numerical equations
     """
-    if not numba:
-        print(f"Printing numerical codes of {eqn.name}")
-        eqn.assign_eqn_var_address(*xys)
-        code_F = print_F(eqn)
-        code_J = print_J(eqn, sparse)
-        custom_func = dict()
-        custom_func.update(numerical_interface)
-        custom_func.update(parse_trigger_fun(eqn))
-        F = Solverzlambdify(code_F, 'F_', modules=[custom_func, 'numpy'])
-        J = Solverzlambdify(code_J, 'J_', modules=[custom_func, 'numpy'])
-        p = parse_p(eqn)
-        print('Complete!')
-        if isinstance(eqn, SymAE) and not isinstance(eqn, SymFDAE):
-            num_eqn = nAE(F, J, p)
-        elif isinstance(eqn, SymFDAE):
-            num_eqn = nFDAE(F, J, p, eqn.nstep)
-        elif isinstance(eqn, SymDAE):
-            num_eqn = nDAE(eqn.M, F, J, p)
-        else:
-            raise ValueError(f'Unknown equation type {type(eqn)}')
-        if output_code:
-            return num_eqn, {'F': code_F, 'J': code_J}
-        else:
-            return num_eqn
+    print(f"Printing numerical codes of {eqn.name}")
+    eqn.assign_eqn_var_address(*xys)
+    code_F = print_F(eqn)
+    code_J = print_J(eqn, sparse)
+    custom_func = dict()
+    custom_func.update(numerical_interface)
+    custom_func.update(parse_trigger_fun(eqn))
+    F = Solverzlambdify(code_F, 'F_', modules=[custom_func, 'numpy'])
+    J = Solverzlambdify(code_J, 'J_', modules=[custom_func, 'numpy'])
+    p = parse_p(eqn)
+    print('Complete!')
+    if isinstance(eqn, SymAE) and not isinstance(eqn, SymFDAE):
+        num_eqn = nAE(F, J, p)
+    elif isinstance(eqn, SymFDAE):
+        num_eqn = nFDAE(F, J, p, eqn.nstep)
+    elif isinstance(eqn, SymDAE):
+        num_eqn = nDAE(eqn.M, F, J, p)
     else:
-        print(f"Printing numerical codes of {eqn.name} for numba-acceleration!")
-        eqn.assign_eqn_var_address(*xys)
-        p = parse_p(eqn)
-        code_F = print_F_numba(eqn)
-        code_inner_F = print_inner_F(eqn)
-        code_J = print_J_numba(eqn)
-        code_inner_J, row, col = print_inner_J(eqn, *xys)
-        custom_func = dict()
-        custom_func.update(numerical_interface)
-        custom_func.update(parse_trigger_fun(eqn))
+        raise ValueError(f'Unknown equation type {type(eqn)}')
+    if output_code:
+        return num_eqn, {'F': code_F, 'J': code_J}
+    else:
+        return num_eqn
 
-        print('Complete!')
 
-        eqn_parameter = {}
-        if isinstance(eqn, SymAE) and not isinstance(eqn, SymFDAE):
-            eqn_type = 'AE'
-        elif isinstance(eqn, SymFDAE):
-            eqn_type = 'FDAE'
-            eqn_parameter.update({'nstep': eqn.nstep})
-        elif isinstance(eqn, SymDAE):
-            eqn_type = 'DAE'
-            eqn_parameter.update({'M': eqn.M})
-        else:
-            raise ValueError(f'Unknown equation type {type(eqn)}')
+def render_modules(eqn: SymEquations, *xys, name, directory=None, numba=False):
+    """
+    factory method of numerical equations
+    """
+    print(f"Printing python codes of {eqn.name}...")
+    eqn.assign_eqn_var_address(*xys)
+    p = parse_p(eqn)
+    code_F = print_F_numba(eqn)
+    code_inner_F = print_inner_F(eqn)
+    code_sub_inner_F = print_sub_inner_F(eqn)
+    code_J = print_J_numba(eqn)
+    codes = print_inner_J(eqn, *xys)
+    code_inner_J = codes['code_inner_J']
+    code_sub_inner_J = codes['code_sub_inner_J']
+    custom_func = dict()
+    custom_func.update(numerical_interface)
+    custom_func.update(parse_trigger_fun(eqn))
 
-        if len(xys) == 1:
-            y = xys[0]
-        else:
-            y = xys[0]
-            for arg in xys[1:]:
-                y = combine_Vars(y, arg)
+    print('Complete!')
 
-        code_dict = {'F': code_F, 'inner_F': code_inner_F, 'J': code_J, 'inner_J': code_inner_J}
-        eqn_parameter.update({'row': row, 'col': col})
-        print(f"Rendering python modules!")
-        if eqn.name is None:
-            raise ValueError(f'Please specify name of {eqn_type} object!')
-        render_as_modules(eqn.name,
-                          code_dict,
-                          eqn_type,
-                          p,
-                          eqn_parameter,
-                          y,
-                          [custom_func, 'numpy'])
-        print('Complete!')
+    eqn_parameter = {}
+    if isinstance(eqn, SymAE) and not isinstance(eqn, SymFDAE):
+        eqn_type = 'AE'
+    elif isinstance(eqn, SymFDAE):
+        eqn_type = 'FDAE'
+        eqn_parameter.update({'nstep': eqn.nstep})
+    elif isinstance(eqn, SymDAE):
+        eqn_type = 'DAE'
+        eqn_parameter.update({'M': eqn.M})
+    else:
+        raise ValueError(f'Unknown equation type {type(eqn)}')
+
+    if len(xys) == 1:
+        y = xys[0]
+    else:
+        y = xys[0]
+        for arg in xys[1:]:
+            y = combine_Vars(y, arg)
+
+    code_dict = {'F': code_F,
+                 'inner_F': code_inner_F,
+                 'sub_inner_F': code_sub_inner_F,
+                 'J': code_J,
+                 'inner_J': code_inner_J,
+                 'sub_inner_J': code_sub_inner_J}
+    eqn_parameter.update({'row': codes['row'], 'col': codes['col'], 'data': codes['data']})
+    print(f"Rendering python modules!")
+    render_as_modules(name,
+                      code_dict,
+                      eqn_type,
+                      p,
+                      eqn_parameter,
+                      y,
+                      [custom_func, 'numpy'],
+                      numba,
+                      directory)
+    print('Complete!')

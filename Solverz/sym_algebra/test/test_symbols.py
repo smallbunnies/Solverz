@@ -1,4 +1,4 @@
-from Solverz.symboli_algebra.symbols import Var, Solverz_internal_name
+from Solverz.sym_algebra.symbols import Var, Solverz_internal_name
 
 
 def test_internal_var_declaration():

@@ -2,7 +2,7 @@ import numpy as np
 from sympy import lambdify
 import inspect
 
-from Solverz.symboli_algebra.symbols import Var, Para, idx, IdxVar, IdxPara, Idxidx
+from Solverz.sym_algebra.symbols import Var, Para, idx, IdxVar, IdxPara, Idxidx
 from Solverz.numerical_interface.custom_function import sol_slice
 
 

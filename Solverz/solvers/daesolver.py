@@ -9,7 +9,7 @@ from scipy.sparse import csc_array, linalg as sla
 
 from Solverz.equation.equations import DAE
 from Solverz.solvers.nlaesolver import nr_method
-from Solverz.symboli_algebra.symbols import Var
+from Solverz.sym_algebra.symbols import Var
 from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
 from Solverz.numerical_interface.num_eqn import nDAE, nAE
 from Solverz.solvers.stats import Stats
@@ -319,7 +319,7 @@ def ode15s(ode: DAE,
 
 @dae_io_parser
 def Rodas(dae: nDAE,
-          tspan: List| np.ndarray,
+          tspan: List | np.ndarray,
           y0: np.ndarray,
           opt: Opt = None):
     if opt is None:
@@ -391,7 +391,7 @@ def Rodas(dae: nDAE,
         if reject == 0:
             J = dae.J(t, y0, p)
 
-        dfdt0 = dt * dfdt1(dae, t, y0)
+        dfdt0 = dt * dfdt(dae, t, y0)
         rhs = dae.F(t, y0, p) + rparam.g[0] * dfdt0
         stats.nfeval = stats.nfeval + 1
 
@@ -577,15 +577,7 @@ class Rodas_param:
                 raise ValueError("Not implemented")
 
 
-def dfdt(dae, t, y):
-    tscale = np.maximum(0.1 * np.abs(t), 1e-8)
-    ddt = t + np.sqrt(np.spacing(1)) * tscale - t
-    f0 = dae.F(t, y)
-    f1 = dae.F(t + ddt, y)
-    return (f1 - f0) / ddt
-
-
-def dfdt1(dae: nDAE, t, y):
+def dfdt(dae: nDAE, t, y):
     tscale = np.maximum(0.1 * np.abs(t), 1e-8)
     ddt = t + np.sqrt(np.spacing(1)) * tscale - t
     f0 = dae.F(t, y, dae.p)

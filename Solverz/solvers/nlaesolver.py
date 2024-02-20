@@ -37,19 +37,17 @@ def nr_method(eqn: nAE,
 @ae_io_parser
 def continuous_nr(eqn: nAE,
                   y: np.ndarray,
-                  opt=None):
+                  opt: Opt = None):
     p = eqn.p
     if opt is None:
-        dt = 1
-        hmax = 1.7
-    else:
-        dt = opt.hinit
-        hmax = opt.hmax
+        opt = Opt()
 
+    dt = 1
+    hmax = 1.7
     tol = opt.ite_tol
 
     def f(y_, p_) -> np.ndarray:
-        return -solve(eqn.J(y_, p_), eqn.g(y_, p_))
+        return -solve(eqn.J(y_, p_), eqn.F(y_, p_))
 
     Pow = 1 / 5
     # c2, c3, c4, c5 = 1 / 5, 3 / 10, 4 / 5, 8 / 9 for non-autonomous equations
@@ -69,7 +67,7 @@ def continuous_nr(eqn: nAE,
     hmin = 16 * np.spacing(0)
     # atol and rtol can not be too small
     ite = 0
-    df = eqn.g(y, p)
+    df = eqn.F(y, p)
     while max(abs(df)) > tol:
         ite = ite + 1
         err = 2
@@ -88,7 +86,7 @@ def continuous_nr(eqn: nAE,
             # error control
             # error estimation
             err = dt * np.linalg.norm(
-                kE.reshape(-1, ) / np.maximum(np.maximum(abs(y.array), abs(ynew.array)).reshape(-1, ), threshold),
+                kE.reshape(-1, ) / np.maximum(np.maximum(abs(y), abs(ynew)).reshape(-1, ), threshold),
                 np.Inf)
             if err > rtol:  # failed step
                 if dt <= hmin:
@@ -102,7 +100,7 @@ def continuous_nr(eqn: nAE,
                 break
 
         y = ynew
-        df = eqn.g(y, p)
+        df = eqn.F(y, p)
 
         if nofailed:  # Enlarge step size if no failure is met
             temp = 1.25 * (err / rtol) ** Pow
@@ -115,4 +113,7 @@ def continuous_nr(eqn: nAE,
 
         if ite > 100:
             break
-    return y, ite
+    if opt.stats:
+        return y, ite
+    else:
+        return y

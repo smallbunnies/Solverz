@@ -1,7 +1,7 @@
 from sympy import simplify
 
-from Solverz.symboli_algebra.symbols import Para, AliasVar, IdxVar, Var
-from Solverz.symboli_algebra.functions import switch
+from Solverz.sym_algebra.symbols import Para, AliasVar, IdxVar, Var
+from Solverz.sym_algebra.functions import switch
 
 
 def finite_difference(diff_var, flux, source, two_dim_var, M, scheme='central diff', direction=None):

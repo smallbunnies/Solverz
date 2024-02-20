@@ -2,7 +2,6 @@ from __future__ import annotations
 from typing import Callable, Union, List, Dict
 import builtins
 from datetime import datetime
-from numbers import Number
 import re
 import os
 
@@ -17,8 +16,8 @@ from numbers import Number
 from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDAE, DAE as SymDAE, AE as SymAE
 from Solverz.variable.variables import Vars
 from Solverz.equation.param import TimeSeriesParam
-from Solverz.symboli_algebra.symbols import Var, SolDict, Para, idx, IdxSymBasic
-from Solverz.symboli_algebra.functions import zeros, CSC_array, Arange
+from Solverz.sym_algebra.symbols import Var, SolDict, Para, idx, IdxSymBasic
+from Solverz.sym_algebra.functions import zeros, CSC_array, Arange
 from Solverz.utilities.address import Address
 from Solverz.utilities.io import save
 
@@ -29,26 +28,28 @@ def is_valid_python_module_name(module_name):
     return bool(pattern.match(module_name))
 
 
-def create_python_module(module_name, initiate_code, module_code, dependency_code, auxiliary):
+def create_python_module(module_name, initiate_code, module_code, dependency_code, auxiliary, directory=None):
+    location = module_name if directory is None else directory + '/' + module_name
+
     # Create the parent directory if it doesn't exist
-    os.makedirs(module_name, exist_ok=True)
+    os.makedirs(location, exist_ok=True)
 
     # Create an empty __init__.py file
-    init_path = os.path.join(module_name, "__init__.py")
+    init_path = os.path.join(location, "__init__.py")
     with open(init_path, "w") as file:
         file.write(initiate_code)
 
     # Create the file with the dependency code
-    module_path = os.path.join(module_name, "dependency.py")
+    module_path = os.path.join(location, "dependency.py")
     with open(module_path, "w") as file:
         file.write(dependency_code)
 
     # Create the file with the module code
-    module_path = os.path.join(module_name, "num_func.py")
+    module_path = os.path.join(location, "num_func.py")
     with open(module_path, "w") as file:
         file.write(module_code)
 
-    save(auxiliary, f'{module_name}/param_and_setting.pkl')
+    save(auxiliary, f'{location}/param_and_setting.pkl')
 
 
 def print_init_code(eqn_type: str, module_name, eqn_param):
@@ -83,19 +84,35 @@ def print_init_code(eqn_type: str, module_name, eqn_param):
     return code
 
 
-def print_module_code(code_dict: Dict[str, str]):
+def print_module_code(code_dict: Dict[str, str], numba=False):
     code = 'from .dependency import *\n'
-    code += '\r\n'
+    code += """_data_ = setting["data"]\n"""
+    code += """_F_ = zeros_like(y)"""
+    code += '\n\r\n'
     code += code_dict['F']
     code += '\n\r\n'
-    code += '@njit(cache=True)\n'
+    if numba:
+        code += '@njit(cache=True)\n'
     code += code_dict['inner_F']
     code += '\n\r\n'
+    sub_inner_F = code_dict['sub_inner_F']
+    for sub_func in sub_inner_F:
+        if numba:
+            code += '@njit(cache=True)\n'
+        code += sub_func
+        code += '\n\r\n'
     code += code_dict['J']
     code += '\n\r\n'
-    code += '@njit(cache=True)\n'
+    if numba:
+        code += '@njit(cache=True)\n'
     code += code_dict['inner_J']
-    code += '\n'
+    code += '\n\r\n'
+    sub_inner_J = code_dict['sub_inner_J']
+    for sub_func in sub_inner_J:
+        if numba:
+            code += '@njit(cache=True)\n'
+        code += sub_func
+        code += '\n\r\n'
     return code
 
 
@@ -110,26 +127,29 @@ def print_dependency_code(modules):
     code += 'setting = auxiliary["eqn_param"]\n'
     code += 'row = setting["row"]\n'
     code += 'col = setting["col"]\n'
+    code += 'data_ = setting["data"]\n'
     code += 'p = auxiliary["p"]\n'
     code += 'y = auxiliary["vars"]\n'
     return code
 
 
-def render_as_modules(name, code_dict: Dict[str, str], eqn_type: str, p: dict, eqn_param: dict, variables: Vars, modules=None):
+def render_as_modules(name, code_dict: Dict[str, str], eqn_type: str, p: dict, eqn_param: dict, variables: Vars,
+                      modules=None, numba=False, directory=None):
     if is_valid_python_module_name(name):
         module_name = name
     else:
         raise ValueError("Invalid python module name!")
 
     init_code = print_init_code(eqn_type, module_name, eqn_param)
-    module_code = print_module_code(code_dict)
+    module_code = print_module_code(code_dict, numba=numba)
     dependency_code = print_dependency_code(modules)
 
     create_python_module(module_name,
                          init_code,
                          module_code,
                          dependency_code,
-                         {'p': p, 'eqn_param': eqn_param, 'vars': variables})
+                         {'p': p, 'eqn_param': eqn_param, 'vars': variables},
+                         directory)
 
 
 def parse_name_space(modules=None):
@@ -244,22 +264,32 @@ def print_param(ae: SymEquations, numba_printer=False):
         return param_declaration, param_list
 
 
-def _print_F_assignment(eqn_address, rhs):
+def _print_F_assignment(eqn_address, eqn, i):
     F_ = Var('_F_', internal_use=True)
-    return Assignment(F_[eqn_address], rhs)
+    return Assignment(F_[eqn_address], FunctionCall(f'inner_F{int(i)}', [name for name in eqn.SYMBOLS.keys()]))
 
 
 def print_eqn_assignment(ae: SymEquations, numba_printer=False):
-    temp = Var('_F_', internal_use=True)
-    eqn_declaration = [Assignment(temp, zeros(ae.eqn_size, ))]
+    _F_ = Var('_F_', internal_use=True)
+    eqn_declaration = []
+    if not numba_printer:
+        eqn_declaration.append(Assignment(_F_, zeros(ae.eqn_size, )))
+    count = 0
     for eqn_name in ae.EQNs.keys():
         eqn_address = ae.a[eqn_name]
+        eqn = ae.EQNs[eqn_name]
         if numba_printer:
-            for var in list(ae.EQNs[eqn_name].expr.free_symbols):
+            for var in list(eqn.expr.free_symbols):
                 if isinstance(var, IdxSymBasic):
                     if isinstance(var.index, (idx, list)):
                         raise ValueError(f"Numba printer does not accept idx or list index {var.index}")
-        eqn_declaration.append(_print_F_assignment(eqn_address, ae.EQNs[eqn_name].RHS))
+            _F_ = Var('_F_', internal_use=True)
+            eqn_declaration.append(Assignment(_F_[eqn_address],
+                                              FunctionCall(f'inner_F{int(count)}',
+                                                           [name for name in eqn.SYMBOLS.keys()])))
+            count = count + 1
+        else:
+            eqn_declaration.append(Assignment(_F_[eqn_address], eqn.RHS))
     return eqn_declaration
 
 
@@ -485,11 +515,8 @@ def print_J_numba(ae: SymEquations):
     param_assignments, param_list = print_param(ae, numba_printer=True)
     body.extend(param_assignments)
     body.extend(print_trigger(ae))
-    p = SolDict('p_')
-    # body.extend([Assignment(Var('row', internal_use=True), p['row'])])
-    # body.extend([Assignment(Var('col', internal_use=True), p['col'])])
     body.extend([Assignment(Var('data', internal_use=True),
-                            FunctionCall('inner_J', [arg.name for arg in var_list + param_list]))])
+                            FunctionCall('inner_J', [symbols('_data_', real=True)] + [arg.name for arg in var_list + param_list]))])
     body.extend([Return(coo_2_csc(ae))])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
@@ -501,19 +528,40 @@ def print_inner_J(ae: SymEquations, *xys):
     args = []
     for var in var_list + param_list:
         args.append(symbols(var.name, real=True))
-    fp = FunctionPrototype(real, 'inner_J', args)
+    fp = FunctionPrototype(real, 'inner_J', [symbols('_data_', real=True)] + args)
     body = []
     row, col, jac_address = parse_jac_address(ae, *xys)
-    temp = Var('data_', internal_use=True)
-    body.extend([Assignment(temp, zeros(jac_address.total_size, ))])
+    data = np.zeros_like(row)
+    # temp = Var('data_', internal_use=True)
+    # body.extend([Assignment(temp, zeros(jac_address.total_size, ))])
+    code_sub_inner_J_blocks = []
+    count = 0
     for jac_ in jac_address.object_list:
         eqn_name, var_name = jac_.split("@@@")
-        rhs = ae.EQNs[eqn_name].derivatives[var_name].RHS
-        body.extend([_print_inner_J_block_assignment(rhs, jac_address[jac_])])
-    temp = Var('data_', internal_use=True)
+        derivative = ae.EQNs[eqn_name].derivatives[var_name]
+        rhs = derivative.RHS
+        if isinstance(rhs, (Number, SymNumber)):
+            data[jac_address[jac_]] = rhs
+        else:
+            body.append(Assignment(Var('_data_', internal_use=True)[jac_address[jac_]],
+                                   FunctionCall(f'inner_J{int(count)}', [name for name in derivative.SYMBOLS.keys()])))
+            args1 = []
+            for var in derivative.SYMBOLS.keys():
+                args1.append(symbols(var, real=True))
+
+            fp1 = FunctionPrototype(real, f'inner_J{int(count)}', args1)
+            body1 = [Return(rhs)]
+            fd1 = FunctionDefinition.from_FunctionPrototype(fp1, body1)
+            code_sub_inner_J_blocks.append(pycode(fd1, fully_qualified_modules=False))
+            count += 1
+    temp = Var('_data_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
-    return pycode(fd, fully_qualified_modules=False), row, col
+    return {'code_inner_J': pycode(fd, fully_qualified_modules=False),
+            'code_sub_inner_J': code_sub_inner_J_blocks,
+            'row': row,
+            'col': col,
+            'data': data}
 
 
 def _print_inner_J_block_assignment(rhs, address: slice):
@@ -529,7 +577,7 @@ def print_F_numba(ae: SymEquations):
     param_assignments, param_list = print_param(ae, numba_printer=True)
     body.extend(param_assignments)
     body.extend(print_trigger(ae))
-    body.extend([Return(FunctionCall('inner_F', [arg.name for arg in var_list + param_list]))])
+    body.extend([Return(FunctionCall('inner_F', [symbols('_F_', real=True)] + [arg.name for arg in var_list + param_list]))])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
 
@@ -540,13 +588,29 @@ def print_inner_F(ae: SymEquations):
     args = []
     for var in var_list + param_list:
         args.append(symbols(var.name, real=True))
-    fp = FunctionPrototype(real, 'inner_F', args)
+    fp = FunctionPrototype(real, 'inner_F', [symbols('_F_', real=True)] + args)
     body = []
     body.extend(print_eqn_assignment(ae, True))
     temp = Var('_F_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
+
+
+def print_sub_inner_F(ae: SymEquations):
+    code_blocks = []
+    count = 0
+    for eqn_name in ae.EQNs.keys():
+        eqn = ae.EQNs[eqn_name]
+        args = []
+        for var in eqn.SYMBOLS.keys():
+            args.append(symbols(var, real=True))
+        fp = FunctionPrototype(real, f'inner_F{count}', args)
+        body = [Return(eqn.RHS)]
+        fd = FunctionDefinition.from_FunctionPrototype(fp, body)
+        count = count + 1
+        code_blocks.append(pycode(fd, fully_qualified_modules=False))
+    return code_blocks
 
 
 def parse_jac_address(eqns: SymEquations, *xys):

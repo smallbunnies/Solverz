@@ -1,6 +1,6 @@
-from Solverz.symboli_algebra.symbols import Var, Para, idx
-from Solverz.symboli_algebra.functions import Abs, Mat_Mul
-from Solverz.symboli_algebra.matrix_calculus import TensorExpr
+from Solverz.sym_algebra.symbols import Var, Para, idx
+from Solverz.sym_algebra.functions import Abs, Mat_Mul
+from Solverz.sym_algebra.matrix_calculus import TensorExpr
 from Solverz.equation.eqn import Eqn
 
 mL = Para('mL', dim=2)

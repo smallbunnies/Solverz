@@ -6,7 +6,7 @@ import warnings
 
 import numpy as np
 
-from Solverz.symboli_algebra.symbols import Var
+from Solverz.sym_algebra.symbols import Var
 from Solverz.utilities.address import Address, combine_Address
 from Solverz.numerical_interface.Array import Array
 
@@ -76,8 +76,11 @@ class Vars(VarsBasic):
         else:
             self.array = array
 
-    def __getitem__(self, var_name: str):
-        return self.array[self.a[var_name]]
+    def __getitem__(self, item):
+        if isinstance(item, str):
+            return self.array[self.a[item]]
+        else:
+            return self.array[item]
 
     def __setitem__(self, key, value):
         if key in self.var_list:
