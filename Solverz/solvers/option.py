@@ -6,10 +6,13 @@ class Opt:
                  facmax=6,
                  fac1=0.2,
                  fac2=6,
-                 scheme='rodas',
+                 scheme='rodas4',
+                 ite_tol=1e-5,
                  fix_h: bool = False,
                  hinit=None,
-                 hmax=None):
+                 hmax=None,
+                 pbar=False,
+                 stats=False):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety
@@ -20,3 +23,6 @@ class Opt:
         self.hinit = hinit
         self.hmax = hmax
         self.scheme = scheme
+        self.pbar = pbar
+        self.ite_tol = ite_tol  # tol for iterative solver
+        self.stats = stats

@@ -3,7 +3,7 @@ import numpy as np
 from functools import partial
 
 from Solverz import Eqn, AE, nr_method, as_Vars, Var, Param, continuous_nr, Para, idx, Abs, exp, Mat_Mul, \
-    made_numerical, parse_ae_v
+    made_numerical
 
 # %% initialize variables and params
 sys_df = pd.read_excel('instances/4node3pipe_change_sign.xlsx',
@@ -154,10 +154,9 @@ E.param_initializer('t_node', param=Param('t_node',
 y0 = as_Vars([m, mq, Ts, Tr, Touts, Toutr, phi])
 nE, code = made_numerical(E, y0, output_code=True)
 
-y1 = nr_method(nE, y0.array)
+ynr = nr_method(nE, y0)
 # y_cnr, ite = continuous_nr(nE, y0.array)
 
-y_nr = parse_ae_v(y1, y0.a)
 
 sys_df = pd.read_excel('instances/4node3pipe_change_sign_bench.xlsx',
                        sheet_name=None,
@@ -168,8 +167,8 @@ sys_df = pd.read_excel('instances/4node3pipe_change_sign_bench.xlsx',
 def test_nr_method():
     for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
         # find nonzero elements
-        idx_nonzero = np.nonzero(y_nr[var_name])
-        assert max(abs((y_nr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) /
+        idx_nonzero = np.nonzero(ynr[var_name])
+        assert max(abs((ynr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) /
                    np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, )) <= 1e-8
 
 

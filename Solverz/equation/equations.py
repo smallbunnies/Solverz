@@ -12,8 +12,8 @@ from scipy.sparse import csc_array, coo_array
 
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
 from Solverz.equation.param import Param, IdxParam
-from Solverz.symboli_algebra.symbols import Var, idx, IdxVar, Para, AliasVar
-from Solverz.symboli_algebra.functions import Slice
+from Solverz.sym_algebra.symbols import Var, idx, IdxVar, Para, AliasVar
+from Solverz.sym_algebra.functions import Slice
 from Solverz.variable.variables import Vars
 from Solverz.utilities.address import Address, combine_Address
 

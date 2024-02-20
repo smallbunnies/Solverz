@@ -23,7 +23,7 @@ author = 'Ruizhi Yu'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ['sphinx.ext.autodoc',
+extensions = ['sphinx.ext.autodoc', 'sphinx.ext.doctest',
               'sphinx_math_dollar', 'sphinx.ext.mathjax', 'numpydoc',
               'sphinx_reredirects', 'sphinx_copybutton',
               'sphinx.ext.graphviz', 'sphinxcontrib.jquery',

@@ -2,5 +2,5 @@
 Numerical Computation
 =====================
 
-.. automodule:: Solverz.num.num_interface
+.. automodule:: Solverz.numerical_interface.custom_function
    :members:

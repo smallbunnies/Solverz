@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-from Solverz import Eqn, AE, nr_method, as_Vars, Var, Para, idx, Abs, exp, Mat_Mul, made_numerical, parse_ae_v
+from Solverz import Eqn, AE, nr_method, as_Vars, Var, Para, idx, Abs, exp, Mat_Mul, made_numerical
 
 # %% initialize variables and params
 sys_df = pd.read_excel('instances/4node3pipe.xlsx',
@@ -86,10 +86,9 @@ y0 = as_Vars([m, mq, Ts, Tr, Touts, Toutr, phi])
 
 nE, code = made_numerical(E, y0, output_code=True)
 
-y1 = nr_method(nE, y0.array)
+y_nr = nr_method(nE, y0)
 # y_cnr, ite = continuous_nr(nE, y0.array)
 
-y_nr = parse_ae_v(y1, y0.a)
 
 sys_df = pd.read_excel('instances/4node3pipe_bench.xlsx',
                        sheet_name=None,

@@ -1,6 +1,6 @@
 import numpy as np
 
-from Solverz import idx, Var, Para, Sign, as_Vars, nr_method, Eqn, AE, Mat_Mul, made_numerical, parse_ae_v
+from Solverz import idx, Var, Para, Sign, as_Vars, nr_method, Eqn, AE, Mat_Mul, made_numerical
 
 k = idx('k', value=[0, 1, 2])
 i = idx('i', value=[0, 0, 3])
@@ -24,9 +24,7 @@ gas_flow = AE(eqn=[eqn1, eqn2, eqn3, eqn4])
 y0 = as_Vars([f, Pi])
 
 ngas_flow = made_numerical(gas_flow, y0)
-y = nr_method(ngas_flow, y0.array)
-
-y1 = parse_ae_v(y, gas_flow.var_address)
+y1 = nr_method(ngas_flow, y0)
 
 
 def test_nr_method():

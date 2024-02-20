@@ -1,6 +1,4 @@
-import numpy as np
-
-from Solverz import Eqn, AE, nr_method, as_Vars, Var, made_numerical, parse_ae_v
+from Solverz import Eqn, AE, nr_method, as_Vars, Var, made_numerical
 
 x = Var(name='x', value=2)
 
@@ -9,8 +7,7 @@ f = AE(name='F',
        eqn=e)
 y = as_Vars(x)
 nf = made_numerical(f, y)
-y1 = nr_method(nf, y.array)
-y = parse_ae_v(y1, y.a)
+y = nr_method(nf, y)
 
 
 def test_nr_method():

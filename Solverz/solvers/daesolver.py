@@ -9,21 +9,24 @@ from scipy.sparse import csc_array, linalg as sla
 
 from Solverz.equation.equations import DAE
 from Solverz.solvers.nlaesolver import nr_method
-from Solverz.symboli_algebra.symbols import Var
+from Solverz.sym_algebra.symbols import Var
 from Solverz.variable.variables import TimeVars, Vars, as_Vars, combine_Vars
-from Solverz.numerical_interface.num_eqn import nDAE, nAE
+from Solverz.num_api.num_eqn import nDAE, nAE
 from Solverz.solvers.stats import Stats
 from Solverz.solvers.option import Opt
+from Solverz.solvers.parser import dae_io_parser
 from Solverz.solvers.laesolver import lu_decomposition
 
 
+@dae_io_parser
 def implicit_trapezoid(dae: nDAE,
-                       tspan: Union[List, np.ndarray],
+                       tspan: List | np.ndarray,
                        y0: np.ndarray,
-                       dt,
-                       pbar=False):
+                       opt: Opt = None):
     stats = Stats(scheme='Trapezoidal')
-
+    if opt is None:
+        opt = Opt(stats=True)
+    dt = opt.hinit
     tspan = np.array(tspan)
     T_initial = tspan[0]
     T_end = tspan[-1]
@@ -35,9 +38,6 @@ def implicit_trapezoid(dae: nDAE,
     y[0, :] = y0
     T = np.zeros((10000,))
 
-    if pbar:
-        bar = tqdm.tqdm(total=T_end)
-
     p = dae.p
     while abs(tt - T_end) > abs(dt) / 10:
         My0 = dae.M @ y0
@@ -46,7 +46,7 @@ def implicit_trapezoid(dae: nDAE,
                  lambda y_, p_: -dae.M + dt / 2 * dae.J(t0 + dt, y_, p_),
                  p)
 
-        y1, ite = nr_method(ae, y0, stats=True)
+        y1, ite = nr_method(ae, y0, Opt(stats=True))
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite
 
@@ -68,8 +68,10 @@ def backward_euler(dae: nDAE,
                    tspan: Union[List, np.ndarray],
                    y0: np.ndarray,
                    dt,
-                   pbar=False):
+                   opt: Opt = None):
     stats = Stats(scheme='Backward Euler')
+    if opt is None:
+        opt = Opt()
 
     tspan = np.array(tspan)
     T_initial = tspan[0]
@@ -82,9 +84,6 @@ def backward_euler(dae: nDAE,
     y[0, :] = y0
     T = np.zeros((10000,))
 
-    if pbar:
-        bar = tqdm.tqdm(total=T_end)
-
     p = dae.p
     while abs(tt - T_end) > abs(dt) / 10:
         My0 = dae.M @ y0
@@ -92,7 +91,7 @@ def backward_euler(dae: nDAE,
                  lambda y_, p_: dae.M - dt * dae.J(t0 + dt, y_, p_),
                  p)
 
-        y1, ite = nr_method(ae, y0, stats=True)
+        y1, ite = nr_method(ae, y0, stats=True, tol=opt.ite_tol)
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite
 
@@ -318,8 +317,9 @@ def ode15s(ode: DAE,
     pass
 
 
+@dae_io_parser
 def Rodas(dae: nDAE,
-          tspan: Union[List, np.ndarray],
+          tspan: List | np.ndarray,
           y0: np.ndarray,
           opt: Opt = None):
     if opt is None:
@@ -334,8 +334,8 @@ def Rodas(dae: nDAE,
     if opt.hmax is None:
         opt.hmax = np.abs(tend - t0)
     nt = 0
-    t = 0
-    hmin = 16 * np.spacing(t)
+    t = t0
+    hmin = 16 * np.spacing(t0)
     uround = np.spacing(1.0)
     T = np.zeros((10001,))
     T[nt] = t0
@@ -371,6 +371,10 @@ def Rodas(dae: nDAE,
             print(f"Error exit of RODAS at time = {t}: step size too small h = {dt}.\n")
             break
 
+        if reject > 100:
+            print("Step rejected over 100 times.\n")
+            break
+
         # Stretch the step if within 10% of T-t.
         if t + dt >= tend:
             dt = tend - t
@@ -387,7 +391,7 @@ def Rodas(dae: nDAE,
         if reject == 0:
             J = dae.J(t, y0, p)
 
-        dfdt0 = dt * dfdt1(dae, t, y0)
+        dfdt0 = dt * dfdt(dae, t, y0)
         rhs = dae.F(t, y0, p) + rparam.g[0] * dfdt0
         stats.nfeval = stats.nfeval + 1
 
@@ -465,92 +469,115 @@ class Rodas_param:
 
     def __init__(self,
                  scheme: str = 'rodas'):
-        if scheme == 'rodas':
-            self.scheme = 'rodas'
-            self.s = 6
-            self.pord = 4
-            self.alpha = np.zeros((self.s, self.s))
-            self.beta = np.zeros((self.s, self.s))
-            self.g = np.zeros((self.s, 1))
-            self.gamma = 0.25
-            self.alpha[1, 0] = 3.860000000000000e-01
-            self.alpha[2, 0:2] = [1.460747075254185e-01, 6.392529247458190e-02]
-            self.alpha[3, 0:3] = [-3.308115036677222e-01, 7.111510251682822e-01, 2.496604784994390e-01]
-            self.alpha[4, 0:4] = [-4.552557186318003e+00, 1.710181363241323e+00, 4.014347332103149e+00,
-                                  -1.719715090264703e-01]
-            self.alpha[5, 0:5] = [2.428633765466977e+00, -3.827487337647808e-01, -1.855720330929572e+00,
-                                  5.598352992273752e-01,
-                                  2.499999999999995e-01]
-            self.beta[1, 0] = 3.170000000000250e-02
-            self.beta[2, 0:2] = [1.247220225724355e-02, 5.102779774275723e-02]
-            self.beta[3, 0:3] = [1.196037669338736e+00, 1.774947364178279e-01, -1.029732405756564e+00]
-            self.beta[4, 0:4] = [2.428633765466977e+00, -3.827487337647810e-01, -1.855720330929572e+00,
-                                 5.598352992273752e-01]
-            self.beta[5, 0:5] = [3.484442712860512e-01, 2.130136219118989e-01, -1.541025326623184e-01,
-                                 4.713207793914960e-01,
-                                 -1.286761399271284e-01]
-            self.b = np.zeros((6,))
-            self.b[0:5] = self.beta[5, 0:5]
-            self.b[5] = self.gamma
-            self.bd = np.zeros((6,))
-            self.bd[0:4] = self.beta[4, 0:4]
-            self.bd[4] = self.gamma
-            self.c = np.array([-4.786970949443344e+00, -6.966969867338157e-01, 4.491962205414260e+00,
-                               1.247990161586704e+00, -2.562844308238056e-01, 0])
-            self.d = np.array([1.274202171603216e+01, -1.894421984691950e+00, -1.113020959269748e+01,
-                               -1.365987420071593e+00, 1.648597281428871e+00, 0])
-            self.e = np.zeros((6,))
-            self.gamma_tilde = self.beta - self.alpha
-            self.a = np.sum(self.alpha, axis=1)
-            self.g = np.sum(self.gamma_tilde, axis=1) + self.gamma
-            self.gamma_tilde = self.gamma_tilde / self.gamma
-            self.alpha = self.alpha.T
-            self.gamma_tilde = self.gamma_tilde.T
+        match scheme:
+            case 'rodas4':
+                self.scheme = 'rodas'
+                self.s = 6
+                self.pord = 4
+                self.alpha = np.zeros((self.s, self.s))
+                self.beta = np.zeros((self.s, self.s))
+                self.g = np.zeros((self.s, 1))
+                self.gamma = 0.25
+                self.alpha[1, 0] = 3.860000000000000e-01
+                self.alpha[2, 0:2] = [1.460747075254185e-01, 6.392529247458190e-02]
+                self.alpha[3, 0:3] = [-3.308115036677222e-01, 7.111510251682822e-01, 2.496604784994390e-01]
+                self.alpha[4, 0:4] = [-4.552557186318003e+00, 1.710181363241323e+00, 4.014347332103149e+00,
+                                      -1.719715090264703e-01]
+                self.alpha[5, 0:5] = [2.428633765466977e+00, -3.827487337647808e-01, -1.855720330929572e+00,
+                                      5.598352992273752e-01,
+                                      2.499999999999995e-01]
+                self.beta[1, 0] = 3.170000000000250e-02
+                self.beta[2, 0:2] = [1.247220225724355e-02, 5.102779774275723e-02]
+                self.beta[3, 0:3] = [1.196037669338736e+00, 1.774947364178279e-01, -1.029732405756564e+00]
+                self.beta[4, 0:4] = [2.428633765466977e+00, -3.827487337647810e-01, -1.855720330929572e+00,
+                                     5.598352992273752e-01]
+                self.beta[5, 0:5] = [3.484442712860512e-01, 2.130136219118989e-01, -1.541025326623184e-01,
+                                     4.713207793914960e-01,
+                                     -1.286761399271284e-01]
+                self.b = np.zeros((6,))
+                self.b[0:5] = self.beta[5, 0:5]
+                self.b[5] = self.gamma
+                self.bd = np.zeros((6,))
+                self.bd[0:4] = self.beta[4, 0:4]
+                self.bd[4] = self.gamma
+                self.c = np.array([-4.786970949443344e+00, -6.966969867338157e-01, 4.491962205414260e+00,
+                                   1.247990161586704e+00, -2.562844308238056e-01, 0])
+                self.d = np.array([1.274202171603216e+01, -1.894421984691950e+00, -1.113020959269748e+01,
+                                   -1.365987420071593e+00, 1.648597281428871e+00, 0])
+                self.e = np.zeros((6,))
+                self.gamma_tilde = self.beta - self.alpha
+                self.a = np.sum(self.alpha, axis=1)
+                self.g = np.sum(self.gamma_tilde, axis=1) + self.gamma
+                self.gamma_tilde = self.gamma_tilde / self.gamma
+                self.alpha = self.alpha.T
+                self.gamma_tilde = self.gamma_tilde.T
 
-        elif scheme == 'rodasp':
-            pass
-            # self.s = 6
-            # self.pord = 4
-            # self.alpha = np.zeros((s, s))
-            # beta = np.zeros((s, s))
-            # gamma = 0.25
-            # alpha[1, 0] = 0.75
-            # alpha[2, 0:2] = [0.0861204008141522, 0.123879599185848]
-            # alpha[3, 0:3] = [0.774934535507324, 0.149265154950868, -0.294199690458192]
-            # alpha[4, 0:4] = [5.30874668264614, 1.33089214003727, -5.37413781165556, -0.265501011027850]
-            # alpha[5, 0:5] = [-1.76443764877448, -0.474756557206303, 2.36969184691580, 0.619502359064983,
-            #                  0.250000000000000]
-            # beta[1, 0] = 0.0
-            # beta[2, 0:2] = [-0.0493920000000000, -0.0141120000000000]
-            # beta[3, 0:3] = [-0.482049469387756, -0.100879555555556, 0.926729024943312]
-            # beta[4, 0:4] = [-1.76443764877448, -0.474756557206303, 2.36969184691580, 0.619502359064983]
-            # beta[5, 0:5] = [-0.0803683707891135, -0.0564906135924476, 0.488285630042799, 0.505716211481619,
-            #                 -0.107142857142857]
-            # b = np.zeros((6,))
-            # b[0:5] = beta[5, 0:5]
-            # b[5] = gamma
-            # bd = np.zeros((6,))
-            # bd[0:4] = beta[4, 0:4]
-            # bd[4] = gamma
-            # # c
-            # # d
-            # gamma_tilde = beta - alpha
-            # gamma_tilde = gamma_tilde / gamma
-            # alpha = alpha.T
-            # gamma_tilde = gamma_tilde.T
-        else:
-            raise ValueError("Not implemented")
+            case 'rodasp':
+                pass
+                # self.s = 6
+                # self.pord = 4
+                # self.alpha = np.zeros((s, s))
+                # beta = np.zeros((s, s))
+                # gamma = 0.25
+                # alpha[1, 0] = 0.75
+                # alpha[2, 0:2] = [0.0861204008141522, 0.123879599185848]
+                # alpha[3, 0:3] = [0.774934535507324, 0.149265154950868, -0.294199690458192]
+                # alpha[4, 0:4] = [5.30874668264614, 1.33089214003727, -5.37413781165556, -0.265501011027850]
+                # alpha[5, 0:5] = [-1.76443764877448, -0.474756557206303, 2.36969184691580, 0.619502359064983,
+                #                  0.250000000000000]
+                # beta[1, 0] = 0.0
+                # beta[2, 0:2] = [-0.0493920000000000, -0.0141120000000000]
+                # beta[3, 0:3] = [-0.482049469387756, -0.100879555555556, 0.926729024943312]
+                # beta[4, 0:4] = [-1.76443764877448, -0.474756557206303, 2.36969184691580, 0.619502359064983]
+                # beta[5, 0:5] = [-0.0803683707891135, -0.0564906135924476, 0.488285630042799, 0.505716211481619,
+                #                 -0.107142857142857]
+                # b = np.zeros((6,))
+                # b[0:5] = beta[5, 0:5]
+                # b[5] = gamma
+                # bd = np.zeros((6,))
+                # bd[0:4] = beta[4, 0:4]
+                # bd[4] = gamma
+                # # c
+                # # d
+                # gamma_tilde = beta - alpha
+                # gamma_tilde = gamma_tilde / gamma
+                # alpha = alpha.T
+                # gamma_tilde = gamma_tilde.T
+            case 'rodas3d':
+                self.s = 4
+                self.pord = 3
+                self.alpha = np.zeros((self.s, self.s))
+                self.beta = np.zeros((self.s, self.s))
+                self.g = np.zeros((self.s, 1))
+                self.gamma = 0.57281606
+                self.alpha[1, 0] = 1.2451051999132263
+                self.alpha[2, 0:2] = [1, 0]
+                self.alpha[3, 0:3] = [0.32630307266483527, 0.10088086733516474, 0.57281606]
+                self.beta[1, 0] = -3.1474142698552949
+                self.beta[2, 0:2] = [0.32630307266483527, 0.10088086733516474]
+                self.beta[3, 0:3] = [0.69775271462407906, 0.056490613592447572, -0.32705938821652658]
+                self.b = np.zeros((self.s,))
+                self.b[0:3] = self.beta[3, 0:3]
+                self.b[self.s - 1] = self.gamma
+                self.bd = np.zeros((self.s,))
+                self.bd[0:2] = self.beta[2, 0:2]
+                self.bd[self.s - 2] = self.gamma
+                # self.c = np.array([-4.786970949443344e+00, -6.966969867338157e-01, 4.491962205414260e+00,
+                #                    1.247990161586704e+00, -2.562844308238056e-01, 0])
+                # self.d = np.array([1.274202171603216e+01, -1.894421984691950e+00, -1.113020959269748e+01,
+                #                    -1.365987420071593e+00, 1.648597281428871e+00, 0])
+                # self.e = np.zeros((6,))
+                self.gamma_tilde = self.beta - self.alpha
+                self.a = np.sum(self.alpha, axis=1)
+                self.g = np.sum(self.gamma_tilde, axis=1) + self.gamma
+                self.gamma_tilde = self.gamma_tilde / self.gamma
+                self.alpha = self.alpha.T
+                self.gamma_tilde = self.gamma_tilde.T
+            case _:
+                raise ValueError("Not implemented")
 
 
-def dfdt(dae, t, y):
-    tscale = np.maximum(0.1 * np.abs(t), 1e-8)
-    ddt = t + np.sqrt(np.spacing(1)) * tscale - t
-    f0 = dae.F(t, y)
-    f1 = dae.F(t + ddt, y)
-    return (f1 - f0) / ddt
-
-
-def dfdt1(dae: nDAE, t, y):
+def dfdt(dae: nDAE, t, y):
     tscale = np.maximum(0.1 * np.abs(t), 1e-8)
     ddt = t + np.sqrt(np.spacing(1)) * tscale - t
     f0 = dae.F(t, y, dae.p)
