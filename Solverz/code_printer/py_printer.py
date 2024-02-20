@@ -197,7 +197,7 @@ def print_init_code(eqn_type: str, module_name, eqn_param):
 def print_module_code(code_dict: Dict[str, str], numba=False):
     code = 'from .dependency import *\n'
     code += """_data_ = setting["data"]\n"""
-    code += """_F_ = zeros_like(y)"""
+    code += """_F_ = zeros_like(y, dtype=float64)"""
     code += '\n\r\n'
     code += code_dict['F']
     code += '\n\r\n'
@@ -230,7 +230,7 @@ def print_dependency_code(modules):
     code = "import os\n"
     code += "current_module_dir = os.path.dirname(os.path.abspath(__file__))\n"
     code += 'from Solverz import load\n'
-    code += 'auxiliary = load(f"{current_module_dir}\\param_and_setting.pkl")\n'
+    code += 'auxiliary = load(f"{current_module_dir}\\\\param_and_setting.pkl")\n'
     code += 'from numpy import *\n'
     code += 'from scipy.sparse import *\n'
     code += 'from numba import njit\n'
@@ -642,7 +642,7 @@ def print_inner_J(ae: SymEquations, *xys):
     fp = FunctionPrototype(real, 'inner_J', [symbols('_data_', real=True)] + args)
     body = []
     row, col, jac_address = parse_jac_address(ae, *xys)
-    data = np.zeros_like(row)
+    data = np.zeros_like(row, dtype=np.float64)
     # temp = Var('data_', internal_use=True)
     # body.extend([Assignment(temp, zeros(jac_address.total_size, ))])
     code_sub_inner_J_blocks = []

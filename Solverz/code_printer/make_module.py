@@ -1,6 +1,6 @@
 from typing import List
 
-from Solverz.code_printer.py_printer import render_modules as py_render
+from Solverz.code_printer.py_printer import render_modules as py_module_renderer
 from Solverz.equation.equations import AE, FDAE, DAE
 from Solverz.variable.variables import Vars
 
@@ -25,8 +25,10 @@ class module_printer:
 
     def render(self):
         if self.lang == 'python':
-            py_render(self.mdl,
-                      *self.variables,
-                      name=self.name,
-                      directory=self.directory,
-                      numba=self.jit)
+            py_module_renderer(self.mdl,
+                               *self.variables,
+                               name=self.name,
+                               directory=self.directory,
+                               numba=self.jit)
+        else:
+            raise NotImplemented(f"{self.lang} module renderer not implemented!")
