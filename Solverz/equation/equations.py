@@ -570,7 +570,7 @@ class DAE(Equations):
                 elif isinstance(diff_var, IdxVar):
                     var_idx = diff_var.index
                     var_name = diff_var.name0
-                    if isinstance(var_idx, (float, int)):
+                    if isinstance(var_idx, (np.integer, int)):
                         variable_address = self.var_address.v[var_name][var_idx: var_idx + 1]
                     elif isinstance(var_idx, str):
                         variable_address = self.var_address.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
@@ -592,7 +592,7 @@ class DAE(Equations):
                     elif isinstance(var_idx, list):
                         variable_address = self.var_address.v[var_name][var_idx]
                     else:
-                        raise TypeError(f"Unsupported variable index {var_idx} for equation {eqn_name}")
+                        raise TypeError(f"Unsupported variable index {var_idx} in equation {eqn_name}")
                 else:
                     raise NotImplementedError
                 row.extend(equation_address.tolist())

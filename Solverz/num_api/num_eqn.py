@@ -1,10 +1,5 @@
 from typing import Callable, Dict
 
-import numpy as np
-
-from Solverz.equation.param import TimeSeriesParam
-from Solverz.variable.variables import Vars, TimeVars, combine_Vars
-
 
 class nAE:
 
