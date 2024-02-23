@@ -91,7 +91,7 @@ T1, y, stats2 = Rodas(m3b9_dae,
 T, y_trape, stats = implicit_trapezoid(m3b9_dae,
                                        [0, 10],
                                        y0,
-                                       Opt(hinit=dt))
+                                       Opt(step_size=dt))
 
 
 def test_m3b9():

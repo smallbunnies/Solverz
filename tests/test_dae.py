@@ -27,7 +27,7 @@ T1, Z1, stats1 = Rodas(ndae,
                        np.linspace(0, 20, 201),
                        z,
                        Opt(hinit=0.1))
-T2, Z2, stats2 = implicit_trapezoid(ndae, [0, 20], z, Opt(hinit=0.1))
+T2, Z2, stats2 = implicit_trapezoid(ndae, [0, 20], z, Opt(step_size=0.1))
 
 T3, Zbench, stats3 = Rodas(ndae,
                            np.linspace(0, 20, 201),
