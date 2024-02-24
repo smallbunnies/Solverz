@@ -18,7 +18,7 @@ def fdae_solver(fdae: nFDAE,
     stats = Stats(scheme='FDE solver')
     if opt is None:
         opt = Opt(stats=True)
-    dt = opt.hinit
+    dt = opt.step_size
     tspan = np.array(tspan)
     T_initial = tspan[0]
     tend = tspan[-1]
