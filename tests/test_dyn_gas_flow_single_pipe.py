@@ -43,10 +43,10 @@ gas_FDE.param_initializer('dx', Param('dx', value=np.array(300)))
 gas_FDE.param_initializer('dt', Param('dt', value=5))
 
 ngas = made_numerical(gas_FDE, u0)
-T, u, stats = fdae_solver(ngas, [0, 3600], u0, Opt(step_size=5, ite_tol=1e-3))
+sol1 = fdae_solver(ngas, [0, 3600], u0, Opt(step_size=5, ite_tol=1e-3))
 ngas_sparse, code = made_numerical(gas_FDE, u0, sparse=True, output_code=True)
 
-T1, u1, stats1 = fdae_solver(ngas_sparse, [0, 3600], u0, Opt(step_size=5, ite_tol=1e-3))
+sol2 = fdae_solver(ngas_sparse, [0, 3600], u0, Opt(step_size=5, ite_tol=1e-3))
 
 
 def test_fde_solver():
@@ -58,7 +58,7 @@ def test_fde_solver():
     # assert np.mean(abs(qin - u['q'][:, 0])) < 1.2e-4
 
     # if matrix container is scipy.sparse.csc_array
-    assert np.mean(abs(pout - u['Pie'][:, -1] / 1e6)) < 1e-10
-    assert np.mean(abs(qin - u['q'][:, 0])) < 1e-7
-    assert np.mean(abs(pout - u1['Pie'][:, -1] / 1e6)) < 1e-10
-    assert np.mean(abs(qin - u1['q'][:, 0])) < 1e-7
+    assert np.mean(abs(pout - sol1.Y['Pie'][:, -1] / 1e6)) < 1e-10
+    assert np.mean(abs(qin - sol1.Y['q'][:, 0])) < 1e-7
+    assert np.mean(abs(pout - sol2.Y['Pie'][:, -1] / 1e6)) < 1e-10
+    assert np.mean(abs(qin - sol2.Y['q'][:, 0])) < 1e-7

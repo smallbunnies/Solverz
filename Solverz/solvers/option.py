@@ -13,7 +13,8 @@ class Opt:
                  hmax=None,
                  pbar=False,
                  stats=False,
-                 step_size=1e-3):
+                 step_size=1e-3,
+                 event=None):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety
@@ -28,3 +29,4 @@ class Opt:
         self.ite_tol = ite_tol  # tol for iterative solver
         self.stats = stats
         self.step_size = step_size
+        self.event = event

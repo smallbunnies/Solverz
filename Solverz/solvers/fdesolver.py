@@ -8,6 +8,7 @@ from Solverz.solvers.nlaesolver import nr_method
 from Solverz.solvers.stats import Stats
 from Solverz.solvers.option import Opt
 from Solverz.solvers.parser import fdae_io_parser
+from Solverz.solvers.solution import daesol
 
 
 @fdae_io_parser
@@ -56,7 +57,9 @@ def fdae_solver(fdae: nFDAE,
         else:
             raise NotImplementedError("Multistep FDAE not implemented!")
 
-        u1, ite = nr_method(ae, u0, Opt(ite_tol=opt.ite_tol, stats=True))
+        sol = nr_method(ae, u0, Opt(ite_tol=opt.ite_tol, stats=True))
+        u1 = sol.y
+        ite = sol.stats
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite + 1
 
@@ -77,7 +80,7 @@ def fdae_solver(fdae: nFDAE,
     stats.nstep = nt
     if opt.pbar:
         bar.close()
-    return T, u, stats
+    return daesol(T, u, stats=stats)
 
 
 def fdae_ss_solver(fdae: nFDAE,

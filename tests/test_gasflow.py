@@ -24,10 +24,10 @@ gas_flow = AE(eqn=[eqn1, eqn2, eqn3, eqn4])
 y0 = as_Vars([f, Pi])
 
 ngas_flow = made_numerical(gas_flow, y0)
-y1 = nr_method(ngas_flow, y0)
+sol = nr_method(ngas_flow, y0)
 
 
 def test_nr_method():
     bench = np.array([29.830799999999996, 4.809800000000001, 18.965799999999998,
                       18.965799999999998, 50.0, 40.816, 49.78269999999999, 53.06080000000001])
-    assert np.max(abs((y1.array.T - bench) / bench)) <= 1e-8
+    assert np.max(np.abs((sol.y - bench) / bench)) <= 1e-8

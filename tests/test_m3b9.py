@@ -83,19 +83,19 @@ Uy = Var('Uy',
 y0 = as_Vars([delta, omega, Ixg, Iyg, Ux, Uy])
 
 m3b9_dae, code = made_numerical(m3b9, y0, sparse=False, output_code=True)
-T1, y, stats2 = Rodas(m3b9_dae,
-                      np.linspace(0, 10, 5001).reshape(-1, ),
-                      y0,
-                      Opt(hinit=1e-5))
+sol_rodas = Rodas(m3b9_dae,
+                  np.linspace(0, 10, 5001).reshape(-1, ),
+                  y0,
+                  Opt(hinit=1e-5))
 
-T, y_trape, stats = implicit_trapezoid(m3b9_dae,
-                                       [0, 10],
-                                       y0,
-                                       Opt(step_size=dt))
+sol_trape = implicit_trapezoid(m3b9_dae,
+                               [0, 10],
+                               y0,
+                               Opt(step_size=dt))
 
 
 def test_m3b9():
-    assert np.abs(np.asarray(df['omega']) - y['omega']).max() <= 2e-5
-    assert np.abs(np.asarray(df['omega']) - y_trape['omega']).max() <= 2.48e-4
-    assert np.abs(np.asarray(df['delta']) - y['delta']).max() <= 9.6e-4
-    assert np.abs(np.asarray(df['delta']) - y_trape['delta']).max() <= 7.8e-2
+    assert np.abs(np.asarray(df['omega']) - sol_rodas.Y['omega']).max() <= 2e-5
+    assert np.abs(np.asarray(df['omega']) - sol_trape.Y['omega']).max() <= 2.48e-4
+    assert np.abs(np.asarray(df['delta']) - sol_rodas.Y['delta']).max() <= 9.6e-4
+    assert np.abs(np.asarray(df['delta']) - sol_trape.Y['delta']).max() <= 7.8e-2

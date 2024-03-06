@@ -4,6 +4,7 @@ from Solverz.variable.variables import Vars, TimeVars
 from Solverz.utilities.address import Address
 from Solverz.num_api.num_eqn import nAE, nDAE, nFDAE
 from Solverz.solvers.option import Opt
+from Solverz.solvers.solution import aesol, daesol
 
 
 def ae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -22,21 +23,14 @@ def ae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
             y = y0
 
         # Dispatch AE solvers and capture results
-        results = func(eqn, y, opt)
-
-        # If results include stats, unpack them
-        if isinstance(results, tuple):
-            y, stats = results
-        else:
-            y = results
-            stats = None  # Define stats as None if not returned by func
+        sol = func(eqn, y, opt)
 
         # Wrap the output in Vars if the original y0 was a Vars instance
         if original_y0_is_vars:
-            y = parse_ae_v(y, y0.a)  # Assume y0.a is accessible and relevant
+            sol.y = parse_ae_v(sol.y, y0.a)  # Assume y0.a is accessible and relevant
 
         # Return results, with stats if they were provided
-        return (y, stats) if stats is not None else y
+        return sol
 
     return wrapper
 
@@ -57,14 +51,14 @@ def fdae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
             y = y0
 
         # Dispatch AE solvers and capture results
-        T, y, stats = func(eqn, tspan, y, opt)
+        sol = func(eqn, tspan, y, opt)
 
         # Wrap the output in Vars if the original y0 was a Vars instance
         if original_y0_is_vars:
-            y = parse_dae_v(y, y0.a)  # Assume y0.a is accessible and relevant
+            sol.Y = parse_dae_v(sol.Y, y0.a)  # Assume y0.a is accessible and relevant
 
         # Return results, with stats if they were provided
-        return T, y, stats
+        return sol
 
     return wrapper
 
@@ -85,14 +79,14 @@ def dae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
             y = y0
 
         # Dispatch AE solvers and capture results
-        T, y, stats = func(eqn, tspan, y, opt)
+        sol = func(eqn, tspan, y, opt)
 
         # Wrap the output in Vars if the original y0 was a Vars instance
         if original_y0_is_vars:
-            y = parse_dae_v(y, y0.a)  # Assume y0.a is accessible and relevant
+            sol.Y = parse_dae_v(sol.Y, y0.a)  # Assume y0.a is accessible and relevant
 
         # Return results, with stats if they were provided
-        return T, y, stats
+        return sol
 
     return wrapper
 

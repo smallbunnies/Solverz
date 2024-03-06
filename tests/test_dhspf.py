@@ -86,7 +86,7 @@ y0 = as_Vars([m, mq, Ts, Tr, Touts, Toutr, phi])
 
 nE, code = made_numerical(E, y0, output_code=True)
 
-y_nr = nr_method(nE, y0)
+sol = nr_method(nE, y0)
 # y_cnr, ite = continuous_nr(nE, y0.array)
 
 
@@ -100,8 +100,8 @@ sys_df = pd.read_excel('instances/4node3pipe_bench.xlsx',
 def test_nr_method():
     for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
         # find nonzero elements
-        idx_nonzero = np.nonzero(y_nr[var_name])
-        assert max(abs((y_nr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) /
+        idx_nonzero = np.nonzero(sol.y[var_name])
+        assert max(abs((sol.y[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) /
                    np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, )) <= 1e-8
 
 # def test_cnr_method():

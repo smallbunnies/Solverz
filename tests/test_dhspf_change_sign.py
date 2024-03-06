@@ -154,7 +154,7 @@ E.param_initializer('t_node', param=Param('t_node',
 y0 = as_Vars([m, mq, Ts, Tr, Touts, Toutr, phi])
 nE, code = made_numerical(E, y0, output_code=True)
 
-ynr = nr_method(nE, y0)
+sol_nr = nr_method(nE, y0)
 # y_cnr, ite = continuous_nr(nE, y0.array)
 
 
@@ -167,8 +167,8 @@ sys_df = pd.read_excel('instances/4node3pipe_change_sign_bench.xlsx',
 def test_nr_method():
     for var_name in ['Ts', 'Tr', 'm', 'mq', 'phi']:
         # find nonzero elements
-        idx_nonzero = np.nonzero(ynr[var_name])
-        assert max(abs((ynr[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) /
+        idx_nonzero = np.nonzero(sol_nr.y[var_name])
+        assert max(abs((sol_nr.y[var_name][idx_nonzero] - np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, ))) /
                    np.asarray(sys_df[var_name])[idx_nonzero].reshape(-1, )) <= 1e-8
 
 

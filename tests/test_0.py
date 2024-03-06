@@ -7,8 +7,8 @@ f = AE(name='F',
        eqn=e)
 y = as_Vars(x)
 nf = made_numerical(f, y)
-y = nr_method(nf, y)
+sol = nr_method(nf, y)
 
 
 def test_nr_method():
-    assert abs(y['x'] - 1) <= 1e-8
+    assert abs(sol.y['x'] - 1) <= 1e-8
