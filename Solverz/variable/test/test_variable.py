@@ -109,3 +109,15 @@ def test_TimeVars():
 
     # __repr__()
     assert yt.__repr__() == "Time-series (size 1001×6) ['a', 'b']"
+
+    # append
+    Y = TimeVars(y, length=5)
+    Y.append(Y)
+    assert Y.len == 10
+    np.testing.assert_allclose(Y[5], np.array([1, 2, 3, 4, 5, 6]))
+
+    Y1 = TimeVars(y, length=0)
+    Y1.append(Y)
+    assert Y1.len == 10
+    np.testing.assert_allclose(Y1[0], np.array([1, 2, 3, 4, 5, 6]))
+    np.testing.assert_allclose(Y1[-1], np.array([0, 0, 0, 0, 0, 0]))

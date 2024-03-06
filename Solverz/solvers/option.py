@@ -1,3 +1,6 @@
+from typing import Callable
+
+
 class Opt:
     def __init__(self,
                  atol=1e-6,
@@ -14,7 +17,7 @@ class Opt:
                  pbar=False,
                  stats=False,
                  step_size=1e-3,
-                 event=None):
+                 event: Callable = None):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety

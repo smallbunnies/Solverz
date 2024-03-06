@@ -23,7 +23,7 @@ def Rodas(dae: nDAE,
     uround = np.spacing(1.0)
     T = np.zeros((10001,))
     T[nt] = t0
-    y = np.zeros((10000, vsize))
+    y = np.zeros((10001, vsize))
     y[0, :] = y0
 
     dense_output = False
@@ -33,6 +33,17 @@ def Rodas(dae: nDAE,
         dense_output = True
         inext = 1
         tnext = tspan[inext]
+
+    events = opt.event
+    haveEvent = True if events is not None else False
+
+    if haveEvent:
+        value, isterminal, direction = events(t, y0)
+    stop = 0
+    nevent = -1
+    te = np.zeros((1001,))
+    ye = np.zeros((1001, vsize))
+    ie = np.zeros((1001,))
 
     # The initial step size
     if opt.hinit is None:
@@ -117,6 +128,66 @@ def Rodas(dae: nDAE,
             told = t
             t = t + dt
             stats.nstep = stats.nstep + 1
+            # events
+            if haveEvent:
+                valueold = value
+                value, isterminal, direction = events(t, ynew)
+                value_save = value
+                ff = np.where(value * valueold < 0)[0]
+                if ff.size > 0:
+                    for i in ff:
+                        v0 = valueold[i]
+                        v1 = value[i]
+                        detect = 1
+                        if direction[i] < 0 and v0 <= v1:
+                            detect = 0
+                        if direction[i] > 0 and v0 >= v1:
+                            detect = 0
+                        if detect:
+                            iterate = 1
+                            tL = told
+                            tR = t
+                            if np.abs(v1 - v0) > uround:
+                                tevent = told - v0 * dt / (v1 - v0)  # initial guess for tevent
+                            else:
+                                iterate = 0
+                                tevent = t
+                                ynext = ynew
+                            while iterate > 0:
+                                iterate = iterate + 1
+                                tau = (tevent - told) / dt
+                                ynext = y0 + tau * dt * K @ (
+                                        rparam.b + (tau - 1) * (rparam.c + tau * (rparam.d + tau * rparam.e)))
+                                value, isterminal, direction = events(tevent, ynext)
+                                if v1 * value[i] < 0:
+                                    tL = tevent
+                                    tevent = 0.5 * (tevent + tR)
+                                    v0 = value[i]
+                                elif v0 * value[i] < 0:
+                                    tR = tevent
+                                    tevent = 0.5 * (tL + tevent)
+                                    v1 = value[i]
+                                else:
+                                    iterate = 0
+                                if (tR - tL) < 1e-3 * opt.rtol:
+                                    iterate = 0
+                                if iterate > 100:
+                                    print(f"Lost Event in interval [{told}, {t}].\n")
+                                    break
+                            t = tevent
+                            ynew = ynext
+                            nevent += 1
+                            te[nevent] = tevent
+                            ie[nevent] = i
+                            ye[nevent] = ynext
+                            value, isterminal, direction = events(tevent, ynext)
+                            value = value_save
+                            if isterminal[i]:
+                                if dense_output:
+                                    if tnext >= tevent:
+                                        tnext = tevent
+                                stop = 1
+                                break
 
             if dense_output:  # dense_output
                 while t >= tnext > told:
@@ -125,9 +196,17 @@ def Rodas(dae: nDAE,
                     nt = nt + 1
                     T[nt] = tnext
                     y[nt] = ynext
+
+                    if haveEvent and stop:
+                        if tnext >= tevent:
+                            break
+
                     inext = inext + 1
                     if inext <= n_tspan - 1:
                         tnext = tspan[inext]
+                        if haveEvent and stop:
+                            if tnext >= tevent:
+                                tnext = tevent
                     else:
                         tnext = tend + dt
             else:
@@ -135,7 +214,7 @@ def Rodas(dae: nDAE,
                 T[nt] = t
                 y[nt] = ynew
 
-            if np.abs(tend - t) < uround:
+            if np.abs(tend - t) < uround or stop:
                 done = True
             y0 = ynew
             opt.facmax = opt.fac2
@@ -148,7 +227,13 @@ def Rodas(dae: nDAE,
 
     T = T[0:nt + 1]
     y = y[0:nt + 1]
-    return daesol(T, y, stats=stats)
+    if haveEvent:
+        te = te[0:nevent + 1]
+        ye = ye[0:nevent + 1]
+        ie = ie[0:nevent + 1]
+        return daesol(T, y, te, ye, ie, stats)
+    else:
+        return daesol(T, y, stats=stats)
 
 
 class Rodas_param:

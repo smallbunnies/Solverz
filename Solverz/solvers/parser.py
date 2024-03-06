@@ -84,7 +84,8 @@ def dae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
         # Wrap the output in Vars if the original y0 was a Vars instance
         if original_y0_is_vars:
             sol.Y = parse_dae_v(sol.Y, y0.a)  # Assume y0.a is accessible and relevant
-
+            if sol.ye is not None:
+                sol.ye = parse_dae_v(sol.ye, y0.a)
         # Return results, with stats if they were provided
         return sol
 

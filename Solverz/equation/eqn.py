@@ -21,11 +21,11 @@ class Eqn:
 
     def __init__(self,
                  name: str,
-                 eqn: Expr):
+                 eqn):
 
         self.name: str = name
         self.LHS = 0
-        self.RHS = eqn
+        self.RHS = sympify(eqn)
         self.SYMBOLS: Dict[str, Symbol] = self.obtain_symbols()
 
         # if the eqn has Mat_Mul, then label it as mixed-matrix-vector equation
@@ -137,7 +137,7 @@ class Ode(Eqn):
     """
 
     def __init__(self, name: str,
-                 f: Expr,
+                 f,
                  diff_var: Union[Var, IdxVar]):
         super().__init__(name, f)
         self.diff_var = diff_var

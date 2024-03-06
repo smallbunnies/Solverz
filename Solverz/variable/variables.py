@@ -220,7 +220,8 @@ class TimeVars(VarsBasic):
         self.a = Vars_.a
 
         self.array = np.zeros((length, self.total_size))
-        self.array[0, :] = Vars_.array
+        if length > 0:
+            self.array[0, :] = Vars_.array
 
     def __getitem__(self, item):
         """
@@ -238,8 +239,8 @@ class TimeVars(VarsBasic):
         elif isinstance(item, str):
             return self.array[:, self.a[item]]
         elif isinstance(item, slice):
-            temp = TimeVars(self[item.start], length=item.stop - item.start)
-            temp.array[item, 0:] = self.array[item, 0:]
+            temp = TimeVars(self[item.start], length=0)
+            temp.array = self.array[item, 0:]
             return temp
         else:
             # not implemented
@@ -274,3 +275,9 @@ class TimeVars(VarsBasic):
 
     def __repr__(self):
         return f'Time-series (size {self.len}×{self.total_size}) {list(self.var_list)}'
+
+    def append(self, other: TimeVars):
+        if self.a == other.a:
+            self.array = np.concatenate([self.array, other.array], axis=0)
+        else:
+            raise ValueError("Cannot concatenate two TimeVars with different variable addresses!")

@@ -16,6 +16,7 @@ from Solverz.sym_algebra.symbols import Var, idx, IdxVar, Para, AliasVar
 from Solverz.sym_algebra.functions import Slice
 from Solverz.variable.variables import Vars
 from Solverz.utilities.address import Address, combine_Address
+from Solverz.num_api.Array import Array
 
 
 class Equations:
@@ -118,7 +119,7 @@ class Equations:
         :param args:
         :return:
         """
-        return self.EQNs[eqn_name].NUM_EQN(*args)
+        return Array(self.EQNs[eqn_name].NUM_EQN(*args), dim=1)
 
     def trigger_param_updater(self, eqn: Eqn, *xys):
         # update/initialize triggerable params

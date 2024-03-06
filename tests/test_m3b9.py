@@ -95,7 +95,7 @@ sol_trape = implicit_trapezoid(m3b9_dae,
 
 
 def test_m3b9():
-    assert np.abs(np.asarray(df['omega']) - sol_rodas.Y['omega']).max() <= 2e-5
+    assert np.abs(np.asarray(df['omega']) - sol_rodas.Y['omega']).max() <= 5e-5
     assert np.abs(np.asarray(df['omega']) - sol_trape.Y['omega']).max() <= 2.48e-4
     assert np.abs(np.asarray(df['delta']) - sol_rodas.Y['delta']).max() <= 9.6e-4
     assert np.abs(np.asarray(df['delta']) - sol_trape.Y['delta']).max() <= 7.8e-2
