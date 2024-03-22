@@ -4,6 +4,7 @@ import numpy as np
 
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import DAE, AE
+from Solverz.equation.param import Param
 from Solverz.sym_algebra.symbols import Var, idx, Para
 from Solverz.variable.variables import combine_Vars, as_Vars
 
@@ -52,10 +53,13 @@ def test_jac():
     assert gy[0][3].ndim == 1
     assert np.all(np.isclose(gy[0][3], [2., 6.]))
 
-    A = Para('A', np.random.rand(3, 3), dim=2)
+    A_v = np.random.rand(3, 3)
+    A = Para('A', dim=2)
     f = Eqn('f', eqn=A * x)
     ae = AE(f)
+    ae.param_initializer('A', Param('A', value=A_v, dim=2))
     gy = ae.g_y(as_Vars(x))
     assert isinstance(gy[0][3], np.ndarray)
     assert gy[0][3].ndim == 2
-    assert np.all(np.isclose(gy[0][3], A.value))
+    np.testing.assert_allclose(gy[0][3], A_v)
+

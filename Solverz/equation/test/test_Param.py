@@ -13,33 +13,20 @@ def test_Param():
     Ts1.v = [100, 100]
     assert Ts1.v.__str__() == '[100. 100.]'
 
-    Ts2 = Param(name='Ts',
-                value=[1, 2, 3],
-                dim=1)
+    Ts2 = Param(name='Ts', value=[1, 2, 3], dim=1)
     assert Ts2.v.__str__() == '[1. 2. 3.]'
 
-    Ts3 = Param(name='Ts',
-                value=[1, 2, 3],
-                dim=2)
+    Ts3 = Param(name='Ts', value=[1, 2, 3], dim=2)
     assert Ts3.v.__str__() == '[[1.]\n [2.]\n [3.]]'
 
-    Ts4 = Param(name='Ts',
-                value=[1, 2, 3],
-                dim=2,
-                sparse=True)
+    Ts4 = Param(name='Ts', value=[1, 2, 3], dim=2, sparse=True)
     assert Ts4.v.__str__() == '  (0, 0)\t1.0\n  (1, 0)\t2.0\n  (2, 0)\t3.0'
 
-    Ts5 = Param(name='Ts',
-                value=[1, 2, 3],
-                dim=2,
-                sparse=False)
+    Ts5 = Param(name='Ts', value=[1, 2, 3], dim=2, sparse=False)
     assert Ts5.v.__str__() == '[[1.]\n [2.]\n [3.]]'
 
     A = np.array([[1, 0], [2, 9], [0, 3]])
-    A = Param(name='A',
-              value=A,
-              dim=2,
-              sparse=True)
+    A = Param(name='A', value=A, dim=2, sparse=True)
     assert A.v.__str__() == '  (0, 0)\t1.0\n  (1, 0)\t2.0\n  (1, 1)\t9.0\n  (2, 1)\t3.0'
 
     # test of IdxParam

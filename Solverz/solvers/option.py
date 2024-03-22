@@ -17,7 +17,8 @@ class Opt:
                  pbar=False,
                  stats=False,
                  step_size=1e-3,
-                 event: Callable = None):
+                 event: Callable = None,
+                 event_duration=1e-8):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety
@@ -33,3 +34,4 @@ class Opt:
         self.stats = stats
         self.step_size = step_size
         self.event = event
+        self.event_duration = event_duration

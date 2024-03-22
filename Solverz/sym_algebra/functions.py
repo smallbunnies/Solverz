@@ -4,6 +4,7 @@ from sympy import Symbol, Function, Number, S, Integer, sin as Symsin, cos as Sy
 from sympy.core.function import ArgumentIndexError
 
 
+# %% miscellaneous
 class F(Function):
     """
     For the usage of denoting the function being differentiated in EqnDiff object only
@@ -11,6 +12,7 @@ class F(Function):
     pass
 
 
+# %% matrix func
 class MatrixFunction(Function):
     """
     The basic Function class of matrix computation
@@ -139,12 +141,20 @@ class Diag(MatrixFunction):
         return self._numpycode(printer, **kwargs)
 
 
-class Abs(Function):
+# %% Univariate func
+
+class univariate_func:
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 1:
+            raise TypeError(f'Supports one operand while {len(args)} input!')
+
+
+class Abs(Function, univariate_func):
 
     def fdiff(self, argindex=1):
         """
         Get the first derivative of the argument to Abs().
-
         """
         if argindex == 1:
             return Sign(self.args[0])
@@ -158,12 +168,7 @@ class Abs(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class exp(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 1:
-            raise TypeError(f'Supports one operand while {len(args)} input!')
+class exp(Function, univariate_func):
 
     def fdiff(self, argindex=1):
         return exp(*self.args)
@@ -175,7 +180,7 @@ class exp(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class sin(Symsin):
+class sin(Symsin, univariate_func):
 
     def _numpycode(self, printer, **kwargs):
         return r'sin(' + printer._print(self.args[0]) + r')'
@@ -184,7 +189,7 @@ class sin(Symsin):
         return self._numpycode(printer, **kwargs)
 
 
-class cos(Symcos):
+class cos(Symcos, univariate_func):
 
     def _numpycode(self, printer, **kwargs):
         return r'cos(' + printer._print(self.args[0]) + r')'
@@ -193,6 +198,25 @@ class cos(Symcos):
         return self._numpycode(printer, **kwargs)
 
 
+class Sign(Function, univariate_func):
+
+    def fdiff(self, argindex=1):
+        # sign function should be treated as a constant.
+        if argindex == 1:
+            return 0
+        raise ArgumentIndexError(self, argindex)
+
+    def _numpycode(self, printer, **kwargs):
+        return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+# %% custom func of equation printer
 class minmod_flag(Function):
     """
     Different from `minmod`, minmod function outputs the position of args instead of the values of args.
@@ -218,29 +242,6 @@ class switch(Function):
 
     def _numpycode(self, printer, **kwargs):
         return r'switch(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-
-class Sign(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 1:
-            raise TypeError(f"Sum takes 1 positional arguments but {len(args)} were given!")
-
-    def fdiff(self, argindex=1):
-        # sign function should be treated as a constant.
-        if argindex == 1:
-            return 0
-        raise ArgumentIndexError(self, argindex)
-
-    def _numpycode(self, printer, **kwargs):
-        return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)

@@ -2,6 +2,7 @@ from sympy import simplify
 
 from Solverz.sym_algebra.symbols import Para, AliasVar, IdxVar, Var
 from Solverz.sym_algebra.functions import switch
+from Solverz.utilities.type_checker import is_number
 
 
 def finite_difference(diff_var, flux, source, two_dim_var, M, scheme='central diff', direction=None):
@@ -41,7 +42,15 @@ def finite_difference(diff_var, flux, source, two_dim_var, M, scheme='central di
     return fde
 
 
-def semi_descritize(diff_var, flux, source, two_dim_var, M, scheme='TVD1', a0=None, a1=None):
+def semi_descritize(diff_var,
+                    flux,
+                    source,
+                    two_dim_var,
+                    M,
+                    scheme='TVD1',
+                    a0=None,
+                    a1=None,
+                    dx=None):
     M_ = M + 1  # for pretty printer of M in slice
 
     if a0 is None:
@@ -49,7 +58,14 @@ def semi_descritize(diff_var, flux, source, two_dim_var, M, scheme='TVD1', a0=No
     if a1 is None:
         a1 = Para('ajm12')
 
-    dx = Para('dx')
+    if dx is None:
+        dx = Para('dx')
+    else:
+        if is_number(dx):
+            dx = dx
+        else:
+            raise TypeError(f'Input dx is not number!')
+
     u = diff_var
     if scheme == 'TVD2':
         # j=1

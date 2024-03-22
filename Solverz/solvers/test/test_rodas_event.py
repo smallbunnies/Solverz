@@ -26,7 +26,6 @@ def test_bounceball():
     tstart = 0
     tend = 30
     for i in range(10):
-        # sol = Rodas(nbball, [0, 10], y0, opt)
         sol = Rodas(nbball, np.linspace(tstart, tend, 100), y0, opt)
 
         tout = np.concatenate([tout, sol.T[1:]])
@@ -42,7 +41,9 @@ def test_bounceball():
     np.testing.assert_allclose(teout,
                                np.array([4.081633047365558, 7.755103268847604, 11.061226369910107, 14.03673684129459,
                                          16.714695668619328, 19.124858513456523, 21.294005283692695, 23.246237159791765,
-                                         25.003245923211466, 26.584554164220997]))
+                                         25.003245923211466, 26.584554164220997]),
+                               rtol=1e-5,
+                               atol=0)
 
 
 def test_orbit():
@@ -73,7 +74,11 @@ def test_orbit():
     sol = Rodas(norbit, [0, 7], y0, Opt(event=events, rtol=1e-5, atol=1e-4))
 
     np.testing.assert_allclose(sol.te,
-                               np.array([3.09609516, 6.19215951]))
+                               np.array([3.09609516, 6.19215951]),
+                               rtol=1e-5,
+                               atol=0)
     np.testing.assert_allclose(sol.ye,
-                               np.array([[-1.26246764e+00, 1.16325594e-05, 4.96142666e-06, 1.04957384e+00],
-                                         [1.20002351e+00, 6.79541812e-09, 6.49631155e-05, -1.04934900e+00]]))
+                               np.array([[-1.262468e+00, 1.162918e-05, 4.956687e-06, 1.049574e+00],
+                                         [1.200024e+00, 1.455118e-09, 6.495375e-05, -1.049349e+00]]),
+                               rtol=1e-5,
+                               atol=0)

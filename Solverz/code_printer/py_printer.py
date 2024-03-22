@@ -232,6 +232,7 @@ def print_dependency_code(modules):
     code += 'from Solverz import load\n'
     code += 'auxiliary = load(f"{current_module_dir}\\\\param_and_setting.pkl")\n'
     code += 'from numpy import *\n'
+    code += 'from numpy import abs\n'
     code += 'from scipy.sparse import *\n'
     code += 'from numba import njit\n'
     code += 'setting = auxiliary["eqn_param"]\n'

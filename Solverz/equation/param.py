@@ -5,14 +5,13 @@ import numpy as np
 from scipy.interpolate import interp1d
 
 from Solverz.num_api.Array import Array
+from Solverz.variable.ssymbol import sSymBasic
 
 
-class Param:
+class Param(sSymBasic):
 
     def __init__(self,
                  name: str,
-                 unit: Optional[str] = None,
-                 info: Optional[str] = None,
                  value: Union[np.ndarray, list, Number] = None,
                  triggerable: bool = False,
                  trigger_var: Union[str, List[str]] = None,
@@ -21,13 +20,10 @@ class Param:
                  dtype=float,
                  sparse=False
                  ):
-        self.name = name
-        self.unit = unit
-        self.info = info
+        super().__init__(name=name, Type='Para', value=value, dim=dim)
         self.triggerable = triggerable
         self.trigger_var = [trigger_var] if isinstance(trigger_var, str) else trigger_var
         self.trigger_fun = trigger_fun
-        self.dim = dim
         self.dtype = dtype
         self.sparse = sparse
         self.__v = None
@@ -56,16 +52,12 @@ class IdxParam(Param):
 
     def __init__(self,
                  name: str,
-                 unit: Optional[str] = None,
-                 info: Optional[str] = None,
                  value: Union[np.ndarray, list, Number] = None,
                  triggerable: bool = False,
                  trigger_var: str = None,
                  trigger_fun: Callable = None
                  ):
         super().__init__(name,
-                         unit,
-                         info,
                          value,
                          triggerable,
                          trigger_var,
@@ -81,22 +73,13 @@ class TimeSeriesParam(Param):
                  v_series,
                  time_series,
                  index=None,
-                 unit: Optional[str] = None,
-                 info: Optional[str] = None,
                  value: Union[np.ndarray, list, Number] = None,
                  dim=1,
                  dtype=float,
                  sparse=False
                  ):
         super().__init__(name,
-                         unit,
-                         info,
-                         value,
-                         triggerable=False,
-                         trigger_var=None,
-                         trigger_fun=None,
-                         dim=dim,
-                         dtype=dtype,
+                         value, triggerable=False, trigger_var=None, trigger_fun=None, dim=dim, dtype=dtype,
                          sparse=sparse)
         self.v_series = Array(v_series, dim=1)
         self.time_series = Array(time_series, dim=1)

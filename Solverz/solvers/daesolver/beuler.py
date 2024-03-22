@@ -29,7 +29,9 @@ def backward_euler(dae: nDAE,
                  lambda y_, p_: dae.M - dt * dae.J(t0 + dt, y_, p_),
                  p)
 
-        y1, ite = nr_method(ae, y0, Opt(stats=True))
+        sol = nr_method(ae, y0, Opt(stats=True))
+        y1 = sol.y
+        ite = sol.stats
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite
 

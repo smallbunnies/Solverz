@@ -8,10 +8,18 @@ from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
 from Solverz.sym_algebra.symbols import Var, Para, IdxVar, idx, IdxPara, AliasVar, IdxAliasVar
+from Solverz.variable.ssymbol import sVar
 from Solverz.sym_algebra.functions import Mat_Mul, Slice, F
 from Solverz.sym_algebra.matrix_calculus import MixedEquationDiff
 from Solverz.sym_algebra.transform import finite_difference, semi_descritize
 from Solverz.num_api.custom_function import numerical_interface
+
+
+def sVar2Var(var: Union[sVar, Var, List[Var, sVar]]) -> Union[Var, List[Var]]:
+    if isinstance(var, list):
+        return [arg.symbol if isinstance(arg, sVar) else arg for arg in var]
+    else:
+        return var.symbol if isinstance(var, sVar) else var
 
 
 class Eqn:
@@ -22,7 +30,8 @@ class Eqn:
     def __init__(self,
                  name: str,
                  eqn):
-
+        if not isinstance(name, str):
+            raise ValueError("Equation name must be string!")
         self.name: str = name
         self.LHS = 0
         self.RHS = sympify(eqn)
@@ -138,8 +147,9 @@ class Ode(Eqn):
 
     def __init__(self, name: str,
                  f,
-                 diff_var: Union[Var, IdxVar]):
+                 diff_var: Union[Var, IdxVar, sVar]):
         super().__init__(name, f)
+        diff_var = sVar2Var(diff_var)
         self.diff_var = diff_var
         self.LHS = Derivative(diff_var, t)
 
@@ -172,13 +182,15 @@ class HyperbolicPde(Pde):
     """
 
     def __init__(self, name: str,
-                 diff_var: Var,
+                 diff_var: Var | sVar,
                  flux: Expr = 0,
                  source: Expr = 0,
-                 two_dim_var: Union[Var, List[Var]] = None):
+                 two_dim_var: Union[Var, sVar, List[Var | sVar]] = None):
         if isinstance(source, (float, int)):
             source = sympify(source)
         super().__init__(name, source)
+        diff_var = sVar2Var(diff_var)
+        two_dim_var = sVar2Var(two_dim_var) if two_dim_var is not None else None
         self.diff_var = diff_var
         if isinstance(flux, (float, int)):
             flux = sympify(flux)
@@ -298,7 +310,13 @@ class HyperbolicPde(Pde):
                                          'euler',
                                          direction=direction))
 
-    def semi_discretize(self, a0=None, a1=None, scheme='TVD1', M: int = 0, output_boundary=True) -> List[Eqn]:
+    def semi_discretize(self,
+                        a0=None,
+                        a1=None,
+                        scheme='TVD1',
+                        M: int = 0,
+                        output_boundary=True,
+                        dx=None) -> List[Eqn]:
         r"""
         Semi-discretize the hyperbolic PDE of nonlinear conservation law as ODEs using the Kurganov-Tadmor scheme
         (see [Kurganov2000]_). The difference stencil is as follows, with $x_{j+1}-x_{j}=\Delta x$.
@@ -352,6 +370,10 @@ class HyperbolicPde(Pde):
            1
            >>> p.semi_discretize(a0=1,a2=1, scheme=2, M=2, output_boundary=False)
            2
+
+        dx : Number
+
+            spatial difference step size
 
         Returns
         =======
@@ -419,7 +441,8 @@ class HyperbolicPde(Pde):
                                        M,
                                        scheme='TVD2',
                                        a0=a0,
-                                       a1=a1)
+                                       a1=a1,
+                                       dx=dx)
             dae_list.extend([Ode('SDM of ' + self.name + ' 1',
                                  eqn_dict['Ode'][0][0],
                                  eqn_dict['Ode'][0][1]),
@@ -443,7 +466,8 @@ class HyperbolicPde(Pde):
                                        M,
                                        scheme='TVD1',
                                        a0=a0,
-                                       a1=a1)
+                                       a1=a1,
+                                       dx=dx)
             dae_list.extend([Ode('SDM of ' + self.name + 'using',
                                  eqn_dict['Ode'][0],
                                  eqn_dict['Ode'][1])])
