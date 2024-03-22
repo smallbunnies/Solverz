@@ -5,7 +5,7 @@ import numpy as np
 
 from sympy import Expr, Symbol
 
-from Solverz.sym_algebra.symbols import Var, AliasVar, Para
+from Solverz.sym_algebra.symbols import Var, AliasVar, Para, idx
 from Solverz.num_api.Array import Array
 from Solverz.sym_algebra.functions import Abs, sin, cos, exp, Sign, Mat_Mul
 from Solverz.utilities.type_checker import is_number
@@ -19,6 +19,15 @@ def pre_process(other):
         return other.symbol
     else:
         return other
+
+
+def convert_idx_in_slice(s: slice):
+    if isinstance(s, slice):
+        start = s.start + 0 if s.start is not None else s.start
+        stop = s.stop + 0 if s.stop is not None else s.stop
+        step = s.step + 0 if s.step is not None else s.step
+        s = slice(start, stop, step)
+        return s
 
 
 class sSymBasic:
@@ -35,7 +44,12 @@ class sSymBasic:
             self.value = None
         self.Type = Type
         self.init = init
-        self.symbol = Var(self.name) if self.Type == 'Var' else Para(self.name, dim=self.dim)
+        if self.Type == 'Var':
+            self.symbol = Var(self.name)
+        elif self.Type == 'Para':
+            self.symbol = Para(self.name, dim=self.dim)
+        elif self.Type == 'idx':
+            self.symbol = idx(self.name)
 
     def __neg__(self):
         return -self.symbol
@@ -74,6 +88,16 @@ class sSymBasic:
 
     def __getitem__(self, index):
         index = pre_process(index)
+        if isinstance(index, tuple):
+            index = tuple([convert_idx_in_slice(arg) if isinstance(arg, slice) else arg+0 for arg in index])
+        elif isinstance(index, slice):
+            index = convert_idx_in_slice(index)
+        elif isinstance(index, (int, np.integer, Expr)):
+            index = index + 0  # convert IdxParam to idx symbol
+        elif isinstance(index, (list, idx)):
+            index = index
+        else:
+            raise TypeError(f"Index type {type(index)} not implemented!")
         return self.symbol[index]
 
 

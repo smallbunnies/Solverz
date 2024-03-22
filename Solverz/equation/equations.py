@@ -11,7 +11,7 @@ from scipy.sparse import csc_array, coo_array
 # from cvxopt import spmatrix, matrix
 
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
-from Solverz.equation.param import Param, IdxParam
+from Solverz.equation.param import ParamBase, Param, IdxParam
 from Solverz.sym_algebra.symbols import Var, idx, IdxVar, Para, AliasVar
 from Solverz.sym_algebra.functions import Slice
 from Solverz.variable.variables import Vars
@@ -36,7 +36,7 @@ class Equations:
         self.f_list = []
         self.g_list = []
         self.matrix_container = matrix_container
-        self.PARAM: Dict[str, Param] = dict()
+        self.PARAM: Dict[str, ParamBase] = dict()
         self.triggerable_quantity: Dict[str, str] = dict()
         self.jac_element_address = Address()
 
@@ -84,10 +84,10 @@ class Equations:
     with warnings.catch_warnings():
         warnings.simplefilter("once")
 
-    def param_initializer(self, name, param: Param):
+    def param_initializer(self, name, param: ParamBase):
         if not self.is_param_defined(name):
             warnings.warn(f'Parameter {name} not defined in equations!')
-        if isinstance(param, Param):
+        if isinstance(param, ParamBase):
             self.PARAM[name] = param
             if param.triggerable:
                 self.triggerable_quantity[param.name] = param.trigger_var

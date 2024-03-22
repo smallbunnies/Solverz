@@ -2,7 +2,7 @@ from typing import Dict
 
 import numpy as np
 from Solverz.equation.equations import AE, FDAE, DAE
-from Solverz.equation.param import Param
+from Solverz.equation.param import ParamBase
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.utilities.address import Address
 from Solverz.variable.variables import Vars
@@ -38,7 +38,7 @@ class Model:
                 self.eqn_dict[key] = value
             elif isinstance(value, sVar):
                 self.var_dict[key] = value
-            elif isinstance(value, Param):
+            elif isinstance(value, ParamBase):
                 self.param_dict[key] = value
 
         if any([isinstance(arg, Ode) for arg in self.eqn_dict.values()]):
@@ -56,7 +56,7 @@ class Model:
             raise TypeError(f"Equation type {eqn_type} not implemented!")
 
         for name, param in self.param_dict.items():
-            if isinstance(param, Param):
+            if isinstance(param, ParamBase):
                 eqs.param_initializer(name, param)
 
         a = Address()
