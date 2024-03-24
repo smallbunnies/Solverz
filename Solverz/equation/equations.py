@@ -335,6 +335,12 @@ class FDAE(AE):
 
         self.nstep = nstep
 
+    def __repr__(self):
+        if not self.eqn_size:
+            return f"FDAE {self.name} with addresses uninitialized"
+        else:
+            return f"FDAE {self.name} ({self.eqn_size}×{self.vsize})"
+
 
 class DAE(Equations):
 
@@ -475,7 +481,7 @@ class DAE(Equations):
         temp = []
         if eqn:
             if eqn in self.f_list:
-                lhs_eqn = Eqn('lhs_'+eqn, self.EQNs[eqn].diff_var)
+                lhs_eqn = Eqn('lhs_' + eqn, self.EQNs[eqn].diff_var)
                 args = self.obtain_eqn_args(lhs_eqn, t, *xys)
                 temp.append(Array(lhs_eqn.NUM_EQN(*args), dim=1))
         else:
@@ -617,6 +623,7 @@ class DAE(Equations):
             raise ValueError(f"Unsupported matrix container {self.matrix_container}")
 
     def __repr__(self):
-        return f"DAE: {self.name}"
-
-
+        if not self.eqn_size:
+            return f"DAE {self.name} with addresses uninitialized"
+        else:
+            return f"DAE {self.name} ({self.eqn_size}×{self.vsize})"

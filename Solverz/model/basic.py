@@ -7,6 +7,7 @@ from Solverz.equation.eqn import Eqn, Ode
 from Solverz.utilities.address import Address
 from Solverz.variable.variables import Vars
 from Solverz.variable.ssymbol import sVar, sAliasVar
+from Solverz.num_api.Array import Array
 
 
 class Model:
@@ -27,7 +28,7 @@ class Model:
                     args += [self.var_dict[arg].value]
                 else:
                     args += [self.init_var(arg)]
-        self.var_dict[name].value = init_func.NUM_EQN(*args)
+        self.var_dict[name].value = Array(init_func.NUM_EQN(*args), dim=1)
 
     def create_instance(self):
         attr_dict = vars(self)
