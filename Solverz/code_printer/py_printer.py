@@ -43,7 +43,8 @@ def parse_p(ae: SymEquations):
 def parse_trigger_fun(ae: SymEquations):
     func = dict()
     for para_name, param in ae.PARAM.items():
-        func.update({para_name + '_trigger_func': param.trigger_fun})
+        if param.trigger_fun is not None:
+            func.update({para_name + '_trigger_func': param.trigger_fun})
 
     return func
 
@@ -254,6 +255,7 @@ def print_dependency_code(modules):
     code += 'auxiliary = load(f"{current_module_dir}\\\\param_and_setting.pkl")\n'
     code += 'from numpy import *\n'
     code += 'from numpy import abs\n'
+    code += 'from Solverz.num_api.custom_function import *\n'  # import Solverz built-in func
     code += 'from scipy.sparse import *\n'
     code += 'from numba import njit\n'
     code += 'setting = auxiliary["eqn_param"]\n'

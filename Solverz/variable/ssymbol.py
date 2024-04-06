@@ -7,7 +7,7 @@ from sympy import Expr, Symbol
 
 from Solverz.sym_algebra.symbols import Var, AliasVar, Para, idx
 from Solverz.num_api.Array import Array
-from Solverz.sym_algebra.functions import Abs, sin, cos, exp, Sign, Mat_Mul
+from Solverz.sym_algebra.functions import Abs, sin, cos, exp, Sign, Mat_Mul, Saturation, Min
 from Solverz.utilities.type_checker import is_number
 
 
@@ -99,7 +99,7 @@ class sSymBasic:
     def __getitem__(self, index):
         index = pre_process(index)
         if isinstance(index, tuple):
-            index = tuple([convert_idx_in_slice(arg) if isinstance(arg, slice) else arg+0 for arg in index])
+            index = tuple([convert_idx_in_slice(arg) if isinstance(arg, slice) else arg + 0 for arg in index])
         elif isinstance(index, slice):
             index = convert_idx_in_slice(index)
         elif isinstance(index, (int, np.integer, Expr)):
@@ -152,6 +152,14 @@ def sExp(x):
 
 def sSign(x):
     return Sign(sSym2Sym(x))
+
+
+def sSaturation(*args):
+    return Saturation(*[pre_process(arg) for arg in args])
+
+
+def sMin(*args):
+    return Min(*[pre_process(arg) for arg in args])
 
 
 def sMat_Mul(*args):

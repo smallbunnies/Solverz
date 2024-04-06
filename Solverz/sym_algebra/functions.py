@@ -216,7 +216,7 @@ class Sign(Function, univariate_func):
         return self._numpycode(printer, **kwargs)
 
 
-# %% custom func of equation printer
+# %% multi-variate func
 class minmod_flag(Function):
     """
     Different from `minmod`, minmod function outputs the position of args instead of the values of args.
@@ -226,14 +226,6 @@ class minmod_flag(Function):
     def eval(cls, *args):
         if len(args) != 3:
             raise TypeError(f"minmod takes 3 positional arguments but {len(args)} were given!")
-
-
-class Slice(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) > 3:
-            raise TypeError(f"minmod takes at most 3 positional arguments but {len(args)} were given!")
 
 
 class switch(Function):
@@ -248,6 +240,104 @@ class switch(Function):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
+
+
+class Saturation(Function):
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 3:
+            raise TypeError(f'Three operands required while {len(args)} input!')
+        v = args[0]
+        vmin = args[1]
+        vmax = args[2]
+        return v * In(v, vmin, vmax) + vmax * GreaterThan(v, vmax) + vmin * LessThan(v, vmin)
+
+
+class Min(Function):
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 2:
+            raise TypeError(f'Two operands required while {len(args)} input!')
+        x = args[0]
+        y = args[1]
+        return x * LessThan(x, y) + y * (1 - LessThan(x, y))
+
+
+class In(Function):
+    """
+    In(v, vmin, vmax)
+        return True if vmin<=v<=vmax
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '(({op1})<=({op2})<=({op3}))'.format(op1=printer._print(self.args[1]),
+                                              op2=printer._print(self.args[0]),
+                                              op3=printer._print(self.args[2]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'SolIn(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class GreaterThan(Function):
+    """
+    return True if x>y
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '(({op1})>=({op2}))'.format(op1=printer._print(self.args[0]),
+                                       op2=printer._print(self.args[1]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'SolGreaterThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class LessThan(Function):
+    """
+    return True if x<y
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '(({op1})<=({op2}))'.format(op1=printer._print(self.args[0]),
+                                       op2=printer._print(self.args[1]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'SolLessThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+# %% custom func of equation printer
+class Slice(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) > 3:
+            raise TypeError(f"minmod takes at most 3 positional arguments but {len(args)} were given!")
 
 
 class zeros(Function):

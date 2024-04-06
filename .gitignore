@@ -19,3 +19,5 @@ Solverz/Lib/
 Solverz/pyvenv.cfg
 Solverz/Scripts
 Solverz/share
+*.nbc
+*.nbi

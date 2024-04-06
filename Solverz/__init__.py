@@ -11,5 +11,5 @@ from Solverz.code_printer.py_printer import render_modules
 from Solverz.code_printer.make_module import module_printer
 from Solverz.utilities.io import save, load, save_result
 from Solverz.utilities.profile import count_time
-from Solverz.variable.ssymbol import sVar, sAliasVar, sAbs, sCos, sSin, sExp, sSign, sMat_Mul
+from Solverz.variable.ssymbol import sVar, sAliasVar, sAbs, sCos, sSin, sExp, sSign, sMat_Mul, sSaturation, sMin
 from Solverz.model.basic import Model
