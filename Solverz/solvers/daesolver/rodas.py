@@ -92,7 +92,10 @@ def Rodas(dae: nDAE,
         rhs = dae.F(t, y0, p) + rparam.g[0] * dfdt0
         stats.nfeval = stats.nfeval + 1
 
-        lu = lu_decomposition(M - dt * rparam.gamma * J)
+        try:
+            lu = lu_decomposition(M - dt * rparam.gamma * J)
+        except RuntimeError:
+            break
         stats.ndecomp = stats.ndecomp + 1
         K[:, 0] = lu.solve(rhs)
 
@@ -218,6 +221,9 @@ def Rodas(dae: nDAE,
                 nt = nt + 1
                 T[nt] = t
                 y[nt] = ynew
+
+            if nt == 10000:
+                done = True
 
             if np.abs(tend - t) < uround or stop:
                 done = True

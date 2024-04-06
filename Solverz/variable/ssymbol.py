@@ -43,13 +43,15 @@ class sSymBasic:
         else:
             self.value = None
         self.Type = Type
-        self.init = init
+        self.init = sSym2Sym(init) if init is not None else None
         if self.Type == 'Var':
             self.symbol = Var(self.name)
         elif self.Type == 'Para':
             self.symbol = Para(self.name, dim=self.dim)
         elif self.Type == 'idx':
             self.symbol = idx(self.name)
+        elif self.Type == 'AliasVar':
+            self.symbol = AliasVar(self.name)
 
     def __neg__(self):
         return -self.symbol
@@ -82,9 +84,17 @@ class sSymBasic:
         other = pre_process(other)
         return getattr(self.symbol, '__pow__')(other)
 
+    def __rpow__(self, other):
+        other = pre_process(other)
+        return getattr(self.symbol, '__rpow__')(other)
+
     def __truediv__(self, other):
         other = pre_process(other)
         return getattr(self.symbol, '__truediv__')(other)
+
+    def __rtruediv__(self, other):
+        other = pre_process(other)
+        return getattr(self.symbol, '__rtruediv__')(other)
 
     def __getitem__(self, index):
         index = pre_process(index)
@@ -102,13 +112,15 @@ class sSymBasic:
 
 
 class sVar(sSymBasic):
-    def __init__(self, name: str, value=None, dim: int = 1, init=None):
-        super().__init__(name=name, Type='Var', value=value, dim=dim, init=init)
+    def __init__(self, name: str, value=None, init=None):
+        super().__init__(name=name, Type='Var', value=value, dim=1, init=init)
 
 
 class sAliasVar(sSymBasic):
-    def __init__(self, name: str, value=None, dim: int = 1, init=None):
-        super().__init__(name=name, Type='Var', value=value, dim=dim, init=init)
+    def __init__(self, name: str, step, value=None, init=None):
+        name = name + '_tag_' + str(step)
+        super().__init__(name=name, Type='AliasVar', value=value, dim=1, init=init)
+        self.step = step
 
 
 def sSym2Sym(x):

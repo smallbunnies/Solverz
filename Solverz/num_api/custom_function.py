@@ -5,6 +5,7 @@ from functools import reduce
 import numpy as np
 from numpy import linalg
 from scipy.sparse import diags, csc_array, coo_array, linalg as sla
+from numba import njit
 
 # from cvxopt.umfpack import linsolve
 # from cvxopt import matrix, spmatrix
@@ -50,7 +51,6 @@ def _sign(arg):
 
 @implements_nfunc('minmod')
 def minmod(a, b, c):
-
     stacked_array = np.hstack((a, b, c))
     cd1 = (a > 0) & (b > 0) & (c > 0)
     cd2 = (a < 0) & (b < 0) & (c < 0)
@@ -83,6 +83,7 @@ def minmod_flag(*args):
 
 
 @implements_nfunc('switch')
+@njit
 def switch(*args):
     flag = args[-1]
     flag_shape = args[-1].shape

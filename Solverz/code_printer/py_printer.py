@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import inspect
 from typing import Callable, Union, List, Dict
 import builtins
 from datetime import datetime
@@ -23,6 +25,7 @@ from Solverz.utilities.io import save
 from Solverz.variable.variables import combine_Vars
 from Solverz.num_api.custom_function import numerical_interface
 from Solverz.num_api.num_eqn import nAE, nFDAE, nDAE
+
 
 # %%
 
@@ -90,7 +93,19 @@ def render_modules(eqn: SymEquations, *xys, name, directory=None, numba=False):
     code_sub_inner_J = codes['code_sub_inner_J']
     custom_func = dict()
     custom_func.update(numerical_interface)
-    custom_func.update(parse_trigger_fun(eqn))
+
+    def print_trigger_func_code():
+        code_tfuc = dict()
+        trigger_func = parse_trigger_fun(eqn)
+        # rename trigger_func
+        for func_name, func in trigger_func.items():
+            name0 = func.__name__
+            func_code = inspect.getsource(func).replace(name0, func_name)
+            func_code = func_code.replace('np.', '')
+            code_tfuc[func_name] = func_code
+        return code_tfuc
+
+    code_tfunc_dict = print_trigger_func_code()
 
     print('Complete!')
 
@@ -118,7 +133,8 @@ def render_modules(eqn: SymEquations, *xys, name, directory=None, numba=False):
                  'sub_inner_F': code_sub_inner_F,
                  'J': code_J,
                  'inner_J': code_inner_J,
-                 'sub_inner_J': code_sub_inner_J}
+                 'sub_inner_J': code_sub_inner_J,
+                 'tfunc_dict': code_tfunc_dict}
     eqn_parameter.update({'row': codes['row'], 'col': codes['col'], 'data': codes['data']})
     print(f"Rendering python modules!")
     render_as_modules(name,
@@ -199,6 +215,11 @@ def print_module_code(code_dict: Dict[str, str], numba=False):
     code += """_data_ = setting["data"]\n"""
     code += """_F_ = zeros_like(y, dtype=float64)"""
     code += '\n\r\n'
+    for tfunc in code_dict['tfunc_dict'].values():
+        if numba:
+            code += '@njit(cache=True)\n'
+        code += tfunc
+        code += '\n\r\n'
     code += code_dict['F']
     code += '\n\r\n'
     if numba:

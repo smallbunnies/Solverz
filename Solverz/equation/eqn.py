@@ -204,7 +204,7 @@ class HyperbolicPde(Pde):
     def derive_derivative(self):
         pass
 
-    def finite_difference(self, scheme='central diff', direction=None, M: int = 0):
+    def finite_difference(self, scheme='central diff', direction=None, M: int = 0, dx=None):
         r"""
         Discretize hyperbolic PDE as AEs.
 
@@ -265,6 +265,10 @@ class HyperbolicPde(Pde):
 
         The total number of spatial sections.
 
+        dx : Number
+
+        Spatial difference step size
+
         Returns
         =======
 
@@ -299,7 +303,8 @@ class HyperbolicPde(Pde):
                                          self.source,
                                          self.two_dim_var,
                                          M,
-                                         'central diff'))
+                                         'central diff',
+                                         dx=dx))
         elif scheme == 'euler':
             return Eqn('FDM of ' + self.name + 'w.r.t.' + self.diff_var.name + 'using Euler',
                        finite_difference(self.diff_var,
@@ -308,7 +313,8 @@ class HyperbolicPde(Pde):
                                          self.two_dim_var,
                                          M,
                                          'euler',
-                                         direction=direction))
+                                         direction=direction,
+                                         dx=dx))
 
     def semi_discretize(self,
                         a0=None,

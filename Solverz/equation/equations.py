@@ -136,7 +136,7 @@ class Equations:
                             if var in y.var_list:
                                 var_value = y[var]
                     if var_value is None:
-                        raise ValueError(f'Para/Var {Var} not defined')
+                        raise ValueError(f'Para/Var {var} not defined')
                     else:
                         args.append(var_value)
                 temp = trigger_func(*args)
@@ -610,8 +610,12 @@ class DAE(Equations):
                         raise TypeError(f"Unsupported variable index {var_idx} in equation {eqn_name}")
                 else:
                     raise NotImplementedError
-                row.extend(equation_address.tolist())
-                col.extend(variable_address.tolist())
+                eqn_address_list = equation_address.tolist()
+                var_address_list = variable_address.tolist()
+                if len(eqn_address_list) != len(var_address_list):
+                    raise ValueError(f"Incompatible eqn address length {len(eqn_address_list)} and variable address length {len(var_address_list)}")
+                row.extend(eqn_address_list)
+                col.extend(var_address_list)
             else:
                 raise ValueError("Equation in f_list is non-Ode.")
 

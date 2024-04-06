@@ -107,6 +107,8 @@ class TimeSeriesParam(Param):
                  dtype=float,
                  sparse=False
                  ):
+        if value is None:
+            value = v_series[0]
         super().__init__(name,
                          value,
                          triggerable=False,

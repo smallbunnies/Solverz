@@ -5,9 +5,16 @@ from Solverz.sym_algebra.functions import switch
 from Solverz.utilities.type_checker import is_number
 
 
-def finite_difference(diff_var, flux, source, two_dim_var, M, scheme='central diff', direction=None):
+def finite_difference(diff_var, flux, source, two_dim_var, M, scheme='central diff', direction=None, dx=None):
     M_ = M + 1  # for pretty printer of M in slice
-    dx = Para('dx')
+    if dx is None:
+        dx = Para('dx')
+    else:
+        if is_number(dx):
+            dx = dx
+        else:
+            raise TypeError(f'Input dx is not number!')
+
     dt = Para('dt')
     u = diff_var
     u0 = AliasVar(u.name + '_tag_0')

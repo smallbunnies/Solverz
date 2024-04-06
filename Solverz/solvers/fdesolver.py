@@ -62,6 +62,8 @@ def fdae_solver(fdae: nFDAE,
         ite = sol.stats
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite + 1
+        if ite >= 100:
+            break
 
         tt = tt + dt
         nt = nt + 1
