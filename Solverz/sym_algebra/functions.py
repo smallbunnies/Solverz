@@ -253,6 +253,52 @@ class Saturation(Function):
         return v * In(v, vmin, vmax) + vmax * GreaterThan(v, vmax) + vmin * LessThan(v, vmin)
 
 
+class AntiWindUp(Function):
+    r"""
+    For PI controller
+
+        .. math::
+
+            \begin{aligned}
+                \dot{z}(t) & =e(t) \\
+                u_{d e s}(t) & =K_p e(t)+K_i z(t)
+            \end{aligned},
+
+    we limit the integrator output by setting, in the $K_i>0$ case,
+
+        .. math::
+
+            \dot{z}(t)=
+            \begin{cases}
+                0 & \text { if } u_{\text {des }}(t) \geq u_{\max } \text { and } e(t) \geq 0 \\
+                0 & \text { if } u_{\text {des }}(t) \leq u_{\min } \text { and } e(t) \leq 0 \\
+                e(t) & \text { otherwise }
+            \end{cases}.
+
+    So the AntiWindUp function reads
+
+        .. math::
+
+            \dot{z}(t)=
+            \operatorname{AntiWindUp}(u_{\text {des }}(t), u_{\min }, u_{\max }, e(t)).
+
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 4:
+            raise TypeError(f'Four operands required while {len(args)} input!')
+        u = args[0]
+        umin = args[1]
+        umax = args[2]
+        e = args[3]
+        return e*Not(Or(And(GreaterThan(u, umax),
+                            GreaterThan(e, 0)),
+                        And(LessThan(u, umin),
+                            LessThan(e, 0))
+                        ))
+
+
 class Min(Function):
     @classmethod
     def eval(cls, *args):
@@ -274,8 +320,8 @@ class In(Function):
 
     def _sympystr(self, printer, **kwargs):
         return '(({op1})<=({op2})<=({op3}))'.format(op1=printer._print(self.args[1]),
-                                              op2=printer._print(self.args[0]),
-                                              op3=printer._print(self.args[2]))
+                                                    op2=printer._print(self.args[0]),
+                                                    op3=printer._print(self.args[2]))
 
     def _numpycode(self, printer, **kwargs):
         return r'SolIn(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
@@ -289,7 +335,7 @@ class In(Function):
 
 class GreaterThan(Function):
     """
-    return True if x>y
+    Represents > operator
     """
 
     def _eval_derivative(self, s):
@@ -297,7 +343,7 @@ class GreaterThan(Function):
 
     def _sympystr(self, printer, **kwargs):
         return '(({op1})>=({op2}))'.format(op1=printer._print(self.args[0]),
-                                       op2=printer._print(self.args[1]))
+                                           op2=printer._print(self.args[1]))
 
     def _numpycode(self, printer, **kwargs):
         return r'SolGreaterThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
@@ -311,7 +357,7 @@ class GreaterThan(Function):
 
 class LessThan(Function):
     """
-    return True if x<y
+    Represents < operator
     """
 
     def _eval_derivative(self, s):
@@ -319,10 +365,75 @@ class LessThan(Function):
 
     def _sympystr(self, printer, **kwargs):
         return '(({op1})<=({op2}))'.format(op1=printer._print(self.args[0]),
-                                       op2=printer._print(self.args[1]))
+                                           op2=printer._print(self.args[1]))
 
     def _numpycode(self, printer, **kwargs):
         return r'SolLessThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class And(Function):
+    """
+    Represents bitwise_and
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '(({op1})&({op2}))'.format(op1=printer._print(self.args[0]),
+                                          op2=printer._print(self.args[1]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'And(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class Or(Function):
+    """
+    Represents bitwise_or
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '(({op1})|({op2}))'.format(op1=printer._print(self.args[0]),
+                                          op2=printer._print(self.args[1]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'Or(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class Not(Function, univariate_func):
+    """
+    Represents bitwise_not
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '({op1})'.format(op1=printer._print(self.args[0]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'Not(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)

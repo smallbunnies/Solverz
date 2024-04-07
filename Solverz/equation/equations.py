@@ -626,6 +626,14 @@ class DAE(Equations):
         else:
             raise ValueError(f"Unsupported matrix container {self.matrix_container}")
 
+    @property
+    def alg_eqn_addr(self):
+        addr_list = []
+        for eqn in self.g_list:
+            addr_list.extend(self.a.v[eqn].tolist())
+
+        return addr_list
+
     def __repr__(self):
         if not self.eqn_size:
             return f"DAE {self.name} with addresses uninitialized"

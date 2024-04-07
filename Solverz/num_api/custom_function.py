@@ -108,22 +108,43 @@ def switch(*args):
 @implements_nfunc('SolIn')
 @njit(cache=True)
 def SolIn(x, xmin, xmax):
-    x = np.asarray(x).reshape((-1, ))
+    x = np.asarray(x).reshape((-1,))
     return np.bitwise_and(x >= xmin, x <= xmax).astype(np.int32)
 
 
 @implements_nfunc('SolGreaterThan')
 @njit(cache=True)
 def SolGreaterThan(x, y):
-    x = np.asarray(x).reshape((-1, ))
+    x = np.asarray(x).reshape((-1,))
     return (x > y).astype(np.int32)
 
 
 @implements_nfunc('SolLessThan')
 @njit(cache=True)
 def SolLessThan(x, y):
-    x = np.asarray(x).reshape((-1, ))
+    x = np.asarray(x).reshape((-1,))
     return (x < y).astype(np.int32)
+
+
+@implements_nfunc('And')
+@njit(cache=True)
+def And(x, y):
+    x = np.asarray(x).reshape((-1,))
+    return x & y
+
+
+@implements_nfunc('Or')
+@njit(cache=True)
+def Or(x, y):
+    x = np.asarray(x).reshape((-1,))
+    return x | y
+
+
+@implements_nfunc('Not')
+@njit(cache=True)
+def Not(x):
+    x = np.asarray(x).reshape((-1,))
+    return np.ones_like(x) - x
 
 
 @implements_nfunc('Diag')

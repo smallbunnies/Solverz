@@ -7,7 +7,7 @@ from sympy import Expr, Symbol
 
 from Solverz.sym_algebra.symbols import Var, AliasVar, Para, idx
 from Solverz.num_api.Array import Array
-from Solverz.sym_algebra.functions import Abs, sin, cos, exp, Sign, Mat_Mul, Saturation, Min
+from Solverz.sym_algebra.functions import Abs, sin, cos, exp, Sign, Mat_Mul, Saturation, Min, AntiWindUp
 from Solverz.utilities.type_checker import is_number
 
 
@@ -156,6 +156,10 @@ def sSign(x):
 
 def sSaturation(*args):
     return Saturation(*[pre_process(arg) for arg in args])
+
+
+def sAntiWindUp(*args):
+    return AntiWindUp(*[pre_process(arg) for arg in args])
 
 
 def sMin(*args):
