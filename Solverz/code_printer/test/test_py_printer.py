@@ -38,6 +38,7 @@ def test_address_parser():
     assert _parse_jac_var_address(v_address, 2, None, True).__repr__() == 'arange(0, 3)[value_coo.col]'
     assert pycode(_parse_jac_var_address(v_address, 1, None, True)) == 'arange(0, 3)'
     assert pycode(_parse_jac_var_address(v_address, 1, None, False)) == 'arange(0, 3)'
+    assert pycode(_parse_jac_var_address(v_address, 0, 2, True, 3)) == '3*[2]'
 
     M = idx('M')
     assert _parse_jac_var_address(v_address, 2, M, True).__repr__() == 'arange(0, 3)[M[value_coo.col]]'

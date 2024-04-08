@@ -24,6 +24,7 @@ def Rodas(dae: nDAE,
     T = np.zeros((10001,))
     T[nt] = t0
     y = np.zeros((10001, vsize))
+    y0 = DaeIc(dae, y0, t0, opt.rtol) # check and modify initial values
     y[0, :] = y0
 
     dense_output = False

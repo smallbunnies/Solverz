@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import warnings
 from typing import Callable, Union, List, Dict
 import builtins
 from datetime import datetime
@@ -443,7 +444,11 @@ def _parse_jac_eqn_address(eqn_address: slice, derivative_dim, sparse):
     return eqn_address
 
 
-def _parse_jac_var_address(var_address_slice: slice, derivative_dim, var_idx, sparse):
+def _parse_jac_var_address(var_address_slice: slice,
+                           derivative_dim,
+                           var_idx,
+                           sparse,
+                           eqn_length: int = 1):
     if var_idx is not None:
         try:  # try to simplify the variable address in cases such as [1:10][0,1,2,3]
             temp = np.arange(var_address_slice.start, var_address_slice.stop)[var_idx]
@@ -451,7 +456,9 @@ def _parse_jac_var_address(var_address_slice: slice, derivative_dim, var_idx, sp
                 if not sparse:
                     var_address = temp
                 else:
-                    if derivative_dim == 0 or derivative_dim == 1:
+                    if derivative_dim == 0: # For the derivative of omega[0] in eqn omega-omega[0] where omega is a vector
+                        var_address = eqn_length * SolList(temp)
+                    elif derivative_dim == 1:
                         var_address = SolList(temp)
                     else:
                         var_address = Var('array([' + str(temp) + '])')[idx('value_coo.col')]
@@ -509,7 +516,8 @@ def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx,
         var_address = _parse_jac_var_address(var_address_slice,
                                              derivative_dim,
                                              var_idx,
-                                             True)
+                                             True,
+                                             eqn_address_slice.stop - eqn_address_slice.start)
         # assign elements to sparse matrix can not be easily broadcast, so we have to parse the data
         data = _parse_jac_data(eqn_address_slice.stop - eqn_address_slice.start,
                                derivative_dim,
@@ -797,6 +805,9 @@ def parse_jac_address(eqns: SymEquations, *xys):
             else:
                 # reshape is to convert float/integer to 1-dim numpy.ndarray
                 var_address_range = np.array(np.arange(var_address.start, var_address.stop)[index]).reshape((-1,))
+                if len(var_address_range) < len(eqn_address_range):
+                    warnings.warn('Please check the variable address and equation address of this part.')
+                    var_address_range = np.array(len(eqn_address_range)*(var_address_range.tolist()))
         elif isinstance(diff_var, Var):
             var_address_range = np.arange(var_address.start, var_address.stop)
         if len(var_address_range) != len(eqn_address_range):
