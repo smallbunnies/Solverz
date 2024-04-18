@@ -27,26 +27,27 @@ def DaeIc(dae: nDAE, y0: np.ndarray, t0, rtol):
             Jn = J(y)[np.ix_(AlgEqn, AlgVar)]
             Fn = F(y)
             dY = solve(Jn, -Fn[AlgEqn])
-            res = norm(dY)
+            nz_idx = np.abs(y[AlgVar]) > np.spacing(t0)  # in case some variables are too small
+            res = norm(dY[nz_idx]/y[AlgVar][nz_idx])
             # week line search with affine invariant test
             lam = 1
             ynew = y.copy()
             for probe in range(3):
                 ynew[AlgVar] = y[AlgVar] + lam * dY
                 Fnew = F(ynew)
-                if norm(Fnew[AlgEqn]) <= 1e-3 * rtol * norm(Fnew):
+                if norm(Fnew[AlgEqn]) <= 1e-5 * rtol:
                     return ynew
-                resnew = norm(solve(J(ynew)[np.ix_(AlgEqn, AlgVar)], Fnew[AlgEqn]))
+                dYnew = solve(J(ynew)[np.ix_(AlgEqn, AlgVar)], Fnew[AlgEqn])
+                resnew = norm(dYnew[nz_idx]/y[AlgVar][nz_idx])
                 if resnew < 0.9 * res:
                     break
                 else:
                     lam = 0.5 * lam
-            Ynorm = np.max([norm(y[AlgVar]), norm(ynew[AlgVar])])
-            if Ynorm == 0:
-                Ynorm = np.spacing()
+            # Ynorm = np.max([norm(y[AlgVar]), norm(ynew[AlgVar])])
+            # if Ynorm == 0:
+            #     Ynorm = np.spacing()
             y = ynew
-            if resnew <= 1e-3 * rtol * Ynorm:
+            if resnew <= 1e-3 * rtol:
                 return ynew
-        # [UM, S, VM] = svd(M0)
 
     raise ValueError("Need Better y0")

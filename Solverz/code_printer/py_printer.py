@@ -806,7 +806,7 @@ def parse_jac_address(eqns: SymEquations, *xys):
                 # reshape is to convert float/integer to 1-dim numpy.ndarray
                 var_address_range = np.array(np.arange(var_address.start, var_address.stop)[index]).reshape((-1,))
                 if len(var_address_range) < len(eqn_address_range):
-                    warnings.warn('Please check the variable address and equation address of this part.')
+                    warnings.warn(f'Address of variable {diff_var_name} (length={len(var_address_range)}) shorter than equation address of {eqn_name} (length={len(eqn_address_range)}). Please check the variable address and equation address of this part.')
                     var_address_range = np.array(len(eqn_address_range)*(var_address_range.tolist()))
         elif isinstance(diff_var, Var):
             var_address_range = np.arange(var_address.start, var_address.stop)

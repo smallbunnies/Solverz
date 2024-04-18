@@ -24,7 +24,7 @@ def Rodas(dae: nDAE,
     T = np.zeros((10001,))
     T[nt] = t0
     y = np.zeros((10001, vsize))
-    y0 = DaeIc(dae, y0, t0, opt.rtol) # check and modify initial values
+    y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
     y[0, :] = y0
 
     dense_output = False
@@ -181,7 +181,8 @@ def Rodas(dae: nDAE,
                                 if iterate > 100:
                                     print(f"Lost Event in interval [{told}, {t}].\n")
                                     break
-                            if np.abs(tevent - told) < opt.event_duration:  # We're not going to find events closer than tol.
+                            if np.abs(tevent - told) < opt.event_duration:
+                                # We're not going to find events closer than tol.
                                 break
                             t = tevent
                             ynew = ynext
