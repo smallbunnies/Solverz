@@ -6,13 +6,13 @@ from typing import Union, List, Dict, Tuple
 from copy import deepcopy
 
 import numpy as np
-from sympy import Symbol, Expr, Number as SymNumber
+from sympy import Symbol, Integer, Expr, Number as SymNumber
 from scipy.sparse import csc_array, coo_array
 # from cvxopt import spmatrix, matrix
 
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
-from Solverz.equation.param import Param, IdxParam
-from Solverz.sym_algebra.symbols import Var, idx, IdxVar, Para, AliasVar
+from Solverz.equation.param import ParamBase, Param, IdxParam
+from Solverz.sym_algebra.symbols import iVar, idx, IdxVar, Para, iAliasVar
 from Solverz.sym_algebra.functions import Slice
 from Solverz.variable.variables import Vars
 from Solverz.utilities.address import Address, combine_Address
@@ -36,7 +36,7 @@ class Equations:
         self.f_list = []
         self.g_list = []
         self.matrix_container = matrix_container
-        self.PARAM: Dict[str, Param] = dict()
+        self.PARAM: Dict[str, ParamBase] = dict()
         self.triggerable_quantity: Dict[str, str] = dict()
         self.jac_element_address = Address()
 
@@ -58,7 +58,7 @@ class Equations:
             self.f_list = self.f_list + [eqn.name]
 
         for symbol_ in eqn.SYMBOLS.values():
-            if isinstance(symbol_, (Para, AliasVar)):
+            if isinstance(symbol_, (Para, iAliasVar)):
                 # this is not fully initialize of Parameters, please use param_initializer
                 self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
             elif isinstance(symbol_, idx):
@@ -84,10 +84,10 @@ class Equations:
     with warnings.catch_warnings():
         warnings.simplefilter("once")
 
-    def param_initializer(self, name, param: Param):
+    def param_initializer(self, name, param: ParamBase):
         if not self.is_param_defined(name):
             warnings.warn(f'Parameter {name} not defined in equations!')
-        if isinstance(param, Param):
+        if isinstance(param, ParamBase):
             self.PARAM[name] = param
             if param.triggerable:
                 self.triggerable_quantity[param.name] = param.trigger_var
@@ -123,8 +123,8 @@ class Equations:
 
     def trigger_param_updater(self, eqn: Eqn, *xys):
         # update/initialize triggerable params
-        for para_name, trigger_var in self.triggerable_quantity.items():
-            if self.PARAM[para_name].v is None:
+        if len(xys) > 0:
+            for para_name, trigger_var in self.triggerable_quantity.items():
                 trigger_func = self.PARAM[para_name].trigger_fun
                 args = []
                 for var in trigger_var:
@@ -136,10 +136,16 @@ class Equations:
                             if var in y.var_list:
                                 var_value = y[var]
                     if var_value is None:
-                        raise ValueError(f'Para/Var {Var} not defined')
+                        raise ValueError(f'Para/iVar {var} not defined')
                     else:
                         args.append(var_value)
-                self.PARAM[para_name].v = trigger_func(*args)
+                temp = trigger_func(*args)
+                if self.PARAM[para_name].v is None:
+                    self.PARAM[para_name].v = temp
+                else:
+                    if type(temp) is not type(self.PARAM[para_name].v):
+                        raise TypeError(
+                            f"The return types of trigger func for param {para_name} must be {type(self.PARAM[para_name].v)}")
 
     def obtain_eqn_args(self, eqn: Eqn, t=None, *xys: Vars) -> List[np.ndarray]:
         """
@@ -318,26 +324,6 @@ class AE(Equations):
             return f"Algebraic equation {self.name} ({self.eqn_size}×{self.vsize})"
 
 
-class tAE(AE):
-
-    def __init__(self,
-                 eqn: Union[List[Eqn], Eqn],
-                 name: str = None,
-                 matrix_container='scipy'):
-        super().__init__(eqn, name, matrix_container)
-
-        dt = Para('dt')
-        t0 = Para('t0')
-        t = Var('t')
-        self.add_eqn(Eqn('eqn of time', t - t0 - dt))
-
-    def obtain_eqn_args(self, eqn: Eqn, t=None, *xys: Vars) -> List[np.ndarray]:
-        for y in xys:
-            if 't' in y.var_list:
-                return super().obtain_eqn_args(eqn, y['t'], *xys)
-        raise KeyError("Simulation time t undefined in AEs by discretizing DAE!")
-
-
 class FDAE(AE):
 
     def __init__(self,
@@ -348,6 +334,12 @@ class FDAE(AE):
         super().__init__(eqn, name, matrix_container)
 
         self.nstep = nstep
+
+    def __repr__(self):
+        if not self.eqn_size:
+            return f"FDAE {self.name} with addresses uninitialized"
+        else:
+            return f"FDAE {self.name} ({self.eqn_size}×{self.vsize})"
 
 
 class DAE(Equations):
@@ -376,10 +368,16 @@ class DAE(Equations):
         temp = 0
         for eqn_name in self.f_list:
             feval = self.f(None, *xys, eqn=eqn_name)
+            lhs_eval = self.eval_lhs(None, *xys, eqn=eqn_name)
             if isinstance(feval, Number):
-                eqn_size = 1
+                rhs_size = 1
             else:
-                eqn_size = feval.shape[0]
+                rhs_size = feval.shape[0]
+            if isinstance(lhs_eval, Number):
+                lhs_size = 1
+            else:
+                lhs_size = lhs_eval.shape[0]
+            eqn_size = np.max([rhs_size, lhs_size])
             self.a.update(eqn_name, eqn_size)
             temp = temp + eqn_size
             self.esize[eqn_name] = eqn_size
@@ -478,6 +476,22 @@ class DAE(Equations):
 
         return np.hstack(temp)
 
+    def eval_lhs(self, t, *xys, eqn=None) -> np.ndarray:
+
+        temp = []
+        if eqn:
+            if eqn in self.f_list:
+                lhs_eqn = Eqn('lhs_' + eqn, self.EQNs[eqn].diff_var)
+                args = self.obtain_eqn_args(lhs_eqn, t, *xys)
+                temp.append(Array(lhs_eqn.NUM_EQN(*args), dim=1))
+        else:
+            for eqn in self.f_list:
+                lhs_eqn = Eqn('lhs_' + eqn, self.EQNs[eqn].diff_var)
+                args = self.obtain_eqn_args(lhs_eqn, t, *xys)
+                temp.append(Array(lhs_eqn.NUM_EQN(*args), dim=1))
+
+        return np.hstack(temp)
+
     def g(self, t, *xys, eqn=None) -> np.ndarray:
         """
 
@@ -566,12 +580,12 @@ class DAE(Equations):
             equation_address = self.a.v[eqn_name]
             if isinstance(eqn, Ode):
                 diff_var = eqn.diff_var
-                if isinstance(diff_var, Var):
+                if isinstance(diff_var, iVar):
                     variable_address = self.var_address.v[diff_var.name]
                 elif isinstance(diff_var, IdxVar):
                     var_idx = diff_var.index
                     var_name = diff_var.name0
-                    if isinstance(var_idx, (np.integer, int)):
+                    if isinstance(var_idx, (np.integer, int, Integer)):
                         variable_address = self.var_address.v[var_name][var_idx: var_idx + 1]
                     elif isinstance(var_idx, str):
                         variable_address = self.var_address.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
@@ -596,8 +610,12 @@ class DAE(Equations):
                         raise TypeError(f"Unsupported variable index {var_idx} in equation {eqn_name}")
                 else:
                     raise NotImplementedError
-                row.extend(equation_address.tolist())
-                col.extend(variable_address.tolist())
+                eqn_address_list = equation_address.tolist()
+                var_address_list = variable_address.tolist()
+                if len(eqn_address_list) != len(var_address_list):
+                    raise ValueError(f"Incompatible eqn address length {len(eqn_address_list)} and variable address length {len(var_address_list)}")
+                row.extend(eqn_address_list)
+                col.extend(var_address_list)
             else:
                 raise ValueError("Equation in f_list is non-Ode.")
 
@@ -608,32 +626,16 @@ class DAE(Equations):
         else:
             raise ValueError(f"Unsupported matrix container {self.matrix_container}")
 
-    def discretize(self, scheme=1) -> AE:
-        if scheme == 1:
-            # trapezoidal method
-            trapezoidal_ae = tAE(name='trapezoidal_ae', eqn=[self.EQNs[ae] for ae in self.g_list])
+    @property
+    def alg_eqn_addr(self):
+        addr_list = []
+        for eqn in self.g_list:
+            addr_list.extend(self.a.v[eqn].tolist())
 
-            dt = Para('dt')
-            for ode in self.f_list:
-                var_list = []
-                for symbol_ in list(self.EQNs[ode].RHS.free_symbols):
-                    if isinstance(symbol_, Var):
-                        var_list.append((symbol_, Para(symbol_.name + '0')))
-                    elif isinstance(symbol_, IdxVar):
-                        var_list.append((symbol_, Para(symbol_.name0 + '0')[symbol_.index]))
-                diff_var = self.EQNs[ode].diff_var
-                ode_rhs1 = self.EQNs[ode].RHS
-                ode_rhs2 = self.EQNs[ode].RHS.subs(var_list)
-                trapezoidal_ae.add_eqn(Eqn(name=self.EQNs[ode].name,
-                                           eqn=diff_var - Para(diff_var.name + '0') - 1 / 2 * dt * (ode_rhs1 + ode_rhs2)
-                                           ))
-            trapezoidal_ae.PARAM.update(deepcopy(self.PARAM))
-
-        return trapezoidal_ae
+        return addr_list
 
     def __repr__(self):
-        return f"DAE: {self.name}"
-
-
-class PDAE(Equations):
-    pass
+        if not self.eqn_size:
+            return f"DAE {self.name} with addresses uninitialized"
+        else:
+            return f"DAE {self.name} ({self.eqn_size}×{self.vsize})"

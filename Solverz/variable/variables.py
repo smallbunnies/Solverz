@@ -6,24 +6,23 @@ import warnings
 
 import numpy as np
 
-from Solverz.sym_algebra.symbols import Var
+from Solverz.sym_algebra.symbols import iVar
 from Solverz.utilities.address import Address, combine_Address
 from Solverz.num_api.Array import Array
 
 
-def as_Vars(var: Union[Var, List[Var]]) -> Vars:
-    var = [var] if isinstance(var, Var) else var
+def as_Vars(var: Union[iVar, List[iVar]]) -> Vars:
+    var = [var] if isinstance(var, iVar) else var
     a = Address()
-    temp = 0
+
     for var_ in var:
-        if not isinstance(var_, Var):
-            raise TypeError(f'Type {type(var_)} cannot be parsed as Var object')
+        if not isinstance(var_, iVar):
+            raise TypeError(f'Type {type(var_)} cannot be parsed as iVar object')
         if var_.initialized:
             a.add(var_.name, var_.value.shape[0])
         else:
             warnings.warn(f"Variable {var_.name} not initialized, set to zero")
             a.add(var_.name, 1)
-        temp = temp + a.size[var_.name]
 
     array = np.zeros((a.total_size, ))
     for var_ in var:

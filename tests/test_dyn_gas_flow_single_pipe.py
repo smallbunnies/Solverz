@@ -1,15 +1,15 @@
 import numpy as np
 import pandas as pd
 
-from Solverz import idx, Var, Para, as_Vars, HyperbolicPde, fdae_solver, Eqn, Param, IdxParam, FDAE, made_numerical, Opt
+from Solverz import idx, iVar, Para, as_Vars, HyperbolicPde, fdae_solver, Eqn, Param, IdxParam, FDAE, made_numerical, Opt
 
 results = pd.read_excel('instances/dynamic_gas_flow_single_pipe.xlsx',
                         sheet_name=None,
                         engine='openpyxl'
                         )
 
-Pie = Var('Pie', value=np.linspace(9, 8.728, 11) * 1e6)
-q = Var('q', value=7.3125 * np.ones((11,)))
+Pie = iVar('Pie', value=np.linspace(9, 8.728, 11) * 1e6)
+q = iVar('q', value=7.3125 * np.ones((11,)))
 va = Para('va', value=340)
 D = Para('D', value=0.5)
 S = Para('S', value=np.pi * (D.value / 2) ** 2)

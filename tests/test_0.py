@@ -1,6 +1,6 @@
-from Solverz import Eqn, AE, nr_method, as_Vars, Var, made_numerical
+from Solverz import Eqn, AE, nr_method, as_Vars, iVar, made_numerical
 
-x = Var(name='x', value=2)
+x = iVar(name='x', value=2)
 
 e = Eqn(name='e', eqn=x ** 2 - 1)
 f = AE(name='F',

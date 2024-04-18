@@ -26,7 +26,7 @@ class Address:
     def add(self, name: str, length: int = 0):
         if name not in self.object_list:
             self.object_list.append(name)
-            self.length_array = np.append(self.length_array, length)
+            self.length_array = np.append(self.length_array, int(length))
             self.update_v_cache()
         else:
             raise KeyError(f"Variable {name} already exists!")

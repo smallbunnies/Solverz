@@ -5,25 +5,20 @@ import numpy as np
 from scipy.interpolate import interp1d
 
 from Solverz.num_api.Array import Array
+from Solverz.variable.ssymbol import sSymBasic
 
 
-class Param:
-
+class ParamBase:
     def __init__(self,
                  name: str,
-                 unit: Optional[str] = None,
-                 info: Optional[str] = None,
                  value: Union[np.ndarray, list, Number] = None,
                  triggerable: bool = False,
                  trigger_var: Union[str, List[str]] = None,
                  trigger_fun: Callable = None,
                  dim: int = 1,
                  dtype=float,
-                 sparse=False
-                 ):
+                 sparse=False):
         self.name = name
-        self.unit = unit
-        self.info = info
         self.triggerable = triggerable
         self.trigger_var = [trigger_var] if isinstance(trigger_var, str) else trigger_var
         self.trigger_fun = trigger_fun
@@ -52,27 +47,53 @@ class Param:
         return f"Param: {self.name} value: {self.v}"
 
 
-class IdxParam(Param):
+class Param(ParamBase, sSymBasic):
 
     def __init__(self,
                  name: str,
-                 unit: Optional[str] = None,
-                 info: Optional[str] = None,
+                 value: Union[np.ndarray, list, Number] = None,
+                 triggerable: bool = False,
+                 trigger_var: Union[str, List[str]] = None,
+                 trigger_fun: Callable = None,
+                 dim: int = 1,
+                 dtype=float,
+                 sparse=False
+                 ):
+        ParamBase.__init__(self,
+                           name,
+                           value,
+                           triggerable,
+                           trigger_var,
+                           trigger_fun,
+                           dim,
+                           dtype,
+                           sparse)
+        sSymBasic.__init__(self, name=name, Type='Para', value=value, dim=dim)
+
+
+class IdxParam(ParamBase, sSymBasic):
+
+    def __init__(self,
+                 name: str,
                  value: Union[np.ndarray, list, Number] = None,
                  triggerable: bool = False,
                  trigger_var: str = None,
                  trigger_fun: Callable = None
                  ):
-        super().__init__(name,
-                         unit,
-                         info,
-                         value,
-                         triggerable,
-                         trigger_var,
-                         trigger_fun,
-                         dim=1,
-                         dtype=int,
-                         sparse=False)
+        ParamBase.__init__(self,
+                           name,
+                           value,
+                           triggerable,
+                           trigger_var,
+                           trigger_fun,
+                           dim=1,
+                           dtype=int,
+                           sparse=False)
+        sSymBasic.__init__(self,
+                           name=name,
+                           Type='idx',
+                           value=value,
+                           dim=1)
 
 
 class TimeSeriesParam(Param):
@@ -81,16 +102,14 @@ class TimeSeriesParam(Param):
                  v_series,
                  time_series,
                  index=None,
-                 unit: Optional[str] = None,
-                 info: Optional[str] = None,
                  value: Union[np.ndarray, list, Number] = None,
                  dim=1,
                  dtype=float,
                  sparse=False
                  ):
+        if value is None:
+            value = v_series[0]
         super().__init__(name,
-                         unit,
-                         info,
                          value,
                          triggerable=False,
                          trigger_var=None,
@@ -117,7 +136,7 @@ class TimeSeriesParam(Param):
             # input of interp1d is zero-dimensional, we need to reshape
             # [0] is to eliminate the numpy DeprecationWarning in m3b9 test: Conversion of an array with ndim > 0 to a scalar is
             # deprecated, and will error in the future, which should be resolved.
-            vt = self.vt(t).reshape((-1, ))[0]
+            vt = self.vt(t).reshape((-1,))[0]
         else:
             vt = self.v_series[-1]
 

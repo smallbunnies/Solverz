@@ -14,4 +14,4 @@ from Solverz.solvers.parser import dae_io_parser
 from Solverz.solvers.stats import Stats
 from Solverz.variable.variables import TimeVars
 from Solverz.solvers.solution import daesol
-
+from Solverz.solvers.daesolver.daeic import DaeIc

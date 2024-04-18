@@ -3,7 +3,10 @@ from functools import reduce
 from sympy import Symbol, Function, Number, S, Integer, sin as Symsin, cos as Symcos
 from sympy.core.function import ArgumentIndexError
 
+from Solverz.variable.ssymbol import sSym2Sym
 
+
+# %% miscellaneous
 class F(Function):
     """
     For the usage of denoting the function being differentiated in EqnDiff object only
@@ -11,6 +14,22 @@ class F(Function):
     pass
 
 
+# %%
+def VarParser(cls):
+    # To convert non-sympy symbols to sympy symbols
+    original_new = cls.__new__
+
+    def new_new(cls, *args, **options):
+        # check arg types and do the conversions
+        args = [sSym2Sym(arg) for arg in args]
+        return original_new(cls, *args, **options)
+
+    cls.__new__ = new_new
+    return cls
+
+
+# %% matrix func
+@VarParser
 class MatrixFunction(Function):
     """
     The basic Function class of matrix computation
@@ -139,12 +158,20 @@ class Diag(MatrixFunction):
         return self._numpycode(printer, **kwargs)
 
 
-class Abs(Function):
+# %% Univariate func
+@VarParser
+class UniVarFunc(Function):
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 1:
+            raise TypeError(f'Supports one operand while {len(args)} input!')
+
+
+class Abs(UniVarFunc):
 
     def fdiff(self, argindex=1):
         """
         Get the first derivative of the argument to Abs().
-
         """
         if argindex == 1:
             return Sign(self.args[0])
@@ -158,12 +185,7 @@ class Abs(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class exp(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 1:
-            raise TypeError(f'Supports one operand while {len(args)} input!')
+class exp(UniVarFunc):
 
     def fdiff(self, argindex=1):
         return exp(*self.args)
@@ -175,7 +197,13 @@ class exp(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class sin(Symsin):
+class sin(UniVarFunc):
+
+    def fdiff(self, argindex=1):
+        if argindex == 1:
+            return Symcos(self.args[0])
+        else:
+            raise ArgumentIndexError(self, argindex)
 
     def _numpycode(self, printer, **kwargs):
         return r'sin(' + printer._print(self.args[0]) + r')'
@@ -184,7 +212,13 @@ class sin(Symsin):
         return self._numpycode(printer, **kwargs)
 
 
-class cos(Symcos):
+class cos(UniVarFunc):
+
+    def fdiff(self, argindex=1):
+        if argindex == 1:
+            return -Symsin(self.args[0])
+        else:
+            raise ArgumentIndexError(self, argindex)
 
     def _numpycode(self, printer, **kwargs):
         return r'cos(' + printer._print(self.args[0]) + r')'
@@ -193,45 +227,7 @@ class cos(Symcos):
         return self._numpycode(printer, **kwargs)
 
 
-class minmod_flag(Function):
-    """
-    Different from `minmod`, minmod function outputs the position of args instead of the values of args.
-    """
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 3:
-            raise TypeError(f"minmod takes 3 positional arguments but {len(args)} were given!")
-
-
-class Slice(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) > 3:
-            raise TypeError(f"minmod takes at most 3 positional arguments but {len(args)} were given!")
-
-
-class switch(Function):
-    def _eval_derivative(self, s):
-        return switch(*[arg.diff(s) for arg in self.args[0:len(self.args) - 1]], self.args[-1])
-
-    def _numpycode(self, printer, **kwargs):
-        return r'switch(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-
-class Sign(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 1:
-            raise TypeError(f"Sum takes 1 positional arguments but {len(args)} were given!")
+class Sign(UniVarFunc):
 
     def fdiff(self, argindex=1):
         # sign function should be treated as a constant.
@@ -247,6 +243,246 @@ class Sign(Function):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
+
+
+# %% multi-variate func
+@VarParser
+class MulVarFunc(Function):
+    pass
+
+
+class minmod_flag(MulVarFunc):
+    """
+    Different from `minmod`, minmod function outputs the position of args instead of the values of args.
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 3:
+            raise TypeError(f"minmod takes 3 positional arguments but {len(args)} were given!")
+
+
+class switch(MulVarFunc):
+    def _eval_derivative(self, s):
+        return switch(*[arg.diff(s) for arg in self.args[0:len(self.args) - 1]], self.args[-1])
+
+    def _numpycode(self, printer, **kwargs):
+        return r'switch(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class Saturation(MulVarFunc):
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 3:
+            raise TypeError(f'Three operands required while {len(args)} input!')
+        v = args[0]
+        vmin = args[1]
+        vmax = args[2]
+        return v * In(v, vmin, vmax) + vmax * GreaterThan(v, vmax) + vmin * LessThan(v, vmin)
+
+
+class AntiWindUp(MulVarFunc):
+    r"""
+    For PI controller
+
+        .. math::
+
+            \begin{aligned}
+                \dot{z}(t) & =e(t) \\
+                u_{d e s}(t) & =K_p e(t)+K_i z(t)
+            \end{aligned},
+
+    we limit the integrator output by setting, in the $K_i>0$ case,
+
+        .. math::
+
+            \dot{z}(t)=
+            \begin{cases}
+                0 & \text { if } u_{\text {des }}(t) \geq u_{\max } \text { and } e(t) \geq 0 \\
+                0 & \text { if } u_{\text {des }}(t) \leq u_{\min } \text { and } e(t) \leq 0 \\
+                e(t) & \text { otherwise }
+            \end{cases}.
+
+    So the AntiWindUp function reads
+
+        .. math::
+
+            \dot{z}(t)=
+            \operatorname{AntiWindUp}(u_{\text {des }}(t), u_{\min }, u_{\max }, e(t)).
+
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 4:
+            raise TypeError(f'Four operands required while {len(args)} input!')
+        u = args[0]
+        umin = args[1]
+        umax = args[2]
+        e = args[3]
+        return e * Not(Or(And(GreaterThan(u, umax),
+                              GreaterThan(e, 0)),
+                          And(LessThan(u, umin),
+                              LessThan(e, 0))
+                          ))
+
+
+class Min(MulVarFunc):
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 2:
+            raise TypeError(f'Two operands required while {len(args)} input!')
+        x = args[0]
+        y = args[1]
+        return x * LessThan(x, y) + y * (1 - LessThan(x, y))
+
+
+class In(MulVarFunc):
+    """
+    In(v, vmin, vmax)
+        return True if vmin<=v<=vmax
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '(({op1})<=({op2})<=({op3}))'.format(op1=printer._print(self.args[1]),
+                                                    op2=printer._print(self.args[0]),
+                                                    op3=printer._print(self.args[2]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'SolIn(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class GreaterThan(MulVarFunc):
+    """
+    Represents > operator
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '(({op1})>=({op2}))'.format(op1=printer._print(self.args[0]),
+                                           op2=printer._print(self.args[1]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'SolGreaterThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class LessThan(MulVarFunc):
+    """
+    Represents < operator
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '(({op1})<=({op2}))'.format(op1=printer._print(self.args[0]),
+                                           op2=printer._print(self.args[1]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'SolLessThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class And(MulVarFunc):
+    """
+    Represents bitwise_and
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '(({op1})&({op2}))'.format(op1=printer._print(self.args[0]),
+                                          op2=printer._print(self.args[1]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'And(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class Or(MulVarFunc):
+    """
+    Represents bitwise_or
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '(({op1})|({op2}))'.format(op1=printer._print(self.args[0]),
+                                          op2=printer._print(self.args[1]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'Or(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class Not(MulVarFunc):
+    """
+    Represents bitwise_not
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '({op1})'.format(op1=printer._print(self.args[0]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'Not(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+# %% custom func of equation printer
+class Slice(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) > 3:
+            raise TypeError(f"minmod takes at most 3 positional arguments but {len(args)} were given!")
 
 
 class zeros(Function):

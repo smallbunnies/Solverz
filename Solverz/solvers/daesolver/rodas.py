@@ -24,6 +24,7 @@ def Rodas(dae: nDAE,
     T = np.zeros((10001,))
     T[nt] = t0
     y = np.zeros((10001, vsize))
+    y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
     y[0, :] = y0
 
     dense_output = False
@@ -41,9 +42,9 @@ def Rodas(dae: nDAE,
         value, isterminal, direction = events(t, y0)
     stop = 0
     nevent = -1
-    te = np.zeros((1001,))
-    ye = np.zeros((1001, vsize))
-    ie = np.zeros((1001,))
+    te = np.zeros((10001,))
+    ye = np.zeros((10001, vsize))
+    ie = np.zeros((10001,))
 
     # The initial step size
     if opt.hinit is None:
@@ -92,7 +93,10 @@ def Rodas(dae: nDAE,
         rhs = dae.F(t, y0, p) + rparam.g[0] * dfdt0
         stats.nfeval = stats.nfeval + 1
 
-        lu = lu_decomposition(M - dt * rparam.gamma * J)
+        try:
+            lu = lu_decomposition(M - dt * rparam.gamma * J)
+        except RuntimeError:
+            break
         stats.ndecomp = stats.ndecomp + 1
         K[:, 0] = lu.solve(rhs)
 
@@ -153,6 +157,9 @@ def Rodas(dae: nDAE,
                                 iterate = 0
                                 tevent = t
                                 ynext = ynew
+
+                            tol = 128 * np.max([np.spacing(told), np.spacing(t)])
+                            tol = np.min([tol, np.abs(t - told)])
                             while iterate > 0:
                                 iterate = iterate + 1
                                 tau = (tevent - told) / dt
@@ -169,11 +176,14 @@ def Rodas(dae: nDAE,
                                     v1 = value[i]
                                 else:
                                     iterate = 0
-                                if (tR - tL) < 1e-3 * opt.rtol:
+                                if (tR - tL) < tol:
                                     iterate = 0
                                 if iterate > 100:
                                     print(f"Lost Event in interval [{told}, {t}].\n")
                                     break
+                            if np.abs(tevent - told) < opt.event_duration:
+                                # We're not going to find events closer than tol.
+                                break
                             t = tevent
                             ynew = ynext
                             nevent += 1
@@ -213,6 +223,9 @@ def Rodas(dae: nDAE,
                 nt = nt + 1
                 T[nt] = t
                 y[nt] = ynew
+
+            if nt == 10000:
+                done = True
 
             if np.abs(tend - t) < uround or stop:
                 done = True

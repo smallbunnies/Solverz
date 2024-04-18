@@ -1,16 +1,16 @@
 import numpy as np
 
-from Solverz import idx, Var, Para, Sign, as_Vars, nr_method, Eqn, AE, Mat_Mul, made_numerical
+from Solverz import idx, iVar, Para, Sign, as_Vars, nr_method, Eqn, AE, Mat_Mul, made_numerical
 
 k = idx('k', value=[0, 1, 2])
 i = idx('i', value=[0, 0, 3])
 j = idx('j', value=[1, 2, 2])
 m = idx('m', value=[1, 2, 3])
 
-Pi = Var('Pi', value=[50, 49, 45, 1.3 * 49])  # 50, 40.8160, 49.7827, 1.3 * 40.8160
-fin = Var('fin', value=[34.6406, 10.8650, 23.7756, 0])  # 29.8308, 4.8098, 18.9658
+Pi = iVar('Pi', value=[50, 49, 45, 1.3 * 49])  # 50, 40.8160, 49.7827, 1.3 * 40.8160
+fin = iVar('fin', value=[34.6406, 10.8650, 23.7756, 0])  # 29.8308, 4.8098, 18.9658
 finset = Para('finset', value=[10.8650, 23.7756, 0])
-f = Var('f', value=[10, 5, 25, 25])
+f = iVar('f', value=[10, 5, 25, 25])
 c = Para('c', value=[1.0329225961928894, 1.0329267609699861, 1.032931789457253, 1])
 A = Para('A', dim=2, value=[[-1, -1, 0, 0], [1, 0, 0, -1], [0, 1, 1, 0], [0, 0, -1, 1]])
 

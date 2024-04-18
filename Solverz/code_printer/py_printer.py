@@ -1,4 +1,7 @@
 from __future__ import annotations
+
+import inspect
+import warnings
 from typing import Callable, Union, List, Dict
 import builtins
 from datetime import datetime
@@ -16,13 +19,14 @@ from numbers import Number
 from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDAE, DAE as SymDAE, AE as SymAE
 from Solverz.variable.variables import Vars, TimeVars
 from Solverz.equation.param import TimeSeriesParam
-from Solverz.sym_algebra.symbols import Var, SolDict, Para, idx, IdxSymBasic
+from Solverz.sym_algebra.symbols import iVar, SolDict, Para, idx, IdxSymBasic
 from Solverz.sym_algebra.functions import zeros, CSC_array, Arange
 from Solverz.utilities.address import Address
 from Solverz.utilities.io import save
 from Solverz.variable.variables import combine_Vars
 from Solverz.num_api.custom_function import numerical_interface
 from Solverz.num_api.num_eqn import nAE, nFDAE, nDAE
+
 
 # %%
 
@@ -40,7 +44,8 @@ def parse_p(ae: SymEquations):
 def parse_trigger_fun(ae: SymEquations):
     func = dict()
     for para_name, param in ae.PARAM.items():
-        func.update({para_name + '_trigger_func': param.trigger_fun})
+        if param.trigger_fun is not None:
+            func.update({para_name + '_trigger_func': param.trigger_fun})
 
     return func
 
@@ -90,7 +95,19 @@ def render_modules(eqn: SymEquations, *xys, name, directory=None, numba=False):
     code_sub_inner_J = codes['code_sub_inner_J']
     custom_func = dict()
     custom_func.update(numerical_interface)
-    custom_func.update(parse_trigger_fun(eqn))
+
+    def print_trigger_func_code():
+        code_tfuc = dict()
+        trigger_func = parse_trigger_fun(eqn)
+        # rename trigger_func
+        for func_name, func in trigger_func.items():
+            name0 = func.__name__
+            func_code = inspect.getsource(func).replace(name0, func_name)
+            func_code = func_code.replace('np.', '')
+            code_tfuc[func_name] = func_code
+        return code_tfuc
+
+    code_tfunc_dict = print_trigger_func_code()
 
     print('Complete!')
 
@@ -118,7 +135,8 @@ def render_modules(eqn: SymEquations, *xys, name, directory=None, numba=False):
                  'sub_inner_F': code_sub_inner_F,
                  'J': code_J,
                  'inner_J': code_inner_J,
-                 'sub_inner_J': code_sub_inner_J}
+                 'sub_inner_J': code_sub_inner_J,
+                 'tfunc_dict': code_tfunc_dict}
     eqn_parameter.update({'row': codes['row'], 'col': codes['col'], 'data': codes['data']})
     print(f"Rendering python modules!")
     render_as_modules(name,
@@ -199,6 +217,11 @@ def print_module_code(code_dict: Dict[str, str], numba=False):
     code += """_data_ = setting["data"]\n"""
     code += """_F_ = zeros_like(y, dtype=float64)"""
     code += '\n\r\n'
+    for tfunc in code_dict['tfunc_dict'].values():
+        if numba:
+            code += '@njit(cache=True)\n'
+        code += tfunc
+        code += '\n\r\n'
     code += code_dict['F']
     code += '\n\r\n'
     if numba:
@@ -232,6 +255,8 @@ def print_dependency_code(modules):
     code += 'from Solverz import load\n'
     code += 'auxiliary = load(f"{current_module_dir}\\\\param_and_setting.pkl")\n'
     code += 'from numpy import *\n'
+    code += 'from numpy import abs\n'
+    code += 'from Solverz.num_api.custom_function import *\n'  # import Solverz built-in func
     code += 'from scipy.sparse import *\n'
     code += 'from numba import njit\n'
     code += 'setting = auxiliary["eqn_param"]\n'
@@ -328,11 +353,11 @@ def Solverzlambdify(funcstr, funcname, modules=None):
 
 
 def _print_var_parser(var_name, suffix: str, var_address):
-    y = Var('y_' + suffix, internal_use=True)
+    y = iVar('y_' + suffix, internal_use=True)
     if suffix == '':
-        return Assignment(Var(var_name + suffix), y[var_address])
+        return Assignment(iVar(var_name + suffix), y[var_address])
     else:
-        return Assignment(Var(var_name + '_tag_' + suffix), y[var_address])
+        return Assignment(iVar(var_name + '_tag_' + suffix), y[var_address])
     pass
 
 
@@ -375,12 +400,12 @@ def print_param(ae: SymEquations, numba_printer=False):
 
 
 def _print_F_assignment(eqn_address, eqn, i):
-    F_ = Var('_F_', internal_use=True)
+    F_ = iVar('_F_', internal_use=True)
     return Assignment(F_[eqn_address], FunctionCall(f'inner_F{int(i)}', [name for name in eqn.SYMBOLS.keys()]))
 
 
 def print_eqn_assignment(ae: SymEquations, numba_printer=False):
-    _F_ = Var('_F_', internal_use=True)
+    _F_ = iVar('_F_', internal_use=True)
     eqn_declaration = []
     if not numba_printer:
         eqn_declaration.append(Assignment(_F_, zeros(ae.eqn_size, )))
@@ -393,7 +418,7 @@ def print_eqn_assignment(ae: SymEquations, numba_printer=False):
                 if isinstance(var, IdxSymBasic):
                     if isinstance(var.index, (idx, list)):
                         raise ValueError(f"Numba printer does not accept idx or list index {var.index}")
-            _F_ = Var('_F_', internal_use=True)
+            _F_ = iVar('_F_', internal_use=True)
             eqn_declaration.append(Assignment(_F_[eqn_address],
                                               FunctionCall(f'inner_F{int(count)}',
                                                            [name for name in eqn.SYMBOLS.keys()])))
@@ -409,17 +434,21 @@ def _parse_jac_eqn_address(eqn_address: slice, derivative_dim, sparse):
             eqn_address = eqn_address.start if not sparse else SolList(eqn_address.start)
         else:
             if sparse:
-                return Var(f'arange({eqn_address.start}, {eqn_address.stop})')[idx('value_coo.row')]
+                return iVar(f'arange({eqn_address.start}, {eqn_address.stop})')[idx('value_coo.row')]
     else:
         if derivative_dim == 1 or derivative_dim == 0:
             eqn_address = Arange(eqn_address.start, eqn_address.stop)
         else:
             if sparse:
-                return Var(f'arange({eqn_address.start}, {eqn_address.stop})')[idx('value_coo.row')]
+                return iVar(f'arange({eqn_address.start}, {eqn_address.stop})')[idx('value_coo.row')]
     return eqn_address
 
 
-def _parse_jac_var_address(var_address_slice: slice, derivative_dim, var_idx, sparse):
+def _parse_jac_var_address(var_address_slice: slice,
+                           derivative_dim,
+                           var_idx,
+                           sparse,
+                           eqn_length: int = 1):
     if var_idx is not None:
         try:  # try to simplify the variable address in cases such as [1:10][0,1,2,3]
             temp = np.arange(var_address_slice.start, var_address_slice.stop)[var_idx]
@@ -427,15 +456,17 @@ def _parse_jac_var_address(var_address_slice: slice, derivative_dim, var_idx, sp
                 if not sparse:
                     var_address = temp
                 else:
-                    if derivative_dim == 0 or derivative_dim == 1:
+                    if derivative_dim == 0: # For the derivative of omega[0] in eqn omega-omega[0] where omega is a vector
+                        var_address = eqn_length * SolList(temp)
+                    elif derivative_dim == 1:
                         var_address = SolList(temp)
                     else:
-                        var_address = Var('array([' + str(temp) + '])')[idx('value_coo.col')]
+                        var_address = iVar('array([' + str(temp) + '])')[idx('value_coo.col')]
             else:  # np.ndarray
                 if np.all(np.diff(temp) == 1):  # list such as [1,2,3,4] can be viewed as slice [1:5]
                     if derivative_dim == 2:
                         if sparse:
-                            return Var(f'arange({temp[0]}, {temp[-1] + 1})')[idx('value_coo.col')]
+                            return iVar(f'arange({temp[0]}, {temp[-1] + 1})')[idx('value_coo.col')]
                         else:
                             var_address = slice(temp[0], temp[-1] + 1)
                     elif derivative_dim == 1 or derivative_dim == 0:
@@ -444,19 +475,19 @@ def _parse_jac_var_address(var_address_slice: slice, derivative_dim, var_idx, sp
                     if not sparse or derivative_dim < 2:
                         var_address = SolList(*temp)
                     else:
-                        var_address = Var('array([' + ','.join([str(ele) for ele in temp]) + '])')[idx('value_coo.col')]
+                        var_address = iVar('array([' + ','.join([str(ele) for ele in temp]) + '])')[idx('value_coo.col')]
         except (TypeError, IndexError):
             if isinstance(var_idx, str):
                 var_idx = idx(var_idx)
             if not sparse or derivative_dim < 2:
-                var_address = Var(f"arange({var_address_slice.start}, {var_address_slice.stop})")[var_idx]
+                var_address = iVar(f"arange({var_address_slice.start}, {var_address_slice.stop})")[var_idx]
             else:
-                var_address = Var(f"arange({var_address_slice.start}, {var_address_slice.stop})")[
+                var_address = iVar(f"arange({var_address_slice.start}, {var_address_slice.stop})")[
                     var_idx[idx('value_coo.col')]]
     else:
         if derivative_dim == 2:
             if sparse:
-                return Var(f'arange({var_address_slice.start}, {var_address_slice.stop})')[idx('value_coo.col')]
+                return iVar(f'arange({var_address_slice.start}, {var_address_slice.stop})')[idx('value_coo.col')]
             else:
                 var_address = var_address_slice
         elif derivative_dim == 1 or derivative_dim == 0:
@@ -466,7 +497,7 @@ def _parse_jac_var_address(var_address_slice: slice, derivative_dim, var_idx, sp
 
 def _parse_jac_data(data_length, derivative_dim: int, rhs: Union[Expr, Number, SymNumber], rhs_v_type='array'):
     if derivative_dim == 2:
-        return Var('value_coo.data')
+        return iVar('value_coo.data')
     elif derivative_dim == 1:
         return rhs
     elif derivative_dim == 0:
@@ -485,21 +516,22 @@ def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx,
         var_address = _parse_jac_var_address(var_address_slice,
                                              derivative_dim,
                                              var_idx,
-                                             True)
+                                             True,
+                                             eqn_address_slice.stop - eqn_address_slice.start)
         # assign elements to sparse matrix can not be easily broadcast, so we have to parse the data
         data = _parse_jac_data(eqn_address_slice.stop - eqn_address_slice.start,
                                derivative_dim,
                                rhs,
                                rhs_v_dtpe)
         if derivative_dim < 2:
-            return [extend(Var('row', internal_use=True), eqn_address),
-                    extend(Var('col', internal_use=True), var_address),
-                    extend(Var('data', internal_use=True), data)]
+            return [extend(iVar('row', internal_use=True), eqn_address),
+                    extend(iVar('col', internal_use=True), var_address),
+                    extend(iVar('data', internal_use=True), data)]
         else:
-            return [Assignment(Var('value_coo'), coo_array(rhs)),
-                    extend(Var('row', internal_use=True), eqn_address),
-                    extend(Var('col', internal_use=True), var_address),
-                    extend(Var('data', internal_use=True), data)]
+            return [Assignment(iVar('value_coo'), coo_array(rhs)),
+                    extend(iVar('row', internal_use=True), eqn_address),
+                    extend(iVar('col', internal_use=True), var_address),
+                    extend(iVar('data', internal_use=True), data)]
     else:
         eqn_address = _parse_jac_eqn_address(eqn_address_slice,
                                              derivative_dim,
@@ -508,7 +540,7 @@ def print_J_block(eqn_address_slice, var_address_slice, derivative_dim, var_idx,
                                              derivative_dim,
                                              var_idx,
                                              False)
-        return [AddAugmentedAssignment(Var('J_', internal_use=True)[eqn_address, var_address], rhs)]
+        return [AddAugmentedAssignment(iVar('J_', internal_use=True)[eqn_address, var_address], rhs)]
 
 
 def print_J_dense(ae: SymEquations):
@@ -589,7 +621,7 @@ def print_F(ae: SymEquations):
     body.extend(print_param(ae))
     body.extend(print_trigger(ae))
     body.extend(print_eqn_assignment(ae))
-    temp = Var('_F_', internal_use=True)
+    temp = iVar('_F_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
@@ -598,7 +630,7 @@ def print_F(ae: SymEquations):
 def print_J(ae: SymEquations, sparse=False):
     fp = print_func_prototype(ae, 'J_')
     # initialize temp
-    temp = Var('J_', internal_use=True)
+    temp = iVar('J_', internal_use=True)
     body = list()
     body.extend(print_var(ae))
     body.extend(print_param(ae))
@@ -608,9 +640,9 @@ def print_J(ae: SymEquations, sparse=False):
         body.extend(print_J_dense(ae))
         body.append(Return(temp))
     else:
-        body.extend([Assignment(Var('row', internal_use=True), SolList()),
-                     Assignment(Var('col', internal_use=True), SolList()),
-                     Assignment(Var('data', internal_use=True), SolList())])
+        body.extend([Assignment(iVar('row', internal_use=True), SolList()),
+                     Assignment(iVar('col', internal_use=True), SolList()),
+                     Assignment(iVar('data', internal_use=True), SolList())])
         body.extend(print_J_sparse(ae))
         body.append(Return(coo_2_csc(ae)))
     Jd = FunctionDefinition.from_FunctionPrototype(fp, body)
@@ -625,7 +657,7 @@ def print_J_numba(ae: SymEquations):
     param_assignments, param_list = print_param(ae, numba_printer=True)
     body.extend(param_assignments)
     body.extend(print_trigger(ae))
-    body.extend([Assignment(Var('data', internal_use=True),
+    body.extend([Assignment(iVar('data', internal_use=True),
                             FunctionCall('inner_J', [symbols('_data_', real=True)] + [arg.name for arg in
                                                                                       var_list + param_list]))])
     body.extend([Return(coo_2_csc(ae))])
@@ -643,7 +675,7 @@ def print_inner_J(ae: SymEquations, *xys):
     body = []
     row, col, jac_address = parse_jac_address(ae, *xys)
     data = np.zeros_like(row, dtype=np.float64)
-    # temp = Var('data_', internal_use=True)
+    # temp = iVar('data_', internal_use=True)
     # body.extend([Assignment(temp, zeros(jac_address.total_size, ))])
     code_sub_inner_J_blocks = []
     count = 0
@@ -654,7 +686,7 @@ def print_inner_J(ae: SymEquations, *xys):
         if isinstance(rhs, (Number, SymNumber)):
             data[jac_address[jac_]] = rhs
         else:
-            body.append(Assignment(Var('_data_', internal_use=True)[jac_address[jac_]],
+            body.append(Assignment(iVar('_data_', internal_use=True)[jac_address[jac_]],
                                    FunctionCall(f'inner_J{int(count)}', [name for name in derivative.SYMBOLS.keys()])))
             args1 = []
             for var in derivative.SYMBOLS.keys():
@@ -665,7 +697,7 @@ def print_inner_J(ae: SymEquations, *xys):
             fd1 = FunctionDefinition.from_FunctionPrototype(fp1, body1)
             code_sub_inner_J_blocks.append(pycode(fd1, fully_qualified_modules=False))
             count += 1
-    temp = Var('_data_', internal_use=True)
+    temp = iVar('_data_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return {'code_inner_J': pycode(fd, fully_qualified_modules=False),
@@ -676,7 +708,7 @@ def print_inner_J(ae: SymEquations, *xys):
 
 
 def _print_inner_J_block_assignment(rhs, address: slice):
-    data = Var('data_', internal_use=True)
+    data = iVar('data_', internal_use=True)
     return Assignment(data[address], rhs)
 
 
@@ -703,7 +735,7 @@ def print_inner_F(ae: SymEquations):
     fp = FunctionPrototype(real, 'inner_F', [symbols('_F_', real=True)] + args)
     body = []
     body.extend(print_eqn_assignment(ae, True))
-    temp = Var('_F_', internal_use=True)
+    temp = iVar('_F_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
@@ -773,7 +805,10 @@ def parse_jac_address(eqns: SymEquations, *xys):
             else:
                 # reshape is to convert float/integer to 1-dim numpy.ndarray
                 var_address_range = np.array(np.arange(var_address.start, var_address.stop)[index]).reshape((-1,))
-        elif isinstance(diff_var, Var):
+                if len(var_address_range) < len(eqn_address_range):
+                    warnings.warn(f'Address of variable {diff_var_name} (length={len(var_address_range)}) shorter than equation address of {eqn_name} (length={len(eqn_address_range)}). Please check the variable address and equation address of this part.')
+                    var_address_range = np.array(len(eqn_address_range)*(var_address_range.tolist()))
+        elif isinstance(diff_var, iVar):
             var_address_range = np.arange(var_address.start, var_address.stop)
         if len(var_address_range) != len(eqn_address_range):
             raise ValueError('Equation address range is different from variable address range')

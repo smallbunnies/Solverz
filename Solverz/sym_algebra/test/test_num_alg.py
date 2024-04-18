@@ -2,13 +2,13 @@ import numpy as np
 from sympy import lambdify
 import inspect
 
-from Solverz.sym_algebra.symbols import Var, Para, idx, IdxVar, IdxPara, Idxidx
+from Solverz.sym_algebra.symbols import iVar, Para, idx, IdxVar, IdxPara, Idxidx
 from Solverz.num_api.custom_function import sol_slice
 
 
 # test of IndexPrinter
 def test_IndexPrinter():
-    x = Var('x')
+    x = iVar('x')
     G = Para('G', dim=2)
     k = idx('k')
     M = idx('M')
@@ -36,7 +36,7 @@ modules = [{'sol_slice': sol_slice}, 'numpy']
 
 # test of numpy code printer
 def test_numpy_code_printer():
-    x = Var('x')
+    x = iVar('x')
     k = idx('k')
     fxk = lambdify([x, k], x[k], modules=modules)
     assert (inspect.getsource(fxk) ==
@@ -45,15 +45,15 @@ def test_numpy_code_printer():
     k = np.array([0, 2, 5])
     assert np.isclose(fxk(x, k), np.array([[1], [3], [6]])).all()
 
-    z = Var('z')
+    z = iVar('z')
     fz = lambdify([z], z[1], modules=modules)
     assert (inspect.getsource(fz) ==
             "def _lambdifygenerated(z):\n    return z[1]\n")
     x = np.array([1, 2, 3, 4, 5, 6]).reshape((-1, 1))
     assert fz(x) == np.array([2])
 
-    x = Var('x')
-    yy = Var('yy')
+    x = iVar('x')
+    yy = iVar('yy')
     k = idx('k')
     fxyk = lambdify([x, yy, k], x[[1, 2, 3]] + yy[k], modules=modules)
     assert (inspect.getsource(fxyk) ==
@@ -63,7 +63,7 @@ def test_numpy_code_printer():
     k = np.array([0, 3, 3])
     assert np.isclose(fxyk(x, yy, k), np.array([[1], [-4], [-3]])).all()
 
-    z = Var('z')
+    z = iVar('z')
     k = idx('k')
     fzk = lambdify([z, k], z[1:k], modules=modules)
     assert (inspect.getsource(fzk) ==
@@ -72,7 +72,7 @@ def test_numpy_code_printer():
     k = np.array([3])
     assert np.isclose(fzk(z, k), np.array([[-2], [-3]])).all()
 
-    z = Var('z')
+    z = iVar('z')
     M = idx('M')
     j = idx('j')
     fzMj = lambdify([z, M, j], z[1:M[j] + 2], modules=modules)

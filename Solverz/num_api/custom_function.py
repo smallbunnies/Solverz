@@ -5,6 +5,7 @@ from functools import reduce
 import numpy as np
 from numpy import linalg
 from scipy.sparse import diags, csc_array, coo_array, linalg as sla
+from numba import njit
 
 # from cvxopt.umfpack import linsolve
 # from cvxopt import matrix, spmatrix
@@ -50,7 +51,6 @@ def _sign(arg):
 
 @implements_nfunc('minmod')
 def minmod(a, b, c):
-
     stacked_array = np.hstack((a, b, c))
     cd1 = (a > 0) & (b > 0) & (c > 0)
     cd2 = (a < 0) & (b < 0) & (c < 0)
@@ -83,6 +83,7 @@ def minmod_flag(*args):
 
 
 @implements_nfunc('switch')
+@njit
 def switch(*args):
     flag = args[-1]
     flag_shape = args[-1].shape
@@ -102,6 +103,48 @@ def switch(*args):
     else:
         raise ValueError(f"Length of Input array not consistent {shapes}")
     return np.select(conditions, choice_list, 0)
+
+
+@implements_nfunc('SolIn')
+@njit(cache=True)
+def SolIn(x, xmin, xmax):
+    x = np.asarray(x).reshape((-1,))
+    return np.bitwise_and(x >= xmin, x <= xmax).astype(np.int32)
+
+
+@implements_nfunc('SolGreaterThan')
+@njit(cache=True)
+def SolGreaterThan(x, y):
+    x = np.asarray(x).reshape((-1,))
+    return (x > y).astype(np.int32)
+
+
+@implements_nfunc('SolLessThan')
+@njit(cache=True)
+def SolLessThan(x, y):
+    x = np.asarray(x).reshape((-1,))
+    return (x < y).astype(np.int32)
+
+
+@implements_nfunc('And')
+@njit(cache=True)
+def And(x, y):
+    x = np.asarray(x).reshape((-1,))
+    return x & y
+
+
+@implements_nfunc('Or')
+@njit(cache=True)
+def Or(x, y):
+    x = np.asarray(x).reshape((-1,))
+    return x | y
+
+
+@implements_nfunc('Not')
+@njit(cache=True)
+def Not(x):
+    x = np.asarray(x).reshape((-1,))
+    return np.ones_like(x) - x
 
 
 @implements_nfunc('Diag')
