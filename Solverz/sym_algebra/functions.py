@@ -3,6 +3,8 @@ from functools import reduce
 from sympy import Symbol, Function, Number, S, Integer, sin as Symsin, cos as Symcos
 from sympy.core.function import ArgumentIndexError
 
+from Solverz.variable.ssymbol import sSym2Sym
+
 
 # %% miscellaneous
 class F(Function):
@@ -12,7 +14,22 @@ class F(Function):
     pass
 
 
+# %%
+def VarParser(cls):
+    # To convert non-sympy symbols to sympy symbols
+    original_new = cls.__new__
+
+    def new_new(cls, *args, **options):
+        # check arg types and do the conversions
+        args = [sSym2Sym(arg) for arg in args]
+        return original_new(cls, *args, **options)
+
+    cls.__new__ = new_new
+    return cls
+
+
 # %% matrix func
+@VarParser
 class MatrixFunction(Function):
     """
     The basic Function class of matrix computation
@@ -142,15 +159,15 @@ class Diag(MatrixFunction):
 
 
 # %% Univariate func
-
-class univariate_func:
+@VarParser
+class UniVarFunc(Function):
     @classmethod
     def eval(cls, *args):
         if len(args) != 1:
             raise TypeError(f'Supports one operand while {len(args)} input!')
 
 
-class Abs(Function, univariate_func):
+class Abs(UniVarFunc):
 
     def fdiff(self, argindex=1):
         """
@@ -168,7 +185,7 @@ class Abs(Function, univariate_func):
         return self._numpycode(printer, **kwargs)
 
 
-class exp(Function, univariate_func):
+class exp(UniVarFunc):
 
     def fdiff(self, argindex=1):
         return exp(*self.args)
@@ -180,7 +197,13 @@ class exp(Function, univariate_func):
         return self._numpycode(printer, **kwargs)
 
 
-class sin(Symsin, univariate_func):
+class sin(UniVarFunc):
+
+    def fdiff(self, argindex=1):
+        if argindex == 1:
+            return Symcos(self.args[0])
+        else:
+            raise ArgumentIndexError(self, argindex)
 
     def _numpycode(self, printer, **kwargs):
         return r'sin(' + printer._print(self.args[0]) + r')'
@@ -189,7 +212,13 @@ class sin(Symsin, univariate_func):
         return self._numpycode(printer, **kwargs)
 
 
-class cos(Symcos, univariate_func):
+class cos(UniVarFunc):
+
+    def fdiff(self, argindex=1):
+        if argindex == 1:
+            return -Symsin(self.args[0])
+        else:
+            raise ArgumentIndexError(self, argindex)
 
     def _numpycode(self, printer, **kwargs):
         return r'cos(' + printer._print(self.args[0]) + r')'
@@ -198,7 +227,7 @@ class cos(Symcos, univariate_func):
         return self._numpycode(printer, **kwargs)
 
 
-class Sign(Function, univariate_func):
+class Sign(UniVarFunc):
 
     def fdiff(self, argindex=1):
         # sign function should be treated as a constant.
@@ -217,7 +246,12 @@ class Sign(Function, univariate_func):
 
 
 # %% multi-variate func
-class minmod_flag(Function):
+@VarParser
+class MulVarFunc(Function):
+    pass
+
+
+class minmod_flag(MulVarFunc):
     """
     Different from `minmod`, minmod function outputs the position of args instead of the values of args.
     """
@@ -228,7 +262,7 @@ class minmod_flag(Function):
             raise TypeError(f"minmod takes 3 positional arguments but {len(args)} were given!")
 
 
-class switch(Function):
+class switch(MulVarFunc):
     def _eval_derivative(self, s):
         return switch(*[arg.diff(s) for arg in self.args[0:len(self.args) - 1]], self.args[-1])
 
@@ -242,7 +276,7 @@ class switch(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class Saturation(Function):
+class Saturation(MulVarFunc):
     @classmethod
     def eval(cls, *args):
         if len(args) != 3:
@@ -253,7 +287,7 @@ class Saturation(Function):
         return v * In(v, vmin, vmax) + vmax * GreaterThan(v, vmax) + vmin * LessThan(v, vmin)
 
 
-class AntiWindUp(Function):
+class AntiWindUp(MulVarFunc):
     r"""
     For PI controller
 
@@ -292,14 +326,14 @@ class AntiWindUp(Function):
         umin = args[1]
         umax = args[2]
         e = args[3]
-        return e*Not(Or(And(GreaterThan(u, umax),
-                            GreaterThan(e, 0)),
-                        And(LessThan(u, umin),
-                            LessThan(e, 0))
-                        ))
+        return e * Not(Or(And(GreaterThan(u, umax),
+                              GreaterThan(e, 0)),
+                          And(LessThan(u, umin),
+                              LessThan(e, 0))
+                          ))
 
 
-class Min(Function):
+class Min(MulVarFunc):
     @classmethod
     def eval(cls, *args):
         if len(args) != 2:
@@ -309,7 +343,7 @@ class Min(Function):
         return x * LessThan(x, y) + y * (1 - LessThan(x, y))
 
 
-class In(Function):
+class In(MulVarFunc):
     """
     In(v, vmin, vmax)
         return True if vmin<=v<=vmax
@@ -333,7 +367,7 @@ class In(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class GreaterThan(Function):
+class GreaterThan(MulVarFunc):
     """
     Represents > operator
     """
@@ -355,7 +389,7 @@ class GreaterThan(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class LessThan(Function):
+class LessThan(MulVarFunc):
     """
     Represents < operator
     """
@@ -377,7 +411,7 @@ class LessThan(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class And(Function):
+class And(MulVarFunc):
     """
     Represents bitwise_and
     """
@@ -399,7 +433,7 @@ class And(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class Or(Function):
+class Or(MulVarFunc):
     """
     Represents bitwise_or
     """
@@ -421,7 +455,7 @@ class Or(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class Not(Function, univariate_func):
+class Not(MulVarFunc):
     """
     Represents bitwise_not
     """
