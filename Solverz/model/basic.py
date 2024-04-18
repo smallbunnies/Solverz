@@ -7,7 +7,7 @@ from Solverz.equation.param import ParamBase
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.utilities.address import Address
 from Solverz.variable.variables import Vars
-from Solverz.variable.ssymbol import sVar, sAliasVar
+from Solverz.variable.ssymbol import Var, AliasVar
 from Solverz.num_api.Array import Array
 
 
@@ -15,7 +15,7 @@ class Model:
 
     def __init__(self):
         self.eqn_dict = dict()
-        self.var_dict: Dict[str, sVar] = dict()
+        self.var_dict: Dict[str, Var] = dict()
         self.param_dict = dict()
         self.alias_dict = dict()
 
@@ -40,18 +40,18 @@ class Model:
         for key, value in attr_dict.items():
             if isinstance(value, (Ode, Eqn)):
                 self.eqn_dict[key] = value
-            elif isinstance(value, sVar):
+            elif isinstance(value, Var):
                 self.var_dict[key] = value
             elif isinstance(value, ParamBase):
                 self.param_dict[key] = value
-            elif isinstance(value, sAliasVar):
+            elif isinstance(value, AliasVar):
                 nstep = 0 if nstep is None else nstep
                 self.alias_dict[key] = value
                 nstep = np.max([nstep, value.step])
 
         if any([isinstance(arg, Ode) for arg in self.eqn_dict.values()]):
             if nstep is not None:
-                raise ValueError("DAE object cannot have AliasVar!")
+                raise ValueError("DAE object cannot have iAliasVar!")
             eqn_type = 'DAE'
         elif nstep is not None:
             eqn_type = 'FDAE'

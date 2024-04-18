@@ -1,6 +1,6 @@
 from sympy import simplify
 
-from Solverz.sym_algebra.symbols import Para, AliasVar, IdxVar, Var
+from Solverz.sym_algebra.symbols import Para, iAliasVar, IdxVar, iVar
 from Solverz.sym_algebra.functions import switch
 from Solverz.utilities.type_checker import is_number
 
@@ -17,15 +17,15 @@ def finite_difference(diff_var, flux, source, two_dim_var, M, scheme='central di
 
     dt = Para('dt')
     u = diff_var
-    u0 = AliasVar(u.name + '_tag_0')
+    u0 = iAliasVar(u.name + '_tag_0')
 
     if scheme == 'central diff':
         fui1j1 = flux.subs([(a, a[1:M_]) for a in two_dim_var])
         fuij1 = flux.subs([(a, a[0:M_ - 1]) for a in two_dim_var])
-        fui1j = flux.subs([(a, AliasVar(a.name + '_tag_0')[1:M_]) for a in two_dim_var])
-        fuij = flux.subs([(a, AliasVar(a.name + '_tag_0')[0:M_ - 1]) for a in two_dim_var])
+        fui1j = flux.subs([(a, iAliasVar(a.name + '_tag_0')[1:M_]) for a in two_dim_var])
+        fuij = flux.subs([(a, iAliasVar(a.name + '_tag_0')[0:M_ - 1]) for a in two_dim_var])
 
-        S = source.subs([(a, (a[1:M_] + a[0:M_ - 1] + AliasVar(a.name + '_tag_0')[1:M_] + AliasVar(a.name + '_tag_0')[
+        S = source.subs([(a, (a[1:M_] + a[0:M_ - 1] + iAliasVar(a.name + '_tag_0')[1:M_] + iAliasVar(a.name + '_tag_0')[
                                                                                           0:M_ - 1]) / 4) for a in
                          two_dim_var])
 
@@ -111,7 +111,7 @@ def semi_descritize(diff_var,
             stop = U.index.stop
             step = U.index.step
             U = U.symbol0
-            Ux = Var(U.name + 'x')
+            Ux = iVar(U.name + 'x')
 
             # u_j
             Uj = U[start:stop:step]
@@ -148,7 +148,7 @@ def semi_descritize(diff_var,
         ode_rhs2 = -simplify(Hp - Hm) / dx + Suj
 
         theta = Para('theta')
-        ux = Var(u.name + 'x')
+        ux = iVar(u.name + 'x')
         minmod_flag = Para('minmod_flag_of_' + ux.name)
         minmod_rhs = ux[1:M_ - 1] - switch(theta * (u[1:M_ - 1] - u[0:M_ - 2]) / dx,
                                            (u[2:M_] - u[0:M_ - 2]) / (2 * dx),

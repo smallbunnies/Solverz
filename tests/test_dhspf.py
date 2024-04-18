@@ -1,7 +1,7 @@
 # import pandas as pd
 # import numpy as np
 #
-# from Solverz import Eqn, AE, nr_method, as_Vars, Var, Para, idx, Abs, exp, Mat_Mul, made_numerical, Param, IdxParam
+# from Solverz import Eqn, AE, nr_method, as_Vars, iVar, Para, idx, Abs, exp, Mat_Mul, made_numerical, Param, IdxParam
 #
 # # %% initialize variables and params
 # sys_df = pd.read_excel('instances/4node3pipe.xlsx',
@@ -59,13 +59,13 @@
 # f_node = idx(name='f_node', value=np.asarray(f_node).reshape(-1, ))  # intermediate nodes
 # t_node = idx(name='t_node', value=np.asarray(t_node).reshape(-1, ))  # load nodes
 #
-# m = Var(name='m', value=np.asarray(sys_df['var']['m']))
-# mq = Var(name='mq', value=np.asarray(sys_df['var']['mq']))
-# Ts = Var(name='Ts', value=np.asarray(sys_df['var']['Ts']))
-# Tr = Var(name='Tr', value=np.asarray(sys_df['var']['Tr']))
-# Touts = Var(name='Touts', value=np.asarray(sys_df['var']['Touts']))
-# Toutr = Var(name='Toutr', value=np.asarray(sys_df['var']['Toutr']))
-# phi = Var(name='phi', value=np.asarray(sys_df['var']['phi']))
+# m = iVar(name='m', value=np.asarray(sys_df['var']['m']))
+# mq = iVar(name='mq', value=np.asarray(sys_df['var']['mq']))
+# Ts = iVar(name='Ts', value=np.asarray(sys_df['var']['Ts']))
+# Tr = iVar(name='Tr', value=np.asarray(sys_df['var']['Tr']))
+# Touts = iVar(name='Touts', value=np.asarray(sys_df['var']['Touts']))
+# Toutr = iVar(name='Toutr', value=np.asarray(sys_df['var']['Toutr']))
+# phi = iVar(name='phi', value=np.asarray(sys_df['var']['phi']))
 #
 # E1 = Eqn(name='E1', eqn=(Ts[f_node] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Touts)
 # E3 = Eqn(name='E3', eqn=(Tr[t_node] - Ta) * exp(-coeff_lambda * L / (Cp * Abs(m))) + Ta - Toutr)

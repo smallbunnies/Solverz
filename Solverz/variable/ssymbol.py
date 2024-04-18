@@ -5,7 +5,7 @@ import numpy as np
 
 from sympy import Expr, Symbol
 
-from Solverz.sym_algebra.symbols import Var, AliasVar, Para, idx
+from Solverz.sym_algebra.symbols import iVar, iAliasVar, Para, idx
 from Solverz.num_api.Array import Array
 from Solverz.sym_algebra.functions import Abs, sin, cos, exp, Sign, Mat_Mul, Saturation, Min, AntiWindUp
 from Solverz.utilities.type_checker import is_number
@@ -44,14 +44,14 @@ class sSymBasic:
             self.value = None
         self.Type = Type
         self.init = sSym2Sym(init) if init is not None else None
-        if self.Type == 'Var':
-            self.symbol = Var(self.name)
+        if self.Type == 'iVar':
+            self.symbol = iVar(self.name)
         elif self.Type == 'Para':
             self.symbol = Para(self.name, dim=self.dim)
         elif self.Type == 'idx':
             self.symbol = idx(self.name)
-        elif self.Type == 'AliasVar':
-            self.symbol = AliasVar(self.name)
+        elif self.Type == 'iAliasVar':
+            self.symbol = iAliasVar(self.name)
 
     def __neg__(self):
         return -self.symbol
@@ -111,15 +111,15 @@ class sSymBasic:
         return self.symbol[index]
 
 
-class sVar(sSymBasic):
+class Var(sSymBasic):
     def __init__(self, name: str, value=None, init=None):
-        super().__init__(name=name, Type='Var', value=value, dim=1, init=init)
+        super().__init__(name=name, Type='iVar', value=value, dim=1, init=init)
 
 
-class sAliasVar(sSymBasic):
+class AliasVar(sSymBasic):
     def __init__(self, name: str, step, value=None, init=None):
         name = name + '_tag_' + str(step)
-        super().__init__(name=name, Type='AliasVar', value=value, dim=1, init=init)
+        super().__init__(name=name, Type='iAliasVar', value=value, dim=1, init=init)
         self.step = step
 
 

@@ -7,19 +7,19 @@ from sympy import Symbol, Expr, latex, Derivative, sympify
 from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
-from Solverz.sym_algebra.symbols import Var, Para, IdxVar, idx, IdxPara, AliasVar, IdxAliasVar
-from Solverz.variable.ssymbol import sVar
+from Solverz.sym_algebra.symbols import iVar, Para, IdxVar, idx, IdxPara, iAliasVar, IdxAliasVar
+from Solverz.variable.ssymbol import Var
 from Solverz.sym_algebra.functions import Mat_Mul, Slice, F
 from Solverz.sym_algebra.matrix_calculus import MixedEquationDiff
 from Solverz.sym_algebra.transform import finite_difference, semi_descritize
 from Solverz.num_api.custom_function import numerical_interface
 
 
-def sVar2Var(var: Union[sVar, Var, List[Var, sVar]]) -> Union[Var, List[Var]]:
+def sVar2Var(var: Union[Var, iVar, List[iVar, Var]]) -> Union[iVar, List[iVar]]:
     if isinstance(var, list):
-        return [arg.symbol if isinstance(arg, sVar) else arg for arg in var]
+        return [arg.symbol if isinstance(arg, Var) else arg for arg in var]
     else:
-        return var.symbol if isinstance(var, sVar) else var
+        return var.symbol if isinstance(var, Var) else var
 
 
 class Eqn:
@@ -49,7 +49,7 @@ class Eqn:
     def obtain_symbols(self) -> Dict[str, Symbol]:
         temp_dict = dict()
         for symbol_ in list((self.LHS - self.RHS).free_symbols):
-            if isinstance(symbol_, (Var, Para, idx, AliasVar)):
+            if isinstance(symbol_, (iVar, Para, idx, iAliasVar)):
                 temp_dict[symbol_.name] = symbol_
             elif isinstance(symbol_, (IdxVar, IdxPara, IdxAliasVar)):
                 temp_dict[symbol_.name0] = symbol_.symbol0
@@ -77,7 +77,7 @@ class Eqn:
                                                          eqn=diff,
                                                          diff_var=symbol_,
                                                          var_idx=idx_.name if isinstance(idx_, idx) else idx_)
-            elif isinstance(symbol_, Var):
+            elif isinstance(symbol_, iVar):
                 if self.mixed_matrix_vector:
                     diff = MixedEquationDiff(self.RHS, symbol_)
                 else:
@@ -147,7 +147,7 @@ class Ode(Eqn):
 
     def __init__(self, name: str,
                  f,
-                 diff_var: Union[Var, IdxVar, sVar]):
+                 diff_var: Union[iVar, IdxVar, Var]):
         super().__init__(name, f)
         diff_var = sVar2Var(diff_var)
         self.diff_var = diff_var
@@ -174,7 +174,7 @@ class HyperbolicPde(Pde):
     Parameters
     ==========
 
-    two_dim_var : Var or list of Var
+    two_dim_var : iVar or list of Var
 
         Specify the two-dimensional variables in the PDE. Some of the variables, for example, the mass flow $\dot{m}$ in
         the heat transmission equation, are not two-dimensional variables.
@@ -182,10 +182,10 @@ class HyperbolicPde(Pde):
     """
 
     def __init__(self, name: str,
-                 diff_var: Var | sVar,
+                 diff_var: iVar | Var,
                  flux: Expr = 0,
                  source: Expr = 0,
-                 two_dim_var: Union[Var, sVar, List[Var | sVar]] = None):
+                 two_dim_var: Union[iVar, Var, List[iVar | Var]] = None):
         if isinstance(source, (float, int)):
             source = sympify(source)
         super().__init__(name, source)
@@ -198,7 +198,7 @@ class HyperbolicPde(Pde):
             flux = sympify(flux)
         self.flux = flux
         self.source = source
-        self.two_dim_var = [two_dim_var] if isinstance(two_dim_var, Var) else two_dim_var
+        self.two_dim_var = [two_dim_var] if isinstance(two_dim_var, iVar) else two_dim_var
         self.LHS = Derivative(diff_var, t) + Derivative(flux, x)
 
     def derive_derivative(self):
@@ -369,8 +369,8 @@ class HyperbolicPde(Pde):
 
             If true, output equations about the boundary conditions. For example,
 
-           >>> from Solverz import HyperbolicPde, Var
-           >>> T = Var('T')
+           >>> from Solverz import HyperbolicPde, iVar
+           >>> T = iVar('T')
            >>> p = HyperbolicPde(name = 'heat transfer', diff_var=T, flux=T)
            >>> p.semi_discretize(a0=1,a2=1, scheme=2, M=2, output_boundary=True)
            1
@@ -481,7 +481,7 @@ class HyperbolicPde(Pde):
             raise NotImplementedError(f'Scheme {scheme} not implemented')
 
         if output_boundary:
-            dae_list.extend([Eqn(f'Equation of {u[M]}', u[M] - 2 * Var(u.name + 'R') + u[M - 1]),
-                             Eqn(f'Equation of {u[0]}', u[0] - 2 * Var(u.name + 'L') + u[1])])
+            dae_list.extend([Eqn(f'Equation of {u[M]}', u[M] - 2 * iVar(u.name + 'R') + u[M - 1]),
+                             Eqn(f'Equation of {u[0]}', u[0] - 2 * iVar(u.name + 'L') + u[1])])
 
         return dae_list

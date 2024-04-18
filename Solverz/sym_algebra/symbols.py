@@ -155,12 +155,12 @@ class IdxSymBasic(Symbol):
         return self._numpycode(printer, **kwargs)
 
 
-class Var(SolSymBasic):
+class iVar(SolSymBasic):
     def __getitem__(self, index):
         return IdxVar(self, index, self.dim)
 
 
-class AliasVar(SolSymBasic):
+class iAliasVar(SolSymBasic):
     def __getitem__(self, index):
         return IdxAliasVar(self, index, self.dim)
 

@@ -30,9 +30,9 @@ Here, with the aid of Solverz, you can solve the equation as easily as follows
 
     .. testcode::
 
-       >>> from Solverz import Var, as_Vars, exp, Eqn, nr_method, parse_ae_v
+       >>> from Solverz import iVar, as_Vars, exp, Eqn, nr_method, parse_ae_v
        >>> # Declare the unknown variables and give the initial values.
-       >>> x = Var('x', 0)
+       >>> x = iVar('x', 0)
        >>> # Declare your equations
        >>> E = Eqn(name='E', eqn=exp(x)+x-3)
        >>> g = AE(name='g', eqn=E)

@@ -1,10 +1,10 @@
 import numpy as np
-from Solverz import Ode, Var, Opt, Rodas, as_Vars, DAE, made_numerical, TimeVars
+from Solverz import Ode, iVar, Opt, Rodas, as_Vars, DAE, made_numerical, TimeVars
 
 
 # %% event test
 def test_bounceball():
-    x = Var('x', [0, 20])
+    x = iVar('x', [0, 20])
     y0 = as_Vars(x)
     f1 = Ode('f1', x[1], x[0])
     f2 = Ode('f2', -9.8, x[1])
@@ -49,7 +49,7 @@ def test_bounceball():
 def test_orbit():
     mu = 1 / 82.45
     mustar = 1 - mu
-    y = Var('y', [1.2, 0, 0, -1.04935750983031990726])
+    y = iVar('y', [1.2, 0, 0, -1.04935750983031990726])
     f1 = Ode('f1', y[2], y[0])
     f2 = Ode('f2', y[3], y[1])
     r13 = ((y[0] + mu) ** 2 + y[1] ** 2) ** 1.5

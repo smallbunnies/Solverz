@@ -1,17 +1,17 @@
-from Solverz.sym_algebra.symbols import Var, Para, idx
+from Solverz.sym_algebra.symbols import iVar, Para, idx
 from Solverz.sym_algebra.functions import Abs, Mat_Mul
 from Solverz.sym_algebra.matrix_calculus import TensorExpr
 from Solverz.equation.eqn import Eqn
 
 mL = Para('mL', dim=2)
 K = Para(name='K')
-m = Var(name='m')
+m = iVar(name='m')
 V = Para(name='V', dim=2)
-Ts = Var(name='Ts')
+Ts = iVar(name='Ts')
 Vp = Para(name='Vp', dim=2)
-Touts = Var(name='Touts')
+Touts = iVar(name='Touts')
 li = idx(name='li')
-mq = Var(name='mq')
+mq = iVar(name='mq')
 rs = idx(name='rs')
 E8 = Eqn(name='E8', eqn=Mat_Mul(mL, (K * Abs(m) * m)))
 E5 = Eqn(name='E5', eqn=Mat_Mul(V[rs, :], m) - mq[rs])
@@ -20,10 +20,10 @@ TE8 = TensorExpr(E8.RHS)
 TE5 = TensorExpr(E5.RHS)
 TE9 = TensorExpr(E9.RHS)
 
-e = Var(name='e', value=[1.06, 1, 1.00])
-f = Var(name='f', value=[0, 0, 0])
-P = Var(name='P')
-q = Var(name='q')
+e = iVar(name='e', value=[1.06, 1, 1.00])
+f = iVar(name='f', value=[0, 0, 0])
+P = iVar(name='P')
+q = iVar(name='q')
 G = Para(name='G', dim=2, value=[0])
 B = Para(name='B', dim=2, value=[0])
 

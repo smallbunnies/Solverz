@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
 
-from Solverz import Eqn, Ode, DAE, Var, as_Vars, Rodas, implicit_trapezoid, Opt, made_numerical
+from Solverz import Eqn, Ode, DAE, iVar, as_Vars, Rodas, implicit_trapezoid, Opt, made_numerical
 
-x = Var('x', 1)
-y = Var('y', 1)
+x = iVar('x', 1)
+y = iVar('y', 1)
 
 f = Ode(name='f', f=-x ** 3 + 0.5 * y ** 2, diff_var=x)
 g = Eqn(name='g', eqn=x ** 2 + y ** 2 - 2)

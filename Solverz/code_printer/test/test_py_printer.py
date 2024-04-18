@@ -10,7 +10,7 @@ from Solverz import as_Vars, Eqn, AE, sin, made_numerical
 from Solverz.code_printer.make_module import module_printer
 from Solverz.code_printer.py_printer import _parse_jac_eqn_address, _parse_jac_var_address, _parse_jac_data, \
     print_J_block, _print_var_parser
-from Solverz.sym_algebra.symbols import idx, Var, Para
+from Solverz.sym_algebra.symbols import idx, iVar, Para
 
 
 def test_address_parser():
@@ -79,9 +79,9 @@ def test_var_parser():
 
 
 # def test_F_printer():
-#     F = _print_F_assignment(slice(20, 21), Var('x'))
+#     F = _print_F_assignment(slice(20, 21), iVar('x'))
 #     assert pycode(F) == '_F_[20:21] = x'
-#     F = _print_F_assignment(slice(20, 23), Var('x'))
+#     F = _print_F_assignment(slice(20, 23), iVar('x'))
 #     assert pycode(F) == '_F_[20:23] = x'
 
 
@@ -91,14 +91,14 @@ def test_J_block_printer():
                        slice(3, 6),
                        0,
                        None,
-                       Var('omega_b'),
+                       iVar('omega_b'),
                        False)
     assert pycode(Jb) == '[J_[arange(0, 3),arange(3, 6)] += omega_b]'
     Jb = print_J_block(slice(3, 6),
                        slice(12, 21),
                        1,
                        idx('g'),
-                       -Var('Ixg') / Var('Tj'),
+                       -iVar('Ixg') / iVar('Tj'),
                        False)
     assert pycode(Jb) == '[J_[arange(3, 6),arange(12, 21)[g]] += -Ixg/Tj]'
     Jb = print_J_block(slice(12, 15),
@@ -112,7 +112,7 @@ def test_J_block_printer():
                        slice(12, 21),
                        2,
                        None,
-                       Var('G')[idx('ng'), :],
+                       iVar('G')[idx('ng'), :],
                        False)
     assert pycode(Jb) == '[J_[18:24,12:21] += G[ng,:]]'
 
@@ -148,7 +148,7 @@ def test_J_block_printer():
                        slice(281, 292),
                        1,
                        None,
-                       Para('dx') + Var('p'),
+                       Para('dx') + iVar('p'),
                        True)
     assert pycode(Jb) == '[row.extend(arange(281, 292)), col.extend(arange(281, 292)), data.extend(dx + p)]'
 
@@ -156,7 +156,7 @@ def test_J_block_printer():
                        slice(3, 6),
                        2,
                        None,
-                       Var('omega_b'),
+                       iVar('omega_b'),
                        True)
     assert pycode(
         Jb) == '[value_coo = coo_array(omega_b), row.extend(arange(0, 3)[value_coo.row]), col.extend(arange(3, 6)[value_coo.col]), data.extend(value_coo.data)]'
@@ -190,7 +190,7 @@ def test_J_block_printer():
 
 
 def test_py_printer():
-    x = Var('x', [1, 1])
+    x = iVar('x', [1, 1])
     f1 = Eqn('f1', 2 * x[0] + x[1])
     f2 = Eqn('f2', x[0] ** 2 + sin(x[1]))
 
@@ -253,7 +253,7 @@ def test_py_printer():
 
 
 def test_made_numerical():
-    x = Var('x', [1, 1])
+    x = iVar('x', [1, 1])
     f1 = Eqn('f1', 2 * x[0] + x[1])
     f2 = Eqn('f2', x[0] ** 2 + sin(x[1]))
 

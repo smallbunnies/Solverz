@@ -1,10 +1,10 @@
 from sympy import pycode, Integer
 
 from Solverz.sym_algebra.transform import finite_difference, semi_descritize
-from Solverz.sym_algebra.symbols import Var, Para
+from Solverz.sym_algebra.symbols import iVar, Para
 
-pi = Var('pi')
-qi = Var('qi')
+pi = iVar('pi')
+qi = iVar('qi')
 S = Para('S')
 va = Para('va')
 D = Para('D')

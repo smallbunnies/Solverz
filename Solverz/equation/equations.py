@@ -12,7 +12,7 @@ from scipy.sparse import csc_array, coo_array
 
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
 from Solverz.equation.param import ParamBase, Param, IdxParam
-from Solverz.sym_algebra.symbols import Var, idx, IdxVar, Para, AliasVar
+from Solverz.sym_algebra.symbols import iVar, idx, IdxVar, Para, iAliasVar
 from Solverz.sym_algebra.functions import Slice
 from Solverz.variable.variables import Vars
 from Solverz.utilities.address import Address, combine_Address
@@ -58,7 +58,7 @@ class Equations:
             self.f_list = self.f_list + [eqn.name]
 
         for symbol_ in eqn.SYMBOLS.values():
-            if isinstance(symbol_, (Para, AliasVar)):
+            if isinstance(symbol_, (Para, iAliasVar)):
                 # this is not fully initialize of Parameters, please use param_initializer
                 self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
             elif isinstance(symbol_, idx):
@@ -136,7 +136,7 @@ class Equations:
                             if var in y.var_list:
                                 var_value = y[var]
                     if var_value is None:
-                        raise ValueError(f'Para/Var {var} not defined')
+                        raise ValueError(f'Para/iVar {var} not defined')
                     else:
                         args.append(var_value)
                 temp = trigger_func(*args)
@@ -580,7 +580,7 @@ class DAE(Equations):
             equation_address = self.a.v[eqn_name]
             if isinstance(eqn, Ode):
                 diff_var = eqn.diff_var
-                if isinstance(diff_var, Var):
+                if isinstance(diff_var, iVar):
                     variable_address = self.var_address.v[diff_var.name]
                 elif isinstance(diff_var, IdxVar):
                     var_idx = diff_var.index

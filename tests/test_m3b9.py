@@ -1,15 +1,15 @@
 import numpy as np
 import pandas as pd
 
-from Solverz import DAE, Eqn, Ode, Var, Para, idx, sin, cos, Rodas, as_Vars, Mat_Mul, \
+from Solverz import DAE, Eqn, Ode, iVar, Para, idx, sin, cos, Rodas, as_Vars, Mat_Mul, \
     implicit_trapezoid, Opt, TimeSeriesParam, made_numerical
 
-omega = Var(name='omega')
-delta = Var(name='delta')
-Ux = Var(name='Ux')
-Uy = Var(name='Uy')
-Ixg = Var(name='Ixg')
-Iyg = Var(name='Iyg')
+omega = iVar(name='omega')
+delta = iVar(name='delta')
+Ux = iVar(name='Ux')
+Uy = iVar(name='Uy')
+Ixg = iVar(name='Ixg')
+Iyg = iVar(name='Iyg')
 g = idx('g', value=[0, 1, 2])
 ng = idx('ng', value=[3, 4, 5, 6, 7, 8])
 Pm = Para(name='Pm')
@@ -67,16 +67,16 @@ m3b9.param_initializer('G', TimeSeriesParam(name='G',
                                             dim=2))
 m3b9.update_param('B', np.asarray(df['B']))
 
-delta = Var('delta', [0.0625815077879868, 1.06638275203221, 0.944865048677501])
-omega = Var('omega', [1, 1, 1])
-Ixg = Var('Ixg', [0.688836021737262, 1.57988988391346, 0.817891311823357])
-Iyg = Var('Iyg', [-0.260077644814056, 0.192406178191528, 0.173047791590276])
-Ux = Var('Ux',
-         [1.04000110267534, 1.01157932564567, 1.02160343921907,
+delta = iVar('delta', [0.0625815077879868, 1.06638275203221, 0.944865048677501])
+omega = iVar('omega', [1, 1, 1])
+Ixg = iVar('Ixg', [0.688836021737262, 1.57988988391346, 0.817891311823357])
+Iyg = iVar('Iyg', [-0.260077644814056, 0.192406178191528, 0.173047791590276])
+Ux = iVar('Ux',
+          [1.04000110267534, 1.01157932564567, 1.02160343921907,
           1.02502063033405, 0.993215117729926, 1.01056073782038,
           1.02360471178264, 1.01579907336413, 1.03174403980626])
-Uy = Var('Uy',
-         [9.38510394478286e-07, 0.165293826097057, 0.0833635520284917,
+Uy = iVar('Uy',
+          [9.38510394478286e-07, 0.165293826097057, 0.0833635520284917,
           -0.0396760163416718, -0.0692587531054159, -0.0651191654677445,
           0.0665507083524658, 0.0129050646926083, 0.0354351211556429])
 

@@ -8,7 +8,7 @@ import numpy as np
 import sympy as sp
 from sympy import Expr, Mul, Add, S, Number, Integer, Symbol
 
-from Solverz.sym_algebra.symbols import IdxVar, IdxPara, Var, Para
+from Solverz.sym_algebra.symbols import IdxVar, IdxPara, iVar, Para
 from Solverz.sym_algebra.functions import Mat_Mul, Diag, transpose, Abs, Sign
 
 
@@ -239,7 +239,7 @@ def obtain_dim(expr) -> int:
 
     symbol_dict = dict()
     for symbol in list(expr.free_symbols):
-        if isinstance(symbol, (Var, IdxVar)):
+        if isinstance(symbol, (iVar, IdxVar)):
             symbol_dict[symbol] = np.ones((2, 1))
         elif isinstance(symbol, (Para, IdxPara)):
             if symbol.dim == 2:
@@ -262,7 +262,7 @@ def obtain_TExpr(expr: Expr, index: TensorIndex):
         Texpr = TMul(expr, index)
     elif isinstance(expr, Abs):
         Texpr = TAbs(expr, index)
-    elif isinstance(expr, (Var, IdxVar)):
+    elif isinstance(expr, (iVar, IdxVar)):
         Texpr = TVector(expr, index)
     elif isinstance(expr, (Para, IdxPara)):
         if expr.dim == 2:
