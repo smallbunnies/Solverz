@@ -148,7 +148,7 @@ class Ode(Eqn):
     def __init__(self, name: str,
                  f,
                  diff_var: Union[iVar, IdxVar, Var]):
-        super().__init__(name, f)
+        super().__init__(name, sVar2Var(f))
         diff_var = sVar2Var(diff_var)
         self.diff_var = diff_var
         self.LHS = Derivative(diff_var, t)
