@@ -1,14 +1,14 @@
 import numpy as np
-from Solverz import Ode, iVar, Opt, Rodas, as_Vars, DAE, made_numerical, TimeVars
+from Solverz import Ode, Var, Opt, Rodas, made_numerical, TimeVars, Model
 
 
 # %% event test
 def test_bounceball():
-    x = iVar('x', [0, 20])
-    y0 = as_Vars(x)
-    f1 = Ode('f1', x[1], x[0])
-    f2 = Ode('f2', -9.8, x[1])
-    bball = DAE([f1, f2])
+    m = Model()
+    m.x = Var('x', [0, 20])
+    m.f1 = Ode('f1', m.x[1], m.x[0])
+    m.f2 = Ode('f2', -9.8, m.x[1])
+    bball, y0 = m.create_instance()
     nbball = made_numerical(bball, y0, sparse=True)
 
     def events(t, y):
@@ -49,19 +49,19 @@ def test_bounceball():
 def test_orbit():
     mu = 1 / 82.45
     mustar = 1 - mu
-    y = iVar('y', [1.2, 0, 0, -1.04935750983031990726])
-    f1 = Ode('f1', y[2], y[0])
-    f2 = Ode('f2', y[3], y[1])
-    r13 = ((y[0] + mu) ** 2 + y[1] ** 2) ** 1.5
-    r23 = ((y[0] - mustar) ** 2 + y[1] ** 2) ** 1.5
-    f3 = Ode('f3',
-             2 * y[3] + y[0] - mustar * ((y[0] + mu) / r13) - mu * ((y[0] - mustar) / r23),
-             y[2])
-    f4 = Ode('f4',
-             -2 * y[2] + y[1] - mustar * (y[1] / r13) - mu * (y[1] / r23),
-             y[3])
-    y0 = as_Vars(y)
-    orbit = DAE([f1, f2, f3, f4])
+    m = Model()
+    m.y = Var('y', [1.2, 0, 0, -1.04935750983031990726])
+    m.f1 = Ode('f1', m.y[2], m.y[0])
+    m.f2 = Ode('f2', m.y[3], m.y[1])
+    r13 = ((m.y[0] + mu) ** 2 + m.y[1] ** 2) ** 1.5
+    r23 = ((m.y[0] - mustar) ** 2 + m.y[1] ** 2) ** 1.5
+    m.f3 = Ode('f3',
+               2 * m.y[3] + m.y[0] - mustar * ((m.y[0] + mu) / r13) - mu * ((m.y[0] - mustar) / r23),
+               m.y[2])
+    m.f4 = Ode('f4',
+               -2 * m.y[2] + m.y[1] - mustar * (m.y[1] / r13) - mu * (m.y[1] / r23),
+               m.y[3])
+    orbit, y0 = m.create_instance()
     norbit = made_numerical(orbit, y0, sparse=True)
 
     def events(t, y):

@@ -45,7 +45,7 @@ class Model:
             elif isinstance(value, ParamBase):
                 self.param_dict[key] = value
             elif isinstance(value, AliasVar):
-                nstep = 0 if nstep is None else nstep
+                nstep = 1 if nstep is None else nstep
                 self.alias_dict[key] = value
                 nstep = np.max([nstep, value.step])
 
