@@ -401,7 +401,7 @@ def print_param(ae: SymEquations, numba_printer=False):
 
 def _print_F_assignment(eqn_address, eqn, i):
     F_ = iVar('_F_', internal_use=True)
-    return Assignment(F_[eqn_address], FunctionCall(f'inner_F{int(i)}', [name for name in eqn.SYMBOLS.keys()]))
+    return Assignment(F_[eqn_address], FunctionCall(f'inner_F{int(i)}', list(eqn.SYMBOLS.values())))
 
 
 def print_eqn_assignment(ae: SymEquations, numba_printer=False):
@@ -420,8 +420,7 @@ def print_eqn_assignment(ae: SymEquations, numba_printer=False):
                         raise ValueError(f"Numba printer does not accept idx or list index {var.index}")
             _F_ = iVar('_F_', internal_use=True)
             eqn_declaration.append(Assignment(_F_[eqn_address],
-                                              FunctionCall(f'inner_F{int(count)}',
-                                                           [name for name in eqn.SYMBOLS.keys()])))
+                                              FunctionCall(f'inner_F{int(count)}', list(eqn.SYMBOLS.values()))))
             count = count + 1
         else:
             eqn_declaration.append(Assignment(_F_[eqn_address], eqn.RHS))
@@ -587,7 +586,7 @@ def print_J_sparse(ae: SymEquations):
 
 def _print_trigger_func(para_name, trigger_var: List[str]):
     return Assignment(Para(para_name),
-                      FunctionCall(para_name + '_trigger_func', tuple(trigger_var)))
+                      FunctionCall(para_name + '_trigger_func', tuple([symbols(var) for var in trigger_var])))
 
 
 def print_trigger(ae: SymEquations):
@@ -658,8 +657,7 @@ def print_J_numba(ae: SymEquations):
     body.extend(param_assignments)
     body.extend(print_trigger(ae))
     body.extend([Assignment(iVar('data', internal_use=True),
-                            FunctionCall('inner_J', [symbols('_data_', real=True)] + [arg.name for arg in
-                                                                                      var_list + param_list]))])
+                            FunctionCall('inner_J', [symbols('_data_', real=True)] + var_list + param_list))])
     body.extend([Return(coo_2_csc(ae))])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
@@ -687,7 +685,7 @@ def print_inner_J(ae: SymEquations, *xys):
             data[jac_address[jac_]] = rhs
         else:
             body.append(Assignment(iVar('_data_', internal_use=True)[jac_address[jac_]],
-                                   FunctionCall(f'inner_J{int(count)}', [name for name in derivative.SYMBOLS.keys()])))
+                                   FunctionCall(f'inner_J{int(count)}', list(derivative.SYMBOLS.values()))))
             args1 = []
             for var in derivative.SYMBOLS.keys():
                 args1.append(symbols(var, real=True))
@@ -721,7 +719,7 @@ def print_F_numba(ae: SymEquations):
     body.extend(param_assignments)
     body.extend(print_trigger(ae))
     body.extend(
-        [Return(FunctionCall('inner_F', [symbols('_F_', real=True)] + [arg.name for arg in var_list + param_list]))])
+        [Return(FunctionCall('inner_F', [symbols('_F_', real=True)] + var_list + param_list))])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
 
