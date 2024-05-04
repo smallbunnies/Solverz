@@ -18,6 +18,7 @@ def implicit_trapezoid(dae: nDAE,
     t0 = tt
 
     y = np.zeros((10000, y0.shape[0]))
+    y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
     y[0, :] = y0
     T = np.zeros((10000,))
 

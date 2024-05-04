@@ -1,6 +1,6 @@
 class Stats:
 
-    def __init__(self, scheme):
+    def __init__(self, scheme=None):
         self.scheme = scheme
         self.nstep = 0
         self.nfeval = 0

@@ -35,6 +35,7 @@ def fdae_solver(fdae: nFDAE,
     u = np.zeros((nstep, u0.shape[0]))
     u[0, :] = u0
     T = np.zeros((nstep,))
+    T[0] = t0
     if opt.pbar:
         bar = tqdm.tqdm(total=tend)
 
