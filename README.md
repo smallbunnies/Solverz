@@ -9,12 +9,16 @@ Solverz supports three types of abstract equation types, that are
 
 where $p$ is the parameter set of your models, $y_0$ is the previous time node value of $y$.
 
-For example,  to solve the DAE 
-$\begin{aligned}
+For example, we want to know how long it takes for an apple to fall from a tree to the ground. We have the DAE 
+
+$$
+\begin{aligned}
 &v'=-9.8\\
 &h'=v
-\end{aligned}$ with $v(0)=20$and $h(0)=0$
-of  the apple free fall, we can just type the codes
+\end{aligned}
+$$ 
+
+with $v(0)=20$ and $h(0)=0$, we can just type the codes
 ```python
 import matplotlib.pyplot as plt
 import numpy as np
@@ -51,7 +55,9 @@ plt.xlabel('Time/s')
 plt.ylabel('h/m')
 plt.show()
 ```
-![image.png](https://cdn.nlark.com/yuque/0/2024/png/40720019/1715097861620-a7bbece3-421b-4256-8b83-a2786953a7af.png#averageHue=%23fcfcfc&clientId=u56e63a30-9e29-4&from=paste&height=480&id=uda8d926c&originHeight=480&originWidth=640&originalType=binary&ratio=1&rotation=0&showTitle=false&size=19824&status=done&style=none&taskId=uf3867a4b-d579-4db5-8050-031623cdc4c&title=&width=640)
+Then we have
+
+![image.png](res.png)
 
 The model is solved with the stiffly accurate Rosenbrock type method, but you can also write your own solvers by the generated numerical interfaces since, for example, the Newton-Raphson solver implememtation for AEs is as simple as below.
 ```python
@@ -91,6 +97,9 @@ pyprinter.render()
 ```
 to generate an independent python module of your simulation models. You can import them to your .py file by
 
+```python
+from bounceball import mdl as nbball, y as y0
+```
 
 The related resources are:
 
