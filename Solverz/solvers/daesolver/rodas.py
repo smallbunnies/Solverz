@@ -255,7 +255,7 @@ def Rodas(dae: nDAE,
 class Rodas_param:
 
     def __init__(self,
-                 scheme: str = 'rodas'):
+                 scheme: str = 'rodas4'):
         match scheme:
             case 'rodas4':
                 self.s = 6
