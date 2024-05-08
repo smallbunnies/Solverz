@@ -1,3 +1,5 @@
+import warnings
+
 from Solverz.solvers.daesolver.utilities import *
 
 
@@ -225,6 +227,7 @@ def Rodas(dae: nDAE,
                 y[nt] = ynew
 
             if nt == 10000:
+                warnings.warn("Time steps more than 10000! Rodas breaks. Try input a smaller tspan!")
                 done = True
 
             if np.abs(tend - t) < uround or stop:
@@ -252,7 +255,7 @@ def Rodas(dae: nDAE,
 class Rodas_param:
 
     def __init__(self,
-                 scheme: str = 'rodas'):
+                 scheme: str = 'rodas4'):
         match scheme:
             case 'rodas4':
                 self.s = 6

@@ -35,6 +35,7 @@ def fdae_solver(fdae: nFDAE,
     u = np.zeros((nstep, u0.shape[0]))
     u[0, :] = u0
     T = np.zeros((nstep,))
+    T[0] = t0
     if opt.pbar:
         bar = tqdm.tqdm(total=tend)
 
@@ -63,6 +64,7 @@ def fdae_solver(fdae: nFDAE,
         stats.ndecomp = stats.ndecomp + ite
         stats.nfeval = stats.nfeval + ite + 1
         if ite >= 100:
+            print(f"FDAE solver broke at time={tt} due to non-convergence")
             break
 
         tt = tt + dt

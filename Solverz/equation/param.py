@@ -148,3 +148,6 @@ class TimeSeriesParam(Param):
             return temp
         else:
             return vt
+
+    def __repr__(self):
+        return f"TimeSeriesParam: {self.name} value: {self.v}"

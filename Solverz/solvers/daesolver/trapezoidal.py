@@ -18,13 +18,14 @@ def implicit_trapezoid(dae: nDAE,
     t0 = tt
 
     y = np.zeros((10000, y0.shape[0]))
+    y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
     y[0, :] = y0
     T = np.zeros((10000,))
 
     p = dae.p
     while abs(tt - T_end) > abs(dt) / 10:
         My0 = dae.M @ y0
-        F0 = dae.F(t0, y0, p)
+        F0 = dae.F(t0, y0, p).copy()
         ae = nAE(lambda y_, p_: dt / 2 * (dae.F(t0 + dt, y_, p_) + F0) - dae.M @ y_ + My0,
                  lambda y_, p_: -dae.M + dt / 2 * dae.J(t0 + dt, y_, p_),
                  p)
