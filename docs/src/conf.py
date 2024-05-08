@@ -5,6 +5,7 @@
 import inspect
 import os
 import sys
+import time
 
 import sympy
 
@@ -17,7 +18,7 @@ sys.path.insert(0, os.path.abspath('../..'))
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'Solverz'
-copyright = '2023, Ruizhi Yu'
+copyright = f'{time.localtime().tm_year}, Ruizhi Yu'
 author = 'Ruizhi Yu'
 
 # -- General configuration ---------------------------------------------------

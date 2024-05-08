@@ -1,5 +1,8 @@
-# Overview
-Solverz is an open-source python-based simulation modelling language that provides symbolic interfaces for you to model your equations and can then generate functions or numba-jitted python modules for numerical solutions. 
+(intro)=
+
+# An Introductory Example
+
+Solverz aims to help you model and solve your equations more efficiently.
 
 Solverz supports three types of abstract equation types, that are
 
@@ -9,16 +12,20 @@ Solverz supports three types of abstract equation types, that are
 
 where $p$ is the parameter set of your models, $y_0$ is the previous time node value of $y$.
 
-For example, we want to know how long it takes for an apple to fall from a tree to the ground. We have the DAE 
+Say, we want to know how long it takes for an apple to fall from a tree to the ground. We have the 
+differential equations 
 
-$$
+```{math}
+\left\{
 \begin{aligned}
 &v'=-9.8\\
 &h'=v
 \end{aligned}
-$$ 
+\right.
+```
 
 with $v(0)=20$ and $h(0)=0$, we can just type the codes
+
 ```python
 import matplotlib.pyplot as plt
 import numpy as np
@@ -57,33 +64,29 @@ plt.show()
 ```
 Then we have
 
-![image.png](res.png)
+![image.png](/pics/res.png)
 
-The model is solved with the stiffly accurate Rosenbrock type method, but you can also write your own solvers by the generated numerical interfaces since, for example, the Newton-Raphson solver implememtation for AEs is as simple as below.
-```python
-@ae_io_parser
-def nr_method(eqn: nAE,
-              y: np.ndarray,
-              opt: Opt = None):
-    if opt is None:
-        opt = Opt(ite_tol=1e-8)
+The model is solved with the stiffly accurate Rosenbrock type method, but you can also write your own solvers by the 
+generated numerical interfaces. For example, the [multidimensional Newton method](https://en.wikipedia.org/wiki/Newton%27s_method) of 
+AEs is a scheme with formulae
 
-    tol = opt.ite_tol
-    p = eqn.p
-    df = eqn.F(y, p)
-    ite = 0
-    # main loop
-    while max(abs(df)) > tol:
-        ite = ite + 1
-        y = y - solve(eqn.J(y, p), df)
-        df = eqn.F(y, p)
-        if ite >= 100:
-            print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
-            break
-
-    return aesol(y, ite)
+```{math}
+y_{k+1} = y_k - J_F(y_k)^{-1}F(y_k)\quad k=0,1,2,\cdots.
 ```
-The implementation of the NR solver just resembles the formulae you read in any numerical analysis book. This is because the numerical AE object `eqn` provides the $F(t,y,p)$ interface and its Jacobian $J(t,y,p)$, which is derived by symbolic differentiation. 
+
+Its implementation using Solverz can be as simple as
+```python
+# main loop
+while max(abs(df)) > tol:
+    ite = ite + 1
+    y = y - solve(eqn.J(y, p), df)
+    df = eqn.F(y, p)
+    if ite >= 100:
+        print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
+        break
+```
+The numerical AE object `eqn` provides the $F(t,y,p)$ interface and its Jacobian $J(t,y,p)$, which grants
+your full flexibility. So that the implementation of the NR solver just resembles the formulae above.
 
 Sometimes you have very complex models and you dont want to re-derive them everytime. With Solverz, you can just use
 ```python
@@ -100,12 +103,3 @@ to generate an independent python module of your simulation models. You can impo
 ```python
 from bounceball import mdl as nbball, y as y0
 ```
-
-# Installation
-
-# Useful Resources
-
-- [Solverz Documentation](https://docs.solverz.org)
-- [Solverz Cookbook](https://cookbook.solverz.org)
-
- 

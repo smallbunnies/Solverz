@@ -2,68 +2,30 @@
 
 .. module:: solverz
 
-Welcome to Solverz's documentation!
+Welcome to Solverz
 -----------------------------------
 
-.. A `PDF version of these docs <https://github.com/sympy/sympy/releases>`_ is also available.
 
-`Solverz <https://github.com/rzyu45/Solverz>`_ is a Python-based, open-source simulation modeling language. It supports
-models based on partial differential equations (PDEs), ordinary differential equations (ODEs) and algebraic equations (AEs).
-And a diverse set of mature simulation algorithms are provided to solve these models.
-What's more, Solverz also grants you the freedom to design and compare your tailored algorithms through the provided numerical/symbolic interfaces.
+`Solverz <https://github.com/smallbunnies/Solverz>`_ is an open-source python-based simulation modelling
+language that provides symbolic modelling interfaces and numerical functions printer.
 
-If you are new to Solverz, start with the .
+If you are new to Solverz, start with the :ref:`introductory example <intro>`.
 
-This is the central page for all of Solverz's documentation.
+If you find Solverz intriguing, just :ref:`get started <gettingstarted>`.
+
+Additional Solverz paradigms covering multiple areas can be found in
+`Solverz' Cookbook <https://cookbook.solverz.org>`_:
 
 ==================================================================
 
-:ref:`Installation <installation>`
-----------------------------------
-
-Instructions on how to install Solverz.
-
-:ref:`Quick Start <quick-start>`
------------------------------------
-
-Explanations provide in-depth discussions about select SymPy features. These
-topic guides talk about things like the motivation behind design decisions,
-technical implementation details, and opinionated recommendations.
-
-:ref:`Manual <manual>`
------------------------------------
-
-Explanations provide in-depth discussions about select SymPy features. These
-topic guides talk about things like the motivation behind design decisions,
-technical implementation details, and opinionated recommendations.
-
-:ref:`Cookbook <cookbook>`
---------------------------------
-
-The API reference is a detailed description of the Solverz API. Every Solverz
-function and class is enumerated here with detailed information on what each
-function does.
-
-:ref:`API Reference <reference>`
---------------------------------
-
-The API reference is a detailed description of the Solverz API. Every Solverz
-function and class is enumerated here with detailed information on what each
-function does.
-
-:ref:`Contributing <contributing>`
-----------------------------------
-
-The API reference is a detailed description of the Solverz API. Every Solverz
-function and class is enumerated here with detailed information on what each
-function does.
 
 .. toctree::
    :hidden:
 
    install.md
-   quick-start/intro-tutorial.rst
-   manual/index.rst
-   cookbook/index.rst
+   intro.md
+   gettingstart.md
+   advanced.md
    reference/index.rst
-   contributing/index.rst
+   gethelp.md
+   contributing.md
