@@ -17,3 +17,4 @@ sphinxcontrib-qthelp
 sphinxcontrib-serializinghtml
 sphinx-reredirects
 chardet
+sympy
