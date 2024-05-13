@@ -278,12 +278,7 @@ class switch(MulVarFunc):
 
 class Saturation(MulVarFunc):
     @classmethod
-    def eval(cls, *args):
-        if len(args) != 3:
-            raise TypeError(f'Three operands required while {len(args)} input!')
-        v = args[0]
-        vmin = args[1]
-        vmax = args[2]
+    def eval(cls, v, vmin, vmax):
         return v * In(v, vmin, vmax) + vmax * GreaterThan(v, vmax) + vmin * LessThan(v, vmin)
 
 
@@ -319,13 +314,7 @@ class AntiWindUp(MulVarFunc):
     """
 
     @classmethod
-    def eval(cls, *args):
-        if len(args) != 4:
-            raise TypeError(f'Four operands required while {len(args)} input!')
-        u = args[0]
-        umin = args[1]
-        umax = args[2]
-        e = args[3]
+    def eval(cls, u, umin, umax, e):
         return e * Not(Or(And(GreaterThan(u, umax),
                               GreaterThan(e, 0)),
                           And(LessThan(u, umin),
@@ -335,11 +324,7 @@ class AntiWindUp(MulVarFunc):
 
 class Min(MulVarFunc):
     @classmethod
-    def eval(cls, *args):
-        if len(args) != 2:
-            raise TypeError(f'Two operands required while {len(args)} input!')
-        x = args[0]
-        y = args[1]
+    def eval(cls, x, y):
         return x * LessThan(x, y) + y * (1 - LessThan(x, y))
 
 
