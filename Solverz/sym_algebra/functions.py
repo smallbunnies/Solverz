@@ -168,7 +168,20 @@ class UniVarFunc(Function):
 
 
 class Abs(UniVarFunc):
+    r"""
+    The element-wise absolute value function:
 
+        .. math::
+
+            \operatorname{Abs}(x)=|x|
+
+    with derivative
+
+        .. math::
+
+            \frac{\mathrm{d}}{\mathrm{d}x}{\operatorname{Abs}}(x)=\operatorname{Sign}(x).
+
+    """
     def fdiff(self, argindex=1):
         """
         Get the first derivative of the argument to Abs().
@@ -186,7 +199,9 @@ class Abs(UniVarFunc):
 
 
 class exp(UniVarFunc):
-
+    r"""
+    The exponential function, $e^x$.
+    """
     def fdiff(self, argindex=1):
         return exp(*self.args)
 
@@ -198,7 +213,9 @@ class exp(UniVarFunc):
 
 
 class sin(UniVarFunc):
-
+    r"""
+    The sine function.
+    """
     def fdiff(self, argindex=1):
         if argindex == 1:
             return Symcos(self.args[0])
@@ -213,7 +230,9 @@ class sin(UniVarFunc):
 
 
 class cos(UniVarFunc):
-
+    r"""
+    The cosine function.
+    """
     def fdiff(self, argindex=1):
         if argindex == 1:
             return -Symsin(self.args[0])
@@ -228,7 +247,19 @@ class cos(UniVarFunc):
 
 
 class Sign(UniVarFunc):
+    r"""
+    The element-wise indication of the sign of a number
 
+        .. math::
+
+            \operatorname{Sign}(x)=
+            \begin{cases}
+            1&x> 0\\
+            0& x==0\\
+            -1&x< 0
+            \end{cases}
+
+    """
     def fdiff(self, argindex=1):
         # sign function should be treated as a constant.
         if argindex == 1:
@@ -277,6 +308,18 @@ class switch(MulVarFunc):
 
 
 class Saturation(MulVarFunc):
+    r"""
+    The element-wise saturation a number
+
+        .. math::
+
+            \operatorname{Saturation}(v, v_\min, v_\max)=
+            \begin{cases}
+            v_\max&v> v_\max\\
+            v& v_\min\leq v\leq v_\max\\
+            v_\min&v< v_\min
+            \end{cases}
+    """
     @classmethod
     def eval(cls, v, vmin, vmax):
         return v * In(v, vmin, vmax) + vmax * GreaterThan(v, vmax) + vmin * LessThan(v, vmin)
@@ -323,6 +366,18 @@ class AntiWindUp(MulVarFunc):
 
 
 class Min(MulVarFunc):
+    r"""
+    The element-wise minimum of two numbers
+
+    .. math::
+
+        \begin{split}\min(x,y)=
+        \begin{cases}
+        x&x\leq y\\
+        y& x>y
+        \end{cases}\end{split}
+
+    """
     @classmethod
     def eval(cls, x, y):
         return x * LessThan(x, y) + y * (1 - LessThan(x, y))
@@ -361,7 +416,7 @@ class GreaterThan(MulVarFunc):
         return Integer(0)
 
     def _sympystr(self, printer, **kwargs):
-        return '(({op1})>=({op2}))'.format(op1=printer._print(self.args[0]),
+        return '(({op1})>({op2}))'.format(op1=printer._print(self.args[0]),
                                            op2=printer._print(self.args[1]))
 
     def _numpycode(self, printer, **kwargs):
@@ -383,7 +438,7 @@ class LessThan(MulVarFunc):
         return Integer(0)
 
     def _sympystr(self, printer, **kwargs):
-        return '(({op1})<=({op2}))'.format(op1=printer._print(self.args[0]),
+        return '(({op1})<({op2}))'.format(op1=printer._print(self.args[0]),
                                            op2=printer._print(self.args[1]))
 
     def _numpycode(self, printer, **kwargs):

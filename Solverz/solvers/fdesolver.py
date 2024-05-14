@@ -16,6 +16,36 @@ def fdae_solver(fdae: nFDAE,
                 tspan: List | np.ndarray,
                 u0: np.ndarray,
                 opt: Opt = None):
+    r"""
+    The general solver of FDAE.
+
+    Parameters
+    ==========
+
+    fdae : nFDAE
+        Numerical FDAE object.
+
+    tspan : List | np.ndarray
+        An array specifying t0 and tend
+
+    u0 : np.ndarray
+        The initial values of variables
+
+    opt : Opt
+        The solver options, including:
+
+        - step_size: 1e-3(default)|float
+            The step size
+        - ite_tol: 1e-8(default)|float
+            The error tolerance of inner Newton iterations.
+
+    Returns
+    =======
+
+    sol : daesol
+        The daesol object.
+
+    """
     stats = Stats(scheme='FDE solver')
     if opt is None:
         opt = Opt(stats=True)

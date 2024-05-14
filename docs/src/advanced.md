@@ -22,7 +22,7 @@ y& x>y
 We also want to extend the function to vector input, that is, capable of finding the element-wise minimum of two vectors.
 To summarize, we shall implement $\min$ that
 
-1. evaluates $\min(x,y)$correctly
+1. evaluates $\min(x,y)$ correctly
 2. can be derived proper derivatives with respect to $x$ and $y$.
 
 However, it is difficult to devise the analytical derivatives of $\min$. We should perform the trick that rewrites 

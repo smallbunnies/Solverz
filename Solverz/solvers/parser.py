@@ -1,4 +1,5 @@
 from typing import Callable, Any, List
+import functools
 import numpy as np
 from Solverz.variable.variables import Vars, TimeVars
 from Solverz.utilities.address import Address
@@ -14,6 +15,7 @@ def ae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
      2. Convert Vars input to np.ndarray.
     """
 
+    @functools.wraps(func)
     def wrapper(eqn: nAE, y0: np.ndarray | Vars, opt: Opt = None):
         # Convert Vars input to np.ndarray if necessary
         original_y0_is_vars = isinstance(y0, Vars)
@@ -42,6 +44,7 @@ def fdae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
      2. Convert Vars input to np.ndarray.
     """
 
+    @functools.wraps(func)
     def wrapper(eqn: nFDAE, tspan: List | np.ndarray, y0: np.ndarray | Vars, opt: Opt = None):
         # Convert Vars input to np.ndarray if necessary
         original_y0_is_vars = isinstance(y0, Vars)
@@ -70,6 +73,7 @@ def dae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
      2. Convert Vars input to np.ndarray.
     """
 
+    @functools.wraps(func)
     def wrapper(eqn: nDAE, tspan: List | np.ndarray, y0: np.ndarray | Vars, opt: Opt = None):
         # Convert Vars input to np.ndarray if necessary
         original_y0_is_vars = isinstance(y0, Vars)

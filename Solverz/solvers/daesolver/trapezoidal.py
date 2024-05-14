@@ -6,6 +6,40 @@ def implicit_trapezoid(dae: nDAE,
                        tspan: List | np.ndarray,
                        y0: np.ndarray,
                        opt: Opt = None):
+    r"""
+    The fixed step implicit trapezoidal method.
+
+    Parameters
+    ==========
+
+    dae : nDAE
+        Numerical DAE object.
+
+    tspan : List | np.ndarray
+        An array specifying t0 and tend
+
+    y0 : np.ndarray
+        The initial values of variables
+
+    opt : Opt
+        The solver options, including:
+
+        - step_size: 1e-3(default)|float
+            The step size
+
+    Returns
+    =======
+
+    sol : daesol
+        The daesol object.
+
+
+    References
+    ==========
+
+    .. [1] https://en.wikipedia.org/wiki/Trapezoidal_rule_(differential_equations)
+
+    """
     stats = Stats(scheme='Trapezoidal')
     if opt is None:
         opt = Opt(stats=True)

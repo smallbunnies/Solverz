@@ -6,6 +6,40 @@ def backward_euler(dae: nDAE,
                    tspan: Union[List, np.ndarray],
                    y0: np.ndarray,
                    opt: Opt = None):
+    r"""
+    The fixed step backward Euler (implicit Euler) method.
+
+    Parameters
+    ==========
+
+    dae : nDAE
+        Numerical DAE object.
+
+    tspan : List | np.ndarray
+        An array specifying t0 and tend
+
+    y0 : np.ndarray
+        The initial values of variables
+
+    opt : Opt
+        The solver options, including:
+
+        - step_size: 1e-3(default)|float
+            The step size
+
+    Returns
+    =======
+
+    sol : daesol
+        The daesol object.
+
+
+    References
+    ==========
+
+    .. [1] https://en.wikipedia.org/wiki/Backward_Euler_method
+
+    """
     stats = Stats(scheme='Backward Euler')
     if opt is None:
         opt = Opt(stats=True)

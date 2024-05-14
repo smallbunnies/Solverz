@@ -5,6 +5,37 @@ from Solverz.solvers.nlaesolver.utilities import *
 def continuous_nr(eqn: nAE,
                   y: np.ndarray,
                   opt: Opt = None):
+    r"""
+    The Continuous Newton-Raphson method.
+
+    Parameters
+    ==========
+
+    eqn : nAE
+        Numerical AE object.
+
+    y : np.ndarray
+        The initial values of variables
+
+    opt : Opt
+        The solver options, including:
+
+        - ite_tol: 1e-8(default)|float
+            The iteration error tolerance.
+
+    Returns
+    =======
+
+    sol : aesol
+        The aesol object.
+
+    References
+    ==========
+
+    .. [1] F. Milano, ‘Continuous Newton’s Method for Power Flow Analysis’, IEEE Transactions on Power Systems, vol. 24,
+           no. 1, pp. 50–57, Feb. 2009, doi: 10.1109/TPWRS.2008.2004820.
+
+    """
     p = eqn.p
     if opt is None:
         opt = Opt()

@@ -8,6 +8,57 @@ def Rodas(dae: nDAE,
           tspan: List | np.ndarray,
           y0: np.ndarray,
           opt: Opt = None):
+    r"""
+    The stiffly accurate Rosenbrock methods including Rodas4 [1]_, Rodasp [2]_, Rodas5p [3]_.
+
+    Parameters
+    ==========
+
+    dae : nDAE
+        Numerical DAE object.
+
+    tspan : List | np.ndarray
+        Either
+        - a list specifying [t0, tend], or
+        - a `np.ndarray` specifying the time nodes that you are concerned about
+
+    y0 : np.ndarray
+        The initial values of variables
+
+    opt : Opt
+        The solver options, including:
+
+        - scheme: 'rodas4'(default)|'rodasp'|'rodas5p'
+            The rodas scheme
+        - rtol: 1e-3(default)|float
+            The relative error tolerance
+        - atol: 1e-6(default)|float
+            The absolute error tolerance
+        - event: Callable
+            The simulation events, with $t$ and $y$ being args,
+            and `value`, `is_terminal` and `direction` being outputs
+        - fixed_h: False(default)|bool
+            To use fixed step size
+        - hinit: None(default)|float
+            Initial step size
+        - hmax: None(default)|float
+            Maximum step size.
+
+    Returns
+    =======
+
+    sol : daesol
+        The daesol object.
+
+
+    References
+    ==========
+
+    .. [1] Hairer and Wanner, Solving Ordinary Differential Equations II , 2nd ed. Berlin, Heidelberg, Germany: Springer-Verlag, 1996.
+    .. [2] Steinebach, Order-reduction of ROW-methods for DAEs and method of lines applications. Preprint-Nr. 1741, FB Mathematik, TH Darmstadt, 1995
+    .. [3] Steinebach, “Construction of rosenbrock-wanner method rodas5p and numerical benchmarks within the julia differential equations package,” BIT, vol. 63, no. 27, Jun 2023.
+    """
+
     if opt is None:
         opt = Opt()
     stats = Stats(opt.scheme)
