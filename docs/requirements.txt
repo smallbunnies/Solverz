@@ -20,3 +20,4 @@ sphinxcontrib-serializinghtml
 sphinx-reredirects
 chardet
 sympy
+networkx
