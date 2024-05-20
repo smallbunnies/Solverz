@@ -103,6 +103,12 @@ from bounceball import mdl as nbball, y as y0
 
 # Installation
 
+Solverz requires ```python>=3.10```, and can be installed locally with
+
+```shell
+pip install Solverz
+```
+
 # Useful Resources
 
 - [Solverz Documentation](https://docs.solverz.org)
