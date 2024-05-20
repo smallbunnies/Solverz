@@ -5,7 +5,7 @@ on: push
 jobs:
   build:
     name: Build distribution 📦
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
@@ -33,7 +33,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
     needs:
     - build
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/project/Solverz/
@@ -55,7 +55,7 @@ jobs:
       and upload them to GitHub Release
     needs:
     - publish-to-pypi
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     permissions:
       contents: write  # IMPORTANT: mandatory for making GitHub Releases
