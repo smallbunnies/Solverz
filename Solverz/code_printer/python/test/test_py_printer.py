@@ -8,7 +8,7 @@ from sympy import symbols, pycode, Integer
 
 from Solverz import as_Vars, Eqn, AE, sin, made_numerical
 from Solverz.code_printer.make_module import module_printer
-from Solverz.code_printer.py_printer import _parse_jac_eqn_address, _parse_jac_var_address, _parse_jac_data, \
+from Solverz.code_printer.python.py_printer import _parse_jac_eqn_address, _parse_jac_var_address, _parse_jac_data, \
     print_J_block, _print_var_parser
 from Solverz.sym_algebra.symbols import idx, iVar, Para
 

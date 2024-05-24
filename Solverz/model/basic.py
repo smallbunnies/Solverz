@@ -85,7 +85,7 @@ class Model:
         if eqn_type == 'FDAE':
             for i in range(nstep):
                 eqs.update_param(y0.derive_alias(f'_tag_{i}'))
-        eqs.assign_eqn_var_address(y0)
+        eqs.FormJac(y0)
 
         if eqs.eqn_size != eqs.vsize:
             warnings.warn(f'Equation size {eqs.eqn_size} and variable size {eqs.vsize} not equal!')

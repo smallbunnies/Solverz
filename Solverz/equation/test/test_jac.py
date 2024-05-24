@@ -18,8 +18,8 @@ def test_jac():
     dae = DAE([f, g])
 
     z = combine_Vars(as_Vars(x), as_Vars(y))
-    fxy = dae.f_xy(None, z)
-    gxy = dae.g_xy(None, z)
+    fxy = dae.fy(None, z)
+    gxy = dae.gy(None, z)
     assert fxy[0][3].shape == (1,)
     assert np.all(np.isclose(fxy[0][3], [-3.]))
     assert fxy[1][3].shape == (1,)
@@ -34,21 +34,21 @@ def test_jac():
 
     f = Eqn('f', eqn=x)
     ae = AE(f)
-    gy = ae.g_y(as_Vars(x))
+    gy = ae.gy(as_Vars(x))
     assert isinstance(gy[0][3], Number)
     # assert gy[0][3].ndim == 0
     assert np.all(np.isclose(gy[0][3], 1))
 
     f = Eqn('f', eqn=x[i])
     ae = AE(f)
-    gy = ae.g_y(as_Vars(x))
+    gy = ae.gy(as_Vars(x))
     assert isinstance(gy[0][3], Number)
     # assert gy[0][3].ndim == 0
     assert np.all(np.isclose(gy[0][3], 1))
 
     f = Eqn('f', eqn=x[i] ** 2)
     ae = AE(f)
-    gy = ae.g_y(as_Vars(x))
+    gy = ae.gy(as_Vars(x))
     assert isinstance(gy[0][3], np.ndarray)
     assert gy[0][3].ndim == 1
     assert np.all(np.isclose(gy[0][3], [2., 6.]))
@@ -58,7 +58,7 @@ def test_jac():
     f = Eqn('f', eqn=A * x)
     ae = AE(f)
     ae.param_initializer('A', Param('A', value=A_v, dim=2))
-    gy = ae.g_y(as_Vars(x))
+    gy = ae.gy(as_Vars(x))
     assert isinstance(gy[0][3], np.ndarray)
     assert gy[0][3].ndim == 2
     np.testing.assert_allclose(gy[0][3], A_v)
