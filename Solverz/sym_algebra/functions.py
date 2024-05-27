@@ -182,6 +182,7 @@ class Abs(UniVarFunc):
             \frac{\mathrm{d}}{\mathrm{d}x}{\operatorname{Abs}}(x)=\operatorname{Sign}(x).
 
     """
+
     def fdiff(self, argindex=1):
         """
         Get the first derivative of the argument to Abs().
@@ -202,6 +203,7 @@ class exp(UniVarFunc):
     r"""
     The exponential function, $e^x$.
     """
+
     def fdiff(self, argindex=1):
         return exp(*self.args)
 
@@ -216,6 +218,7 @@ class sin(UniVarFunc):
     r"""
     The sine function.
     """
+
     def fdiff(self, argindex=1):
         if argindex == 1:
             return Symcos(self.args[0])
@@ -233,6 +236,7 @@ class cos(UniVarFunc):
     r"""
     The cosine function.
     """
+
     def fdiff(self, argindex=1):
         if argindex == 1:
             return -Symsin(self.args[0])
@@ -260,6 +264,7 @@ class Sign(UniVarFunc):
             \end{cases}
 
     """
+
     def fdiff(self, argindex=1):
         # sign function should be treated as a constant.
         if argindex == 1:
@@ -320,6 +325,7 @@ class Saturation(MulVarFunc):
             v_\min&v< v_\min
             \end{cases}
     """
+
     @classmethod
     def eval(cls, v, vmin, vmax):
         return v * In(v, vmin, vmax) + vmax * GreaterThan(v, vmax) + vmin * LessThan(v, vmin)
@@ -378,6 +384,7 @@ class Min(MulVarFunc):
         \end{cases}\end{split}
 
     """
+
     @classmethod
     def eval(cls, x, y):
         return x * LessThan(x, y) + y * (1 - LessThan(x, y))
@@ -417,7 +424,7 @@ class GreaterThan(MulVarFunc):
 
     def _sympystr(self, printer, **kwargs):
         return '(({op1})>({op2}))'.format(op1=printer._print(self.args[0]),
-                                           op2=printer._print(self.args[1]))
+                                          op2=printer._print(self.args[1]))
 
     def _numpycode(self, printer, **kwargs):
         return r'SolGreaterThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
@@ -439,7 +446,7 @@ class LessThan(MulVarFunc):
 
     def _sympystr(self, printer, **kwargs):
         return '(({op1})<({op2}))'.format(op1=printer._print(self.args[0]),
-                                           op2=printer._print(self.args[1]))
+                                          op2=printer._print(self.args[1]))
 
     def _numpycode(self, printer, **kwargs):
         return r'SolLessThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'

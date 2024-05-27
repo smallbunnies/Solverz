@@ -17,6 +17,7 @@ from Solverz.sym_algebra.functions import Slice
 from Solverz.variable.variables import Vars
 from Solverz.utilities.address import Address, combine_Address
 from Solverz.num_api.Array import Array
+from Solverz.equation.jac import Jac, JacBlock
 
 
 class Equations:
@@ -39,6 +40,7 @@ class Equations:
         self.PARAM: Dict[str, ParamBase] = dict()
         self.triggerable_quantity: Dict[str, str] = dict()
         self.jac_element_address = Address()
+        self.jac = None
 
         if isinstance(eqn, Eqn):
             eqn = [eqn]
@@ -69,11 +71,35 @@ class Equations:
     def assign_eqn_var_address(self, *args):
         pass
 
+    def Fy(self, y) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
+        pass
+
     def FormJac(self, y):
         self.assign_eqn_var_address(y)
 
-    def FormJacBlock(self, *args):
-        pass
+        Fy_list = self.Fy(y)
+        self.jac = Jac()
+        for fy in Fy_list:
+            EqnName = fy[0]
+            EqnAddr = self.a[EqnName]
+            VarName = fy[1]
+            VarAddr = self.var_address[VarName]
+            DiffVar = fy[2].diff_var
+            DeriExpr = fy[2].RHS
+
+            DiffVarEqn = Eqn('DiffVarEqn'+DiffVar.name, DiffVar)
+            args = self.obtain_eqn_args(DiffVarEqn, 0, y)
+            DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
+
+            Value0 = np.array(fy[3])
+            jb = JacBlock(EqnName,
+                          EqnAddr,
+                          DiffVar,
+                          DiffVarValue,
+                          VarAddr,
+                          DeriExpr,
+                          Value0)
+            self.jac.add_block(EqnName, DiffVar, jb)
 
     @property
     def eqn_size(self):
@@ -265,13 +291,13 @@ class AE(Equations):
         temp = []
         if not eqn:
             for eqn_name, eqn_ in self.EQNs.items():
-                args = self.obtain_eqn_args(eqn_, None, y)
+                args = self.obtain_eqn_args(eqn_, y)
                 g_eqny = self.eval(eqn_name, *args)
                 g_eqny = g_eqny.toarray() if isinstance(g_eqny, csc_array) else g_eqny
                 temp.append(g_eqny.reshape(-1, ))
             return np.hstack(temp)
         else:
-            args = self.obtain_eqn_args(self.EQNs[eqn], None, y)
+            args = self.obtain_eqn_args(self.EQNs[eqn], y)
             return self.eval(eqn, *args)
 
     def gy(self, y: Vars, eqn: List[str] = None, var: List[str] = None) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
@@ -294,10 +320,13 @@ class AE(Equations):
             for var_name in var:
                 for key, value in eqn_diffs.items():
                     if var_name == value.diff_var_name:  # f is viewed as f[k]
-                        args = self.obtain_eqn_args(eqn_diffs[key], None, y)
+                        args = self.obtain_eqn_args(eqn_diffs[key], y)
                         temp = self.eval_diffs(eqn_name, key, *args)
                         gy = [*gy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gy
+
+    def Fy(self, y):
+        return self.gy(y)
 
     def obtain_eqn_args(self, eqn: Eqn, y: Vars) -> List[np.ndarray]:
         """
@@ -327,7 +356,6 @@ class AE(Equations):
         eqn = Eqn('Solverz evalf temporal equation', expr)
         args = self.obtain_eqn_args(eqn, y)
         return eqn.NUM_EQN(*args)
-
 
     def __repr__(self):
         if not self.eqn_size:
