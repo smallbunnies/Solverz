@@ -7,8 +7,9 @@ from typing import Dict
 
 from Solverz.equation.equations import AE as SymAE, FDAE as SymFDAE, DAE as SymDAE
 from Solverz.utilities.io import save
-from Solverz.code_printer.python.py_printer import parse_p, print_F_numba, print_inner_F, print_sub_inner_F, \
-    print_J_numba, print_inner_J, parse_trigger_fun
+from Solverz.code_printer.python.utilities import parse_p, parse_trigger_fun
+from Solverz.code_printer.python.module.module_printer import print_F_numba, print_inner_F, print_sub_inner_F, \
+    print_J_numba, print_inner_J
 from Solverz.equation.equations import Equations as SymEquations
 from Solverz.num_api.custom_function import numerical_interface
 from Solverz.variable.variables import Vars, combine_Vars

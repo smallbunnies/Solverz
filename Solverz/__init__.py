@@ -6,9 +6,7 @@ from Solverz.sym_algebra.functions import Sign, Abs, transpose, exp, Diag, Mat_M
 from Solverz.num_api.custom_function import minmod_flag, minmod
 from Solverz.variable.variables import Vars, TimeVars, as_Vars
 from Solverz.solvers import *
-from Solverz.code_printer.python.py_printer import made_numerical
-from Solverz.code_printer.python.module_generator import render_modules
-from Solverz.code_printer.make_module import module_printer
+from Solverz.code_printer import made_numerical, module_printer
 from Solverz.utilities.io import save, load, save_result
 from Solverz.utilities.profile import count_time
 from Solverz.variable.ssymbol import Var, AliasVar
