@@ -86,6 +86,7 @@ def test_jb_scalar_var_scalar_deri():
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([1, 1, 1]))
     assert jb.SpDeriExpr == iVar('y') * Ones(3)
+    assert jb.SpEleSize == 3
 
     # indexed var
     jb = JacBlock('a',
@@ -102,6 +103,7 @@ def test_jb_scalar_var_scalar_deri():
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
     assert jb.SpDeriExpr == iVar('y') * Ones(3)
+    assert jb.SpEleSize == 3
 
     # sliced var
     jb = JacBlock('a',
@@ -118,6 +120,7 @@ def test_jb_scalar_var_scalar_deri():
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
     assert jb.SpDeriExpr == iVar('y') * Ones(3)
+    assert jb.SpEleSize == 3
 
 
 # %% scalar var and vector derivative
@@ -137,6 +140,7 @@ def test_jb_scalar_var_vector_deri():
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([1, 1, 1]))
     assert jb.SpDeriExpr == iVar('y')
+    assert jb.SpEleSize == 3
 
     # indexed var
     jb = JacBlock('a',
@@ -153,6 +157,7 @@ def test_jb_scalar_var_vector_deri():
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
     assert jb.SpDeriExpr == iVar('y')
+    assert jb.SpEleSize == 3
 
     # sliced var
     jb = JacBlock('a',
@@ -169,6 +174,7 @@ def test_jb_scalar_var_vector_deri():
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
     assert jb.SpDeriExpr == iVar('y')
+    assert jb.SpEleSize == 3
 
     # Derivative size not compatible with equation size
     with pytest.raises(ValueError, match="Vector derivative size 2 != Equation size 3"):
@@ -198,6 +204,7 @@ def test_jb_vector_var_scalar_deri():
     assert_allclose(jb.SpEqnAddr, np.arange(1, 10))
     assert_allclose(jb.SpVarAddr, np.arange(1, 10))
     assert jb.SpDeriExpr == iVar('y') * Ones(9)
+    assert jb.SpEleSize == 9
 
     # indexed var
     with pytest.raises(TypeError,
@@ -224,6 +231,7 @@ def test_jb_vector_var_scalar_deri():
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([11, 12, 13]))
     assert jb.SpDeriExpr == iVar('y')[0] * Ones(3)
+    assert jb.SpEleSize == 3
 
     # sliced var with incompatible eqn and var size
     with pytest.raises(ValueError,
@@ -253,6 +261,7 @@ def test_jb_vector_var_vector_deri():
     assert_allclose(jb.SpEqnAddr, np.arange(1, 10))
     assert_allclose(jb.SpVarAddr, np.arange(1, 10))
     assert jb.SpDeriExpr == iVar('y')
+    assert jb.SpEleSize == 9
 
     # incompatible eqn and var size
     with pytest.raises(ValueError,
