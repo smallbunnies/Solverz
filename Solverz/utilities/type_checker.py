@@ -1,10 +1,10 @@
-from sympy import Number as symNumber, Integer
+from sympy import Number as SymNumber, Integer
 import numpy as np
-from numbers import Number
+from numbers import Number as PyNumber
 
 
 def is_number(num):
-    if isinstance(num, (Number, symNumber)):
+    if isinstance(num, (PyNumber, SymNumber)):
         return True
     elif isinstance(num, np.ndarray) and num.size == 1:
         return True

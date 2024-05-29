@@ -5,6 +5,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 import re
 import pytest
+from sympy import sin
 from sympy.codegen.ast import Assignment, AddAugmentedAssignment
 
 from Solverz import Model, Var
@@ -146,3 +147,17 @@ def test_print_F_J():
     nbball = made_numerical(bball, y0, sparse=False)
     np.testing.assert_allclose(nbball.J(0, y0, nbball.p),
                                np.array([[0., 1.], [0., 0.]]))
+
+
+def test_made_numerical():
+    x = iVar('x', [1, 1])
+    f1 = Eqn('f1', 2 * x[0] + x[1])
+    f2 = Eqn('f2', x[0] ** 2 + sin(x[1]))
+
+    F = AE([f1, f2])
+    y = as_Vars([x])
+    nF, code = made_numerical(F, y, sparse=True, output_code=True)
+    F0 = nF.F(y, nF.p)
+    J0 = nF.J(y, nF.p)
+    np.testing.assert_allclose(F0, np.array([2 * 1 + 1, 1 + np.sin(1)]), rtol=1e-8)
+    np.testing.assert_allclose(J0.toarray(), np.array([[2, 1], [2, 0.54030231]]), rtol=1e-8)

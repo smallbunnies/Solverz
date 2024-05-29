@@ -1,11 +1,11 @@
 from __future__ import annotations
 import numpy as np
-from typing import Dict, Union
+from typing import Dict, Union, List
 import warnings
 
 from sympy import Expr, Function, Integer
 from Solverz.sym_algebra.symbols import iVar, IdxVar
-from Solverz.utilities.type_checker import is_vector, is_scalar, is_integer
+from Solverz.utilities.type_checker import is_vector, is_scalar, is_integer, is_number, PyNumber
 from Solverz.sym_algebra.functions import Diag
 
 SolVar = Union[iVar, IdxVar]
@@ -26,6 +26,17 @@ class Jac:
             self.blocks[eqn_name] = dict()
             self.blocks[eqn_name][diff_var] = jb
 
+    @property
+    def JacEleNum(self) -> int:
+        num = 0
+        for jbs_row in self.blocks.values():
+            for jb in jbs_row.values():
+                if jb.DeriType == 'matrix':
+                    raise NotImplementedError("Matrix derivative type not supported!")
+                else:
+                    num = num + jb.SpEleSize
+        return num
+
 
 class JacBlock:
 
@@ -36,7 +47,7 @@ class JacBlock:
                  DiffVarValue,
                  VarAddr,
                  DeriExpr: Expr,
-                 Value0: np.ndarray):
+                 Value0: np.ndarray | PyNumber):
         """
         var_addr is the address of the non-indexed variable. Fox example, if the diff_var is x[0], then the
         var_addr is the address of x. JacBlock will parse the address of x[0]
@@ -52,6 +63,7 @@ class JacBlock:
         self.DiffVarValue: np.ndarray = DiffVarValue
         self.VarAddr: slice = VarAddr
         self.DeriExpr = DeriExpr
+        self.DeriExprBc = Integer(0)  # Derivative broadcast
         self.Value0 = Value0  # the value of derivative
         self.SpEqnAddr: np.ndarray = np.array([])
         self.SpVarAddr: np.ndarray = np.array([])
@@ -71,6 +83,12 @@ class JacBlock:
 
         self.DiffVarType = DiffVarType
 
+        if not isinstance(self.Value0, np.ndarray):
+            if isinstance(self.Value0, PyNumber):
+                self.Value0 = np.array(self.Value0)
+            else:
+                raise TypeError(f"Derivative value type {type(self.Value0)} not supported!")
+
         if self.Value0.ndim == 2:
             DeriType = 'matrix'
         elif is_vector(self.Value0):
@@ -86,11 +104,13 @@ class JacBlock:
         if DiffVarType == 'scalar':
             match DeriType:
                 case 'scalar':
-                    self.DeriExpr = self.DeriExpr * Ones(EqnSize)
+                    self.DeriExprBc = self.DeriExpr * Ones(EqnSize)
                 case 'vector':
                     if self.Value0.size != EqnSize:
                         raise ValueError(f"Vector derivative size {self.Value0.size} != Equation size {EqnSize}")
+                    self.DeriExprBc = self.DeriExpr
                 case 'matrix':
+                    # self.DeriExprBc = self.DeriExpr
                     raise TypeError("Matrix derivative of scalar variables not supported!")
                 case _:
                     raise TypeError(f"Derivative with value {self.Value0} of scalar variables not supported!")
@@ -100,13 +120,14 @@ class JacBlock:
                     if self.DiffVarValue.size != EqnSize:
                         raise ValueError(f"Vector variable {self.DiffVar} size {self.DiffVarValue.size} != " +
                                          f"Equation size {EqnSize} in scalar derivative case.")
-                    self.DeriExpr = self.DeriExpr * Ones(EqnSize)
+                    self.DeriExprBc = self.DeriExpr * Ones(EqnSize)
                 case 'vector':
                     if self.Value0.size != EqnSize:
                         raise ValueError(f"Vector derivative size {self.Value0.size} != Equation size {EqnSize}")
                     if self.DiffVarValue.size != EqnSize:
                         raise ValueError(f"Vector variable {self.DiffVar} size {self.DiffVarValue.size} != " +
                                          f"Equation size {EqnSize} in vector derivative case.")
+                    self.DeriExprBc = self.DeriExpr
                 case 'matrix':
                     if self.Value0.shape[0] == EqnSize:
                         try:
@@ -114,6 +135,7 @@ class JacBlock:
                         except ValueError:
                             raise ValueError(f"Incompatible matrix derivative size {self.Value0.shape} " +
                                              f"and vector variable size {DiffVarValue.shape}.")
+                    self.DeriExprBc = self.DeriExpr
                 case _:
                     raise TypeError(f"Derivative with value {self.Value0} of vector variables not supported!")
 
@@ -121,6 +143,10 @@ class JacBlock:
         self.ParseSp()
         # parse dense jac blocks, the address and expression
         self.ParseDen()
+
+    @property
+    def IsDeriNumber(self):
+        return is_number(self.DeriExpr)
 
     def ParseSp(self):
         EqnSize = self.EqnAddr.stop - self.EqnAddr.start
@@ -141,7 +167,7 @@ class JacBlock:
                                 raise TypeError(f"Index of vector variable cant be integer!")
                             else:
                                 raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
-                        self.SpDeriExpr = self.DeriExpr
+                        self.SpDeriExpr = self.DeriExprBc
             case 'scalar':
                 match self.DeriType:
                     case 'vector' | 'scalar':
@@ -162,7 +188,7 @@ class JacBlock:
                                 self.SpVarAddr = np.array(EqnSize * [idx]).reshape((-1,)).astype(int)
                             else:
                                 raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
-                        self.SpDeriExpr = self.DeriExpr
+                        self.SpDeriExpr = self.DeriExprBc
         if self.SpEqnAddr.size != self.SpVarAddr.size:
             raise ValueError(f"Incompatible equation size {self.SpEqnAddr.size} of Equation {self.EqnName} " +
                              f"and variable size {self.SpVarAddr.size} of Variable {self.DiffVar}!")
@@ -184,7 +210,7 @@ class JacBlock:
                                 raise TypeError(f"Index of vector variable cant be integer!")
                             else:
                                 raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
-                        self.DenDeriExpr = self.DeriExpr
+                        self.DenDeriExpr = self.DeriExprBc
                     case 'vector' | 'scalar':
                         self.DenEqnAddr = self.EqnAddr
                         if isinstance(self.DiffVar, iVar):
@@ -197,7 +223,7 @@ class JacBlock:
                                 raise TypeError(f"Index of vector variable cant be integer!")
                             else:
                                 raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
-                        self.DenDeriExpr = Diag(self.DeriExpr)
+                        self.DenDeriExpr = Diag(self.DeriExprBc)
             case 'scalar':
                 match self.DeriType:
                     case 'vector' | 'scalar':
@@ -210,13 +236,13 @@ class JacBlock:
                                 if VarArange.size > 1:
                                     raise ValueError(f"Length of scalar variable {self.DiffVar} > 1!")
                                 else:
-                                    self.DenVarAddr = slice(VarArange[0], VarArange[-1]+1)
+                                    self.DenVarAddr = slice(VarArange[0], VarArange[-1] + 1)
                             elif is_integer(self.DiffVar.index):
                                 idx = int(slice2array(self.VarAddr)[self.DiffVar.index])
                                 self.DenVarAddr = slice(idx, idx + 1)
                             else:
                                 raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
-                        self.DenDeriExpr = self.DeriExpr
+                        self.DenDeriExpr = self.DeriExprBc
 
 
 def slice2array(s: slice) -> np.ndarray:

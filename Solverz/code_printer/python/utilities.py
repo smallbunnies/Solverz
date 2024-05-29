@@ -8,22 +8,35 @@ from datetime import datetime
 import numpy as np
 from sympy.codegen.ast import Assignment, AddAugmentedAssignment
 from sympy import pycode, symbols, Function, Symbol, Expr, Number as SymNumber
-from sympy.codegen.ast import real, FunctionPrototype, FunctionDefinition, Return, FunctionCall
+from sympy.codegen.ast import real, FunctionPrototype, FunctionDefinition, Return, FunctionCall as SymFuncCall
 from sympy.utilities.lambdify import _import, _module_present, _get_namespace
 from scipy.sparse import sparray
 from numbers import Number
 
+from Solverz.equation.eqn import Eqn
 from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDAE, DAE as SymDAE, AE as SymAE
 from Solverz.equation.jac import JacBlock, Jac
 from Solverz.equation.param import TimeSeriesParam
 from Solverz.sym_algebra.symbols import iVar, SolDict, Para, idx, IdxSymBasic
 from Solverz.sym_algebra.functions import zeros, Arange
 from Solverz.utilities.address import Address
+from Solverz.utilities.type_checker import is_number
 from Solverz.num_api.custom_function import numerical_interface
 from Solverz.num_api.num_eqn import nAE, nFDAE, nDAE
 
 
 # %%
+
+def FunctionCall(name, args):
+    if not isinstance(args, list):
+        raise TypeError("args should be a list.")
+    for i in range(len(args)):
+        if isinstance(args[i], str):
+            raise ValueError("""
+            The `args` parameter passed to sympy.codegen.ast.FunctionCall should not contain str, which may cause sympy parsing error. 
+            For example, the sympy.codegen.ast.FunctionCall parses str E in args to math.e!
+            """)
+    return SymFuncCall(name, args)
 
 
 def parse_p(ae: SymEquations):
@@ -94,7 +107,7 @@ def print_param(ae: SymEquations, numba_printer=False):
 
 def _print_trigger_func(para_name, trigger_var: List[str]):
     return Assignment(Para(para_name),
-                      FunctionCall(para_name + '_trigger_func', tuple([symbols(var) for var in trigger_var])))
+                      FunctionCall(para_name + '_trigger_func', [symbols(var) for var in trigger_var]))
 
 
 def print_trigger(ae: SymEquations):
@@ -180,6 +193,3 @@ class extend(Function):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
-
-
-

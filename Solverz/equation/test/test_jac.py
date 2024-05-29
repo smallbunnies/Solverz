@@ -5,68 +5,95 @@ from numpy.testing import assert_allclose
 import re
 import pytest
 
+from sympy import Integer
+
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import DAE, AE
 from Solverz.equation.param import Param
 from Solverz.sym_algebra.symbols import iVar, idx, Para
 from Solverz.variable.variables import combine_Vars, as_Vars
-from Solverz.equation.jac import JacBlock, Ones
+from Solverz.equation.jac import JacBlock, Ones, Jac
 from Solverz.sym_algebra.functions import Diag
 
 
-# def test_jac():
-#     x = iVar('x', 1)
-#     y = iVar('y', 1)
-#
-#     f = Ode(name='f', f=-x ** 3 + 0.5 * y ** 2, diff_var=x)
-#     g = Eqn(name='g', eqn=x ** 2 + y ** 2 - 2)
-#     dae = DAE([f, g])
-#
-#     z = combine_Vars(as_Vars(x), as_Vars(y))
-#     fxy = dae.fy(None, z)
-#     gxy = dae.gy(None, z)
-#     assert fxy[0][3].shape == (1,)
-#     assert np.all(np.isclose(fxy[0][3], [-3.]))
-#     assert fxy[1][3].shape == (1,)
-#     assert np.all(np.isclose(fxy[1][3], [1]))
-#     assert gxy[0][3].shape == (1,)
-#     assert np.all(np.isclose(gxy[0][3], [2]))
-#     assert gxy[1][3].shape == (1,)
-#     assert np.all(np.isclose(gxy[1][3], [2]))
-#
-#     x = iVar('x', [1, 2, 3])
-#     i = idx('i', value=[0, 2])
-#
-#     f = Eqn('f', eqn=x)
-#     ae = AE(f)
-#     gy = ae.gy(as_Vars(x))
-#     assert isinstance(gy[0][3], Number)
-#     # assert gy[0][3].ndim == 0
-#     assert np.all(np.isclose(gy[0][3], 1))
-#
-#     f = Eqn('f', eqn=x[i])
-#     ae = AE(f)
-#     gy = ae.gy(as_Vars(x))
-#     assert isinstance(gy[0][3], Number)
-#     # assert gy[0][3].ndim == 0
-#     assert np.all(np.isclose(gy[0][3], 1))
-#
-#     f = Eqn('f', eqn=x[i] ** 2)
-#     ae = AE(f)
-#     gy = ae.gy(as_Vars(x))
-#     assert isinstance(gy[0][3], np.ndarray)
-#     assert gy[0][3].ndim == 1
-#     assert np.all(np.isclose(gy[0][3], [2., 6.]))
-#
-#     A_v = np.random.rand(3, 3)
-#     A = Para('A', dim=2)
-#     f = Eqn('f', eqn=A * x)
-#     ae = AE(f)
-#     ae.param_initializer('A', Param('A', value=A_v, dim=2))
-#     gy = ae.gy(as_Vars(x))
-#     assert isinstance(gy[0][3], np.ndarray)
-#     assert gy[0][3].ndim == 2
-#     np.testing.assert_allclose(gy[0][3], A_v)
+def test_jac():
+    #     x = iVar('x', 1)
+    #     y = iVar('y', 1)
+    #
+    #     f = Ode(name='f', f=-x ** 3 + 0.5 * y ** 2, diff_var=x)
+    #     g = Eqn(name='g', eqn=x ** 2 + y ** 2 - 2)
+    #     dae = DAE([f, g])
+    #
+    #     z = combine_Vars(as_Vars(x), as_Vars(y))
+    #     fxy = dae.fy(None, z)
+    #     gxy = dae.gy(None, z)
+    #     assert fxy[0][3].shape == (1,)
+    #     assert np.all(np.isclose(fxy[0][3], [-3.]))
+    #     assert fxy[1][3].shape == (1,)
+    #     assert np.all(np.isclose(fxy[1][3], [1]))
+    #     assert gxy[0][3].shape == (1,)
+    #     assert np.all(np.isclose(gxy[0][3], [2]))
+    #     assert gxy[1][3].shape == (1,)
+    #     assert np.all(np.isclose(gxy[1][3], [2]))
+    #
+    #     x = iVar('x', [1, 2, 3])
+    #     i = idx('i', value=[0, 2])
+    #
+    #     f = Eqn('f', eqn=x)
+    #     ae = AE(f)
+    #     gy = ae.gy(as_Vars(x))
+    #     assert isinstance(gy[0][3], Number)
+    #     # assert gy[0][3].ndim == 0
+    #     assert np.all(np.isclose(gy[0][3], 1))
+    #
+    #     f = Eqn('f', eqn=x[i])
+    #     ae = AE(f)
+    #     gy = ae.gy(as_Vars(x))
+    #     assert isinstance(gy[0][3], Number)
+    #     # assert gy[0][3].ndim == 0
+    #     assert np.all(np.isclose(gy[0][3], 1))
+    #
+    #     f = Eqn('f', eqn=x[i] ** 2)
+    #     ae = AE(f)
+    #     gy = ae.gy(as_Vars(x))
+    #     assert isinstance(gy[0][3], np.ndarray)
+    #     assert gy[0][3].ndim == 1
+    #     assert np.all(np.isclose(gy[0][3], [2., 6.]))
+    #
+    #     A_v = np.random.rand(3, 3)
+    #     A = Para('A', dim=2)
+    #     f = Eqn('f', eqn=A * x)
+    #     ae = AE(f)
+    #     ae.param_initializer('A', Param('A', value=A_v, dim=2))
+    #     gy = ae.gy(as_Vars(x))
+    #     assert isinstance(gy[0][3], np.ndarray)
+    #     assert gy[0][3].ndim == 2
+    #     np.testing.assert_allclose(gy[0][3], A_v)
+
+    # test jac element number counter
+    jac = Jac()
+    x = iVar('x')
+    y = iVar('y')
+    omega = iVar('omega')
+    jac.add_block('a',
+                  x[0],
+                  JacBlock('a',
+                           slice(0, 3),
+                           x[0],
+                           np.array([1]),
+                           slice(1, 2),
+                           iVar('y'),
+                           np.array([1])))
+    jac.add_block('b',
+                  omega[1:4],
+                  JacBlock('b',
+                           slice(3, 12),
+                           omega[4:13],
+                           np.ones(9),
+                           slice(3, 100),
+                           iVar('y') ** 2,
+                           np.ones(9)))
+    assert jac.JacEleNum == 12
 
 
 #%% scalar var and scalar derivative
@@ -87,6 +114,7 @@ def test_jb_scalar_var_scalar_deri():
     assert_allclose(jb.SpVarAddr, np.array([1, 1, 1]))
     assert jb.SpDeriExpr == iVar('y') * Ones(3)
     assert jb.SpEleSize == 3
+    assert jb.IsDeriNumber is False
 
     # indexed var
     jb = JacBlock('a',
@@ -104,6 +132,7 @@ def test_jb_scalar_var_scalar_deri():
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
     assert jb.SpDeriExpr == iVar('y') * Ones(3)
     assert jb.SpEleSize == 3
+    assert jb.IsDeriNumber is False
 
     # sliced var
     jb = JacBlock('a',
@@ -121,6 +150,7 @@ def test_jb_scalar_var_scalar_deri():
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
     assert jb.SpDeriExpr == iVar('y') * Ones(3)
     assert jb.SpEleSize == 3
+    assert jb.IsDeriNumber is False
 
 
 # %% scalar var and vector derivative
@@ -141,6 +171,7 @@ def test_jb_scalar_var_vector_deri():
     assert_allclose(jb.SpVarAddr, np.array([1, 1, 1]))
     assert jb.SpDeriExpr == iVar('y')
     assert jb.SpEleSize == 3
+    assert jb.IsDeriNumber is False
 
     # indexed var
     jb = JacBlock('a',
@@ -158,6 +189,7 @@ def test_jb_scalar_var_vector_deri():
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
     assert jb.SpDeriExpr == iVar('y')
     assert jb.SpEleSize == 3
+    assert jb.IsDeriNumber is False
 
     # sliced var
     jb = JacBlock('a',
@@ -175,6 +207,7 @@ def test_jb_scalar_var_vector_deri():
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
     assert jb.SpDeriExpr == iVar('y')
     assert jb.SpEleSize == 3
+    assert jb.IsDeriNumber is False
 
     # Derivative size not compatible with equation size
     with pytest.raises(ValueError, match="Vector derivative size 2 != Equation size 3"):
@@ -205,6 +238,59 @@ def test_jb_vector_var_scalar_deri():
     assert_allclose(jb.SpVarAddr, np.arange(1, 10))
     assert jb.SpDeriExpr == iVar('y') * Ones(9)
     assert jb.SpEleSize == 9
+    assert jb.IsDeriNumber is False
+
+    # number as derivative
+    jb = JacBlock('a',
+                  slice(1, 10),
+                  iVar('x'),
+                  np.ones(9),
+                  slice(1, 10),
+                  Integer(2),
+                  2)
+
+    assert jb.DenEqnAddr == slice(1, 10)
+    assert jb.DenVarAddr == slice(1, 10)
+    assert jb.DenDeriExpr == Diag(2 * Ones(9))
+    assert_allclose(jb.SpEqnAddr, np.arange(1, 10))
+    assert_allclose(jb.SpVarAddr, np.arange(1, 10))
+    assert jb.SpDeriExpr == 2 * Ones(9)
+    assert jb.SpEleSize == 9
+    assert jb.IsDeriNumber is True
+
+    jb = JacBlock('a',
+                  slice(1, 10),
+                  iVar('x'),
+                  np.ones(9),
+                  slice(1, 10),
+                  Integer(2),
+                  np.array([2]))
+
+    assert jb.DenEqnAddr == slice(1, 10)
+    assert jb.DenVarAddr == slice(1, 10)
+    assert jb.DenDeriExpr == Diag(2 * Ones(9))
+    assert_allclose(jb.SpEqnAddr, np.arange(1, 10))
+    assert_allclose(jb.SpVarAddr, np.arange(1, 10))
+    assert jb.SpDeriExpr == 2 * Ones(9)
+    assert jb.SpEleSize == 9
+    assert jb.IsDeriNumber is True
+
+    jb = JacBlock('a',
+                  slice(1, 10),
+                  iVar('x'),
+                  np.ones(9),
+                  slice(1, 10),
+                  Integer(2),
+                  np.array(2))
+
+    assert jb.DenEqnAddr == slice(1, 10)
+    assert jb.DenVarAddr == slice(1, 10)
+    assert jb.DenDeriExpr == Diag(2 * Ones(9))
+    assert_allclose(jb.SpEqnAddr, np.arange(1, 10))
+    assert_allclose(jb.SpVarAddr, np.arange(1, 10))
+    assert jb.SpDeriExpr == 2 * Ones(9)
+    assert jb.SpEleSize == 9
+    assert jb.IsDeriNumber is True
 
     # indexed var
     with pytest.raises(TypeError,
@@ -232,6 +318,7 @@ def test_jb_vector_var_scalar_deri():
     assert_allclose(jb.SpVarAddr, np.array([11, 12, 13]))
     assert jb.SpDeriExpr == iVar('y')[0] * Ones(3)
     assert jb.SpEleSize == 3
+    assert jb.IsDeriNumber is False
 
     # sliced var with incompatible eqn and var size
     with pytest.raises(ValueError,
@@ -262,6 +349,7 @@ def test_jb_vector_var_vector_deri():
     assert_allclose(jb.SpVarAddr, np.arange(1, 10))
     assert jb.SpDeriExpr == iVar('y')
     assert jb.SpEleSize == 9
+    assert jb.IsDeriNumber is False
 
     # incompatible eqn and var size
     with pytest.raises(ValueError,

@@ -8,33 +8,33 @@ from typing import Dict
 from Solverz.equation.equations import AE as SymAE, FDAE as SymFDAE, DAE as SymDAE
 from Solverz.utilities.io import save
 from Solverz.code_printer.python.utilities import parse_p, parse_trigger_fun
-from Solverz.code_printer.python.module.module_printer import print_F_numba, print_inner_F, print_sub_inner_F, \
-    print_J_numba, print_inner_J
+from Solverz.code_printer.python.module.module_printer import print_F, print_inner_F, print_sub_inner_F, \
+    print_J, print_inner_J, parse_row_col_data
 from Solverz.equation.equations import Equations as SymEquations
 from Solverz.num_api.custom_function import numerical_interface
 from Solverz.variable.variables import Vars, combine_Vars
 
 
-def render_modules(eqn: SymEquations, *xys, name, directory=None, numba=False):
+def render_modules(eqs: SymEquations, *xys, name, directory=None, numba=False):
     """
     factory method of numerical equations
     """
-    print(f"Printing python codes of {eqn.name}...")
-    eqn.assign_eqn_var_address(*xys)
-    p = parse_p(eqn)
-    code_F = print_F_numba(eqn)
-    code_inner_F = print_inner_F(eqn)
-    code_sub_inner_F = print_sub_inner_F(eqn)
-    code_J = print_J_numba(eqn)
-    codes = print_inner_J(eqn, *xys)
-    code_inner_J = codes['code_inner_J']
-    code_sub_inner_J = codes['code_sub_inner_J']
+    print(f"Printing python codes of {eqs.name}...")
+    eqs.FormJac(*xys)
+    p = parse_p(eqs)
+    code_F = print_F(eqs)
+    code_inner_F = print_inner_F(eqs)
+    code_sub_inner_F = print_sub_inner_F(eqs)
+    code_J = print_J(eqs)
+    inner_J = print_inner_J(eqs)
+    code_inner_J = inner_J['code_inner_J']
+    code_sub_inner_J = inner_J['code_sub_inner_J']
     custom_func = dict()
     custom_func.update(numerical_interface)
 
     def print_trigger_func_code():
         code_tfuc = dict()
-        trigger_func = parse_trigger_fun(eqn)
+        trigger_func = parse_trigger_fun(eqs)
         # rename trigger_func
         for func_name, func in trigger_func.items():
             name0 = func.__name__
@@ -48,16 +48,16 @@ def render_modules(eqn: SymEquations, *xys, name, directory=None, numba=False):
     print('Complete!')
 
     eqn_parameter = {}
-    if isinstance(eqn, SymAE) and not isinstance(eqn, SymFDAE):
+    if isinstance(eqs, SymAE) and not isinstance(eqs, SymFDAE):
         eqn_type = 'AE'
-    elif isinstance(eqn, SymFDAE):
+    elif isinstance(eqs, SymFDAE):
         eqn_type = 'FDAE'
-        eqn_parameter.update({'nstep': eqn.nstep})
-    elif isinstance(eqn, SymDAE):
+        eqn_parameter.update({'nstep': eqs.nstep})
+    elif isinstance(eqs, SymDAE):
         eqn_type = 'DAE'
-        eqn_parameter.update({'M': eqn.M})
+        eqn_parameter.update({'M': eqs.M})
     else:
-        raise ValueError(f'Unknown equation type {type(eqn)}')
+        raise ValueError(f'Unknown equation type {type(eqs)}')
 
     if len(xys) == 1:
         y = xys[0]
@@ -73,7 +73,8 @@ def render_modules(eqn: SymEquations, *xys, name, directory=None, numba=False):
                  'inner_J': code_inner_J,
                  'sub_inner_J': code_sub_inner_J,
                  'tfunc_dict': code_tfunc_dict}
-    eqn_parameter.update({'row': codes['row'], 'col': codes['col'], 'data': codes['data']})
+    row, col, data = parse_row_col_data(eqs.jac)
+    eqn_parameter.update({'row': row, 'col': col, 'data': data})
     print(f"Rendering python modules!")
     render_as_modules(name,
                       code_dict,

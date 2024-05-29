@@ -13,7 +13,7 @@ from Solverz.code_printer.python.utilities import _print_var_parser
 from Solverz.sym_algebra.symbols import idx, iVar, Para
 
 
-def test_py_printer():
+def test_module_printer():
     x = iVar('x', [1, 1])
     f1 = Eqn('f1', 2 * x[0] + x[1])
     f2 = Eqn('f2', x[0] ** 2 + sin(x[1]))
@@ -75,16 +75,6 @@ def test_py_printer():
 
     shutil.rmtree(test_folder_path)
 
+test_module_printer()
 
-def test_made_numerical():
-    x = iVar('x', [1, 1])
-    f1 = Eqn('f1', 2 * x[0] + x[1])
-    f2 = Eqn('f2', x[0] ** 2 + sin(x[1]))
 
-    F = AE([f1, f2])
-    y = as_Vars([x])
-    nF, code = made_numerical(F, y, sparse=True, output_code=True)
-    F0 = nF.F(y, nF.p)
-    J0 = nF.J(y, nF.p)
-    np.testing.assert_allclose(F0, np.array([2 * 1 + 1, 1 + np.sin(1)]), rtol=1e-8)
-    np.testing.assert_allclose(J0.toarray(), np.array([[2, 1], [2, 0.54030231]]), rtol=1e-8)

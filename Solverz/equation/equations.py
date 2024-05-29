@@ -90,7 +90,9 @@ class Equations:
             args = self.obtain_eqn_args(DiffVarEqn, y, 0)
             DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
 
+            # The value of deri can be either matrix, vector, or scalar(number). We cannot reshape it.
             Value0 = np.array(fy[3])
+
             jb = JacBlock(EqnName,
                           EqnAddr,
                           DiffVar,
