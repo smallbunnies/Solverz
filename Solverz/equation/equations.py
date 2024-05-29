@@ -40,7 +40,7 @@ class Equations:
         self.PARAM: Dict[str, ParamBase] = dict()
         self.triggerable_quantity: Dict[str, str] = dict()
         self.jac_element_address = Address()
-        self.jac = None
+        self.jac: Jac = Jac()
 
         if isinstance(eqn, Eqn):
             eqn = [eqn]
@@ -78,7 +78,6 @@ class Equations:
         self.assign_eqn_var_address(y)
 
         Fy_list = self.Fy(y)
-        self.jac = Jac()
         for fy in Fy_list:
             EqnName = fy[0]
             EqnAddr = self.a[EqnName]
@@ -87,8 +86,8 @@ class Equations:
             DiffVar = fy[2].diff_var
             DeriExpr = fy[2].RHS
 
-            DiffVarEqn = Eqn('DiffVarEqn'+DiffVar.name, DiffVar)
-            args = self.obtain_eqn_args(DiffVarEqn, 0, y)
+            DiffVarEqn = Eqn('DiffVarEqn' + DiffVar.name, DiffVar)
+            args = self.obtain_eqn_args(DiffVarEqn, y, 0)
             DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
 
             Value0 = np.array(fy[3])
@@ -177,11 +176,29 @@ class Equations:
                     raise TypeError(
                         f"The return types of trigger func for param {para_name} must be {type(self.PARAM[para_name].v)}")
 
-    def obtain_eqn_args(self, *args) -> List[np.ndarray]:
+    def obtain_eqn_args(self, eqn: Eqn, y: Vars, t=0) -> List[np.ndarray]:
         """
         Obtain the args of equations
         """
-        pass
+
+        self.trigger_param_updater(y)
+
+        args = []
+        for symbol in eqn.SYMBOLS.values():
+            value_obtained = False
+            if symbol.name in self.PARAM:
+                temp = self.PARAM[symbol.name].get_v_t(t)
+                if temp is None:
+                    raise TypeError(f'Parameter {symbol.name} uninitialized')
+                args.append(temp)
+                value_obtained = True
+            else:
+                if symbol.name in y.var_list:
+                    args.append(y[symbol.name])
+                    value_obtained = True
+            if not value_obtained:
+                raise ValueError(f'Cannot find the values of variable {symbol.name}')
+        return args
 
     def eval_diffs(self, eqn_name: str, var_name: str, *args: np.ndarray) -> np.ndarray:
         """
@@ -192,30 +209,6 @@ class Equations:
         :return:
         """
         return self.EQNs[eqn_name].derivatives[var_name].NUM_EQN(*args)
-
-    # def parse_address(self, eqn_name, var_name, eqndiff, t, y):
-    #     var_idx = eqndiff.var_idx
-    #     var_idx_func = eqndiff.var_idx_func
-    #
-    #     equation_address = self.a.v[eqn_name]
-    #     if var_idx is None:
-    #         variable_address = self.var_address.v[var_name]
-    #     elif isinstance(var_idx, (float, int)):
-    #         variable_address = self.var_address.v[var_name][var_idx: var_idx + 1]
-    #     elif isinstance(var_idx, str):
-    #         variable_address = self.var_address.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
-    #     elif isinstance(var_idx, slice):
-    #         variable_address = self.var_address.v[var_name][
-    #             var_idx_func.NUM_EQN(*self.obtain_eqn_args(var_idx_func, t, y))]
-    #     elif isinstance(var_idx, Expr):
-    #         args = self.obtain_eqn_args(var_idx_func, y)
-    #         variable_address = self.var_address.v[var_name][var_idx_func.NUM_EQN(*args).reshape(-1, )]
-    #     elif isinstance(var_idx, list):
-    #         variable_address = self.var_address.v[var_name][var_idx]
-    #     else:
-    #         raise TypeError(f"Unsupported variable index {var_idx} for equation {eqn_name}")
-    #
-    #     return equation_address, variable_address
 
     def evalf(self, *args) -> np.ndarray:
         pass
@@ -251,35 +244,6 @@ class AE(Equations):
             self.esize[eqn_name] = eqn_size
         self.var_address = y.a
         self.vsize = y.total_size
-
-        # assign dim of derivatives, which is indispensable in Jac printer
-        gy = self.gy(y)
-        for gy_tuple in gy:
-            eqn_name = gy_tuple[0]
-            var_name = gy_tuple[1]
-            eqndiff = gy_tuple[2]
-            value = gy_tuple[3]
-            if isinstance(value, (np.ndarray, csc_array)):
-                # We use coo_array here because by default when converting to CSR or CSC format,
-                # duplicate (i,j) entries will be summed together.
-                # This facilitates efficient construction of finite element matrices and the like.
-                if value.ndim == 2:  # matrix
-                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 2
-
-                elif value.ndim == 1 and value.shape[0] != 1:  # vector
-                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 1
-                    # self.jac_element_address.add((eqn_name, var_name, eqndiff), value.shape[0])
-                elif value.ndim == 1 and value.shape[0] == 1:  # scalar in np.ndarray for example array([0.0])
-                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
-                    # self.jac_element_address.add((eqn_name, var_name, eqndiff), self.a.size[eqn_name])
-                else:
-                    raise ValueError("Unknown derivative value dimension type!")
-                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].v_type = 'array'
-            elif isinstance(value, (Number, SymNumber)):
-                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
-                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].v_type = 'Number'
-            else:
-                raise ValueError(f"Unknown derivative data type {type(value)}!")
 
     def g(self, y: Vars, eqn: str = None) -> np.ndarray:
         """
@@ -327,30 +291,6 @@ class AE(Equations):
 
     def Fy(self, y):
         return self.gy(y)
-
-    def obtain_eqn_args(self, eqn: Eqn, y: Vars) -> List[np.ndarray]:
-        """
-        Obtain the args of equations
-        """
-
-        self.trigger_param_updater(y)
-
-        args = []
-        for symbol in eqn.SYMBOLS.values():
-            value_obtained = False
-            if symbol.name in self.PARAM:
-                temp = self.PARAM[symbol.name].get_v_t(0)
-                if temp is None:
-                    raise TypeError(f'Parameter {symbol.name} uninitialized')
-                args.append(temp)
-                value_obtained = True
-            else:
-                if symbol.name in y.var_list:
-                    args.append(y[symbol.name])
-                    value_obtained = True
-            if not value_obtained:
-                raise ValueError(f'Cannot find the values of variable {symbol.name}')
-        return args
 
     def evalf(self, expr: Expr, y: Vars) -> np.ndarray:
         eqn = Eqn('Solverz evalf temporal equation', expr)
@@ -400,33 +340,9 @@ class DAE(Equations):
         if len(self.f_list) == 0:
             raise ValueError(f'No ODE found. You should initialise AE instead!')
 
-    def obtain_eqn_args(self, eqn: Eqn, t, y: Vars) -> List[np.ndarray]:
-        """
-        Obtain the args of equations
-        """
-
-        self.trigger_param_updater(y)
-
-        args = []
-        for symbol in eqn.SYMBOLS.values():
-            value_obtained = False
-            if symbol.name in self.PARAM:
-                temp = self.PARAM[symbol.name].get_v_t(t)
-                if temp is None:
-                    raise TypeError(f'Parameter {symbol.name} uninitialized')
-                args.append(temp)
-                value_obtained = True
-            else:
-                if symbol.name in y.var_list:
-                    args.append(y[symbol.name])
-                    value_obtained = True
-            if not value_obtained:
-                raise ValueError(f'Cannot find the values of variable {symbol.name}')
-        return args
-
     def evalf(self, expr: Expr, t, y: Vars) -> np.ndarray:
         eqn = Eqn('Solverz evalf temporary equation', expr)
-        args = self.obtain_eqn_args(eqn, t, y)
+        args = self.obtain_eqn_args(eqn, y, t)
         return eqn.NUM_EQN(*args)
 
     def assign_eqn_var_address(self, y: Vars):
@@ -471,37 +387,6 @@ class DAE(Equations):
         self.var_address = y.a
         self.vsize = self.var_address.total_size
 
-        # assign dim of derivatives, which is indispensable in Jac printer
-        fg_xy = self.fy(0, y)
-        if len(self.g_list) > 0:
-            fg_xy.extend(self.gy(0, y))
-        for gy_tuple in fg_xy:
-            eqn_name = gy_tuple[0]
-            var_name = gy_tuple[1]
-            eqndiff = gy_tuple[2]
-            value = gy_tuple[3]
-            if isinstance(value, (np.ndarray, csc_array)):
-                # We use coo_array here because by default when converting to CSR or CSC format,
-                # duplicate (i,j) entries will be summed together.
-                # This facilitates efficient construction of finite element matrices and the like.
-                if value.ndim == 2:  # matrix
-                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 2
-
-                elif value.ndim == 1 and value.shape[0] != 1:  # vector
-                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 1
-                    # self.jac_element_address.add((eqn_name, var_name, eqndiff), value.shape[0])
-                elif value.ndim == 1 and value.shape[0] == 1:  # scalar in np.ndarray for example array([0.0])
-                    self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
-                    # self.jac_element_address.add((eqn_name, var_name, eqndiff), self.a.size[eqn_name])
-                else:
-                    raise ValueError("Unknown derivative value dimension type!")
-                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].v_type = 'array'
-            elif isinstance(value, (Number, SymNumber)):
-                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].dim = 0
-                self.EQNs[eqn_name].derivatives[eqndiff.diff_var.name].v_type = 'Number'
-            else:
-                raise ValueError(f"Unknown derivative data type {type(value)}!")
-
     def F(self, t, y) -> np.ndarray:
         """
         Return [f(t,x,y), g(t,x,y)]
@@ -519,11 +404,11 @@ class DAE(Equations):
         temp = []
         if eqn:
             if eqn in self.f_list:
-                args = self.obtain_eqn_args(self.EQNs[eqn], t, y)
+                args = self.obtain_eqn_args(self.EQNs[eqn], y, t)
                 temp.append(self.eval(eqn, *args).reshape(-1, ))
         else:
             for eqn in self.f_list:
-                args = self.obtain_eqn_args(self.EQNs[eqn], t, y)
+                args = self.obtain_eqn_args(self.EQNs[eqn], y, t)
                 temp.append(self.eval(eqn, *args).reshape(-1, ))
 
         return np.hstack(temp)
@@ -533,14 +418,22 @@ class DAE(Equations):
         temp = []
         if eqn:
             if eqn in self.f_list:
-                lhs_eqn = Eqn('lhs_' + eqn, self.EQNs[eqn].diff_var)
-                args = self.obtain_eqn_args(lhs_eqn, t, y)
-                temp.append(Array(lhs_eqn.NUM_EQN(*args), dim=1))
+                ode = self.EQNs[eqn]
+                if isinstance(ode, Ode):
+                    lhs_eqn = Eqn('lhs_' + eqn, ode.diff_var)
+                    args = self.obtain_eqn_args(lhs_eqn, y, t)
+                    temp.append(Array(lhs_eqn.NUM_EQN(*args), dim=1))
+                else:
+                    raise TypeError(f"Equation {ode.name} in f_list is not Ode!")
         else:
             for eqn in self.f_list:
-                lhs_eqn = Eqn('lhs_' + eqn, self.EQNs[eqn].diff_var)
-                args = self.obtain_eqn_args(lhs_eqn, t, y)
-                temp.append(Array(lhs_eqn.NUM_EQN(*args), dim=1))
+                ode = self.EQNs[eqn]
+                if isinstance(ode, Ode):
+                    lhs_eqn = Eqn('lhs_' + eqn, ode.diff_var)
+                    args = self.obtain_eqn_args(lhs_eqn, y, t)
+                    temp.append(Array(lhs_eqn.NUM_EQN(*args), dim=1))
+                else:
+                    raise TypeError(f"Equation {ode.name} in f_list is not Ode!")
 
         return np.hstack(temp)
 
@@ -559,11 +452,11 @@ class DAE(Equations):
         temp = []
         if eqn:
             if eqn in self.g_list:
-                args = self.obtain_eqn_args(self.EQNs[eqn], t, y)
+                args = self.obtain_eqn_args(self.EQNs[eqn], y, t)
                 temp.append(self.eval(eqn, *args).reshape(-1, ))
         else:
             for eqn in self.g_list:
-                args = self.obtain_eqn_args(self.EQNs[eqn], t, y)
+                args = self.obtain_eqn_args(self.EQNs[eqn], y, t)
                 temp.append(self.eval(eqn, *args).reshape(-1, ))
 
         return np.hstack(temp)
@@ -582,7 +475,7 @@ class DAE(Equations):
             for var_name in var:
                 for key, value in eqn_diffs.items():
                     if var_name == value.diff_var_name:
-                        args = self.obtain_eqn_args(eqn_diffs[key], t, y)
+                        args = self.obtain_eqn_args(eqn_diffs[key], y, t)
                         temp = self.eval_diffs(eqn_name, key, *args)
                         fy = [*fy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return fy
@@ -604,7 +497,7 @@ class DAE(Equations):
             for var_name in var:
                 for key, value in eqn_diffs.items():
                     if var_name == value.diff_var_name:
-                        args = self.obtain_eqn_args(eqn_diffs[key], t, y)
+                        args = self.obtain_eqn_args(eqn_diffs[key], y, t)
                         temp = self.eval_diffs(eqn_name, key, *args)
                         gy = [*gy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gy

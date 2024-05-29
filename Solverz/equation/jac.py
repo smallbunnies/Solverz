@@ -14,16 +14,17 @@ SolVar = Union[iVar, IdxVar]
 class Jac:
 
     def __init__(self):
-        self.jac: Dict[str, Dict[SolVar, JacBlock]] = dict()
+        self.blocks: Dict[str, Dict[SolVar, JacBlock]] = dict()
 
     def add_block(self,
                   eqn_name: str,
                   diff_var: SolVar,
                   jb: JacBlock):
-        if eqn_name in self.jac:
-            self.jac[eqn_name][diff_var] = jb
+        if eqn_name in self.blocks:
+            self.blocks[eqn_name][diff_var] = jb
         else:
-            self.jac[eqn_name] = dict()
+            self.blocks[eqn_name] = dict()
+            self.blocks[eqn_name][diff_var] = jb
 
 
 class JacBlock:

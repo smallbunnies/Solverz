@@ -14,6 +14,7 @@ from scipy.sparse import sparray
 from numbers import Number
 
 from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDAE, DAE as SymDAE, AE as SymAE
+from Solverz.equation.jac import JacBlock, Jac
 from Solverz.equation.param import TimeSeriesParam
 from Solverz.sym_algebra.symbols import iVar, SolDict, Para, idx, IdxSymBasic
 from Solverz.sym_algebra.functions import zeros, Arange
