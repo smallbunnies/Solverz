@@ -15,12 +15,12 @@ from Solverz.num_api.custom_function import numerical_interface
 from Solverz.variable.variables import Vars, combine_Vars
 
 
-def render_modules(eqs: SymEquations, *xys, name, directory=None, numba=False):
+def render_modules(eqs: SymEquations, y, name, directory=None, numba=False):
     """
     factory method of numerical equations
     """
     print(f"Printing python codes of {eqs.name}...")
-    eqs.FormJac(*xys)
+    eqs.FormJac(y)
     p = parse_p(eqs.PARAM)
     code_F = print_F(eqs.__class__.__name__,
                      eqs.var_address,
@@ -72,13 +72,6 @@ def render_modules(eqs: SymEquations, *xys, name, directory=None, numba=False):
         eqn_parameter.update({'M': eqs.M})
     else:
         raise ValueError(f'Unknown equation type {type(eqs)}')
-
-    if len(xys) == 1:
-        y = xys[0]
-    else:
-        y = xys[0]
-        for arg in xys[1:]:
-            y = combine_Vars(y, arg)
 
     code_dict = {'F': code_F,
                  'inner_F': code_inner_F,
@@ -133,26 +126,26 @@ def create_python_module(module_name, initiate_code, module_code, dependency_cod
 
 def print_init_code(eqn_type: str, module_name, eqn_param):
     code = 'from .num_func import F_, J_\n'
-    code += 'from .dependency import setting, p, y\n'
+    code += 'from .dependency import setting, p_, y\n'
     code += 'import time\n'
     match eqn_type:
         case 'AE':
             code += 'from Solverz.num_api.num_eqn import nAE\n'
-            code += 'mdl = nAE(F_, J_, p)\n'
-            code_compile = 'mdl.F(y.array, p)\nmdl.J(y.array, p)\n'
+            code += 'mdl = nAE(F_, J_, p_)\n'
+            code_compile = 'mdl.F(y, p_)\nmdl.J(y, p_)\n'
         case 'FDAE':
             try:
                 nstep = eqn_param['nstep']
             except KeyError as e:
                 raise ValueError("Cannot parse nstep attribute for FDAE object printing!")
             code += 'from Solverz.num_api.num_eqn import nFDAE\n'
-            code += 'mdl = nFDAE(F_, J_, p, setting["nstep"])\n'
-            args_str = ', '.join(['y.array' for i in range(nstep)])
-            code_compile = f'mdl.F(0, y.array, p, {args_str})\nmdl.J(0, y.array, p, {args_str})\n'
+            code += 'mdl = nFDAE(F_, J_, p_, setting["nstep"])\n'
+            args_str = ', '.join(['y' for i in range(nstep)])
+            code_compile = f'mdl.F(0, y, p_, {args_str})\nmdl.J(0, y, p_, {args_str})\n'
         case 'DAE':
             code += 'from Solverz.num_api.num_eqn import nDAE\n'
-            code += 'mdl = nDAE(setting["M"], F_, J_, p)\n'
-            code_compile = 'mdl.F(0, y.array, p)\nmdl.J(0, y.array, p)\n'
+            code += 'mdl = nDAE(setting["M"], F_, J_, p_)\n'
+            code_compile = 'mdl.F(0, y, p_)\nmdl.J(0, y, p_)\n'
         case _:
             raise ValueError(f'Unknown equation type {eqn_type}')
     code += f'print("Compiling model {module_name}...")\n'
@@ -213,8 +206,7 @@ def print_dependency_code(modules):
     code += 'setting = auxiliary["eqn_param"]\n'
     code += 'row = setting["row"]\n'
     code += 'col = setting["col"]\n'
-    code += 'data_ = setting["data"]\n'
-    code += 'p = auxiliary["p"]\n'
+    code += 'p_ = auxiliary["p"]\n'
     code += 'y = auxiliary["vars"]\n'
     return code
 

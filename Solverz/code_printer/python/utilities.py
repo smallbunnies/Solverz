@@ -85,12 +85,15 @@ def print_param(PARAM: Dict[str, ParamBase]):
     p = SolDict('p_')
     param_list = []
     for param_name, param in PARAM.items():
-        if isinstance(param, TimeSeriesParam):
-            param_assign = Assignment(Para(param_name), FunctionCall(f'p_["{param_name}"].get_v_t', [Symbol('t')]))
-        else:
-            param_assign = Assignment(Para(param_name), p[param_name])
-        param_declaration.append(param_assign)
-        param_list.append(param_assign.lhs)
+        if not param.is_alias:
+            if isinstance(param, TimeSeriesParam):
+                param_assign = Assignment(Para(param_name),
+                                          FunctionCall(f'p_["{param_name}"].get_v_t', [Symbol('t')]))
+            else:
+                param_assign = Assignment(Para(param_name),
+                                          p[param_name])
+            param_declaration.append(param_assign)
+            param_list.append(param_assign.lhs)
 
     return param_declaration, param_list
 

@@ -17,7 +17,8 @@ class ParamBase:
                  trigger_fun: Callable = None,
                  dim: int = 1,
                  dtype=float,
-                 sparse=False):
+                 sparse=False,
+                 is_alias=False):
         self.name = name
         self.triggerable = triggerable
         self.trigger_var = [trigger_var] if isinstance(trigger_var, str) else trigger_var
@@ -27,6 +28,7 @@ class ParamBase:
         self.sparse = sparse
         self.__v = None
         self.v = value
+        self.is_alias = is_alias  # if the Param is an alias var
 
     @property
     def v(self):
@@ -57,7 +59,8 @@ class Param(ParamBase, sSymBasic):
                  trigger_fun: Callable = None,
                  dim: int = 1,
                  dtype=float,
-                 sparse=False
+                 sparse=False,
+                 is_alias=False
                  ):
         ParamBase.__init__(self,
                            name,
@@ -67,7 +70,8 @@ class Param(ParamBase, sSymBasic):
                            trigger_fun,
                            dim,
                            dtype,
-                           sparse)
+                           sparse,
+                           is_alias)
         sSymBasic.__init__(self, name=name, Type='Para', value=value, dim=dim)
 
 

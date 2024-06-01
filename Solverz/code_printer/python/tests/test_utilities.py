@@ -101,6 +101,10 @@ def test_print_param():
                          [0, 1, 2, 3],
                          [0, 100, 200, 300])
     Pdict["G6"] = G6
+    Area = Param('Area',
+                 [1, 1, 1],
+                 is_alias=True)
+    Pdict["Area"] = Area
     param_declaration, param_list = print_param(Pdict)
     assert pycode(param_declaration[0]) == 'lam = p_["lam"]'
     assert pycode(param_declaration[1]) == 'G6 = p_["G6"].get_v_t(t)'

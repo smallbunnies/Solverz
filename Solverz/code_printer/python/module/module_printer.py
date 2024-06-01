@@ -14,7 +14,8 @@ def print_J(eqs_type: str,
     if eqn_size != var_addr.total_size:
         raise ValueError(f"Jac matrix, with size ({eqn_size}*{var_addr.total_size}), not square")
     fp = print_F_J_prototype(eqs_type,
-                             'J_')
+                             'J_',
+                             nstep)
     body = []
     var_assignments, var_list = print_var(var_addr,
                                           nstep)
@@ -77,7 +78,8 @@ def print_F(eqs_type: str,
             PARAM: Dict[str, ParamBase],
             nstep: int = 0):
     fp = print_F_J_prototype(eqs_type,
-                             'F_')
+                             'F_',
+                             nstep)
     body = []
     var_assignments, var_list = print_var(var_addr,
                                           nstep)

@@ -26,7 +26,7 @@ expected = """def J_(t, y_, p_):
     data = inner_J(_data_, omega, delta, x, y, ax, lam, G6)
     return coo_array((data, (row, col)), (25, 25)).tocsc()
 """.strip()
-expected1 = """def J_(t, y_, p_):
+expected1 = """def J_(t, y_, p_, y_0):
     omega = y_[0:10]
     delta = y_[10:15]
     x = y_[15:18]
@@ -76,7 +76,7 @@ def test_print_J():
                    VarAddr,
                    Pdict) == expected
 
-    assert print_J(eqs_type,
+    assert print_J("FDAE",
                    25,
                    VarAddr,
                    Pdict,
@@ -206,6 +206,7 @@ def test_print_F():
     assert print_F(eqs_type,
                    VarAddr,
                    Pdict) == expected6
+
 
 expected7 = """def inner_F(_F_, omega, delta, x, y, ax, lam, G6):
     _F_[0:10] = inner_F0(delta, omega)

@@ -61,9 +61,16 @@ class Equations:
             self.f_list = self.f_list + [eqn.name]
 
         for symbol_ in eqn.SYMBOLS.values():
-            if isinstance(symbol_, (Para, iAliasVar)):
+            if isinstance(symbol_, Para):
                 # this is not fully initialize of Parameters, please use param_initializer
-                self.PARAM[symbol_.name] = Param(symbol_.name, value=symbol_.value, dim=symbol_.dim)
+                self.PARAM[symbol_.name] = Param(symbol_.name,
+                                                 value=symbol_.value,
+                                                 dim=symbol_.dim)
+            elif isinstance(symbol_, iAliasVar):
+                self.PARAM[symbol_.name] = Param(symbol_.name,
+                                                 value=symbol_.value,
+                                                 dim=symbol_.dim,
+                                                 is_alias=True)
             elif isinstance(symbol_, idx):
                 self.PARAM[symbol_.name] = IdxParam(symbol_.name, value=symbol_.value)
 
