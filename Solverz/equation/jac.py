@@ -37,6 +37,24 @@ class Jac:
                     num = num + jb.SpEleSize
         return num
 
+    def parse_row_col_data(self):
+        """
+        Parse the row, col and data for sparse coo-jac construction.
+        """
+        row = np.zeros(self.JacEleNum, dtype=int)
+        col = np.zeros(self.JacEleNum, dtype=int)
+        data = np.zeros(self.JacEleNum, dtype=float)
+        addr_by_ele_0 = 0
+        for eqn_name, jbs_row in self.blocks.items():
+            for var, jb in jbs_row.items():
+                addr_by_ele = slice(addr_by_ele_0, addr_by_ele_0 + jb.SpEleSize)
+                row[addr_by_ele] = jb.SpEqnAddr.copy()
+                col[addr_by_ele] = jb.SpVarAddr.copy()
+                if jb.IsDeriNumber:
+                    data[addr_by_ele] = jb.DeriExpr
+                addr_by_ele_0 += jb.SpEleSize
+        return row, col, data
+
 
 class JacBlock:
 

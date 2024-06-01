@@ -532,22 +532,6 @@ class Slice(Function):
             raise TypeError(f"minmod takes at most 3 positional arguments but {len(args)} were given!")
 
 
-class zeros(Function):
-    # print zeros(6,6) as zeros((6,6))
-    # or zeros(6,) as zeros((6,))
-    def _numpycode(self, printer, **kwargs):
-        if len(self.args) == 2:
-            temp1 = printer._print(self.args[0])
-            temp2 = printer._print(self.args[1])
-            return r'zeros((' + temp1 + ', ' + temp2 + r'))'
-        elif len(self.args) == 1:
-            temp = printer._print(self.args[0])
-            return r'zeros((' + temp + ', ' + r'))'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-
 class CSC_array(Function):
 
     @classmethod

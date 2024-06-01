@@ -114,7 +114,7 @@ expected_J_sp = """def J_(t, y_, p_):
     row.extend([0])
     col.extend([1])
     data.extend(ones(1))
-    return coo_array((data, (row,col)), (2, 2)).tocsc()
+    return coo_array((data, (row, col)), (2, 2)).tocsc()
 """.strip()
 
 expected_F = """def F_(t, y_, p_):

@@ -7,9 +7,9 @@ from typing import Dict
 
 from Solverz.equation.equations import AE as SymAE, FDAE as SymFDAE, DAE as SymDAE
 from Solverz.utilities.io import save
-from Solverz.code_printer.python.utilities import parse_p, parse_trigger_fun
+from Solverz.code_printer.python.utilities import parse_p, parse_trigger_func
 from Solverz.code_printer.python.module.module_printer import print_F, print_inner_F, print_sub_inner_F, \
-    print_J, print_inner_J, parse_row_col_data
+    print_J, print_inner_J
 from Solverz.equation.equations import Equations as SymEquations
 from Solverz.num_api.custom_function import numerical_interface
 from Solverz.variable.variables import Vars, combine_Vars
@@ -21,7 +21,7 @@ def render_modules(eqs: SymEquations, *xys, name, directory=None, numba=False):
     """
     print(f"Printing python codes of {eqs.name}...")
     eqs.FormJac(*xys)
-    p = parse_p(eqs)
+    p = parse_p(eqs.PARAM)
     code_F = print_F(eqs)
     code_inner_F = print_inner_F(eqs)
     code_sub_inner_F = print_sub_inner_F(eqs)
@@ -34,7 +34,7 @@ def render_modules(eqs: SymEquations, *xys, name, directory=None, numba=False):
 
     def print_trigger_func_code():
         code_tfuc = dict()
-        trigger_func = parse_trigger_fun(eqs)
+        trigger_func = parse_trigger_func(eqs.PARAM)
         # rename trigger_func
         for func_name, func in trigger_func.items():
             name0 = func.__name__
@@ -73,7 +73,7 @@ def render_modules(eqs: SymEquations, *xys, name, directory=None, numba=False):
                  'inner_J': code_inner_J,
                  'sub_inner_J': code_sub_inner_J,
                  'tfunc_dict': code_tfunc_dict}
-    row, col, data = parse_row_col_data(eqs.jac)
+    row, col, data = eqs.jac.parse_row_col_data()
     eqn_parameter.update({'row': row, 'col': col, 'data': data})
     print(f"Rendering python modules!")
     render_as_modules(name,

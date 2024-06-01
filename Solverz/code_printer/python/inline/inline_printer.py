@@ -10,12 +10,17 @@ from Solverz.code_printer.python.utilities import *
 
 
 def print_F(eqs: SymEquations):
-    fp = print_func_prototype(eqs, 'F_')
+    fp = print_F_J_prototype(eqs.__class__.__name__,
+                             'F_')
     body = []
-    body.extend(print_var(eqs))
-    body.extend(print_param(eqs))
-    body.extend(print_trigger(eqs))
-    body.extend(print_eqn_assignment(eqs))
+    body.extend(print_var(eqs.var_address,
+                          eqs.nstep)[0])
+    param_decla = print_param(eqs.PARAM)[0]
+    body.extend(param_decla)
+    body.extend(print_trigger(eqs.PARAM))
+    body.extend(print_eqn_assignment(eqs.EQNs,
+                                     eqs.a,
+                                     False))
     temp = iVar('_F_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
@@ -23,13 +28,16 @@ def print_F(eqs: SymEquations):
 
 
 def print_J(eqs: SymEquations, sparse=False):
-    fp = print_func_prototype(eqs, 'J_')
+    fp = print_F_J_prototype(eqs.__class__.__name__,
+                             'J_')
     # initialize temp
     temp = iVar('J_', internal_use=True)
     body = list()
-    body.extend(print_var(eqs))
-    body.extend(print_param(eqs))
-    body.extend(print_trigger(eqs))
+    body.extend(print_var(eqs.var_address,
+                          eqs.nstep)[0])
+    param_decla = print_param(eqs.PARAM)[0]
+    body.extend(param_decla)
+    body.extend(print_trigger(eqs.PARAM))
     if not sparse:
         body.append(Assignment(temp, zeros(eqs.eqn_size, eqs.vsize)))
         body.extend(print_J_blocks(eqs.jac, False))
@@ -71,29 +79,29 @@ def print_J_block(jb: JacBlock, sparse: bool) -> List:
                                        jb.DenDeriExpr)]
 
 
-def made_numerical(eqn: SymEquations, y: Vars, sparse=False, output_code=False):
+def made_numerical(eqs: SymEquations, y: Vars, sparse=False, output_code=False):
     """
     factory method of numerical equations
     """
-    print(f"Printing numerical codes of {eqn.name}")
-    eqn.FormJac(y)
-    code_F = print_F(eqn)
-    code_J = print_J(eqn, sparse)
+    print(f"Printing numerical codes of {eqs.name}")
+    eqs.FormJac(y)
+    code_F = print_F(eqs)
+    code_J = print_J(eqs, sparse)
     custom_func = dict()
     custom_func.update(numerical_interface)
-    custom_func.update(parse_trigger_fun(eqn))
+    custom_func.update(parse_trigger_func(eqs.PARAM))
     F = Solverzlambdify(code_F, 'F_', modules=[custom_func, 'numpy'])
     J = Solverzlambdify(code_J, 'J_', modules=[custom_func, 'numpy'])
-    p = parse_p(eqn)
+    p = parse_p(eqs.PARAM)
     print('Complete!')
-    if isinstance(eqn, SymAE) and not isinstance(eqn, SymFDAE):
+    if isinstance(eqs, SymAE) and not isinstance(eqs, SymFDAE):
         num_eqn = nAE(F, J, p)
-    elif isinstance(eqn, SymFDAE):
-        num_eqn = nFDAE(F, J, p, eqn.nstep)
-    elif isinstance(eqn, SymDAE):
-        num_eqn = nDAE(eqn.M, F, J, p)
+    elif isinstance(eqs, SymFDAE):
+        num_eqn = nFDAE(F, J, p, eqs.nstep)
+    elif isinstance(eqs, SymDAE):
+        num_eqn = nDAE(eqs.M, F, J, p)
     else:
-        raise ValueError(f'Unknown equation type {type(eqn)}')
+        raise ValueError(f'Unknown equation type {type(eqs)}')
     if output_code:
         return num_eqn, {'F': code_F, 'J': code_J}
     else:

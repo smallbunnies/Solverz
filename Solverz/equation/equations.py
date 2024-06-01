@@ -41,6 +41,7 @@ class Equations:
         self.triggerable_quantity: Dict[str, str] = dict()
         self.jac_element_address = Address()
         self.jac: Jac = Jac()
+        self.nstep = 0
 
         if isinstance(eqn, Eqn):
             eqn = [eqn]

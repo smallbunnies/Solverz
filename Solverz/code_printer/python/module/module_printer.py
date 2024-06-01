@@ -7,13 +7,15 @@ from Solverz.code_printer.python.utilities import *
 
 
 def print_J(eqs: SymEquations):
-    fp = print_func_prototype(eqs, 'J_')
+    fp = print_F_J_prototype(eqs.__class__.__name__, 
+                             'J_')
     body = []
-    var_assignments, var_list = print_var(eqs, numba_printer=True)
+    var_assignments, var_list = print_var(eqs.var_address, 
+                                          nstep=eqs.nstep)
     body.extend(var_assignments)
-    param_assignments, param_list = print_param(eqs, numba_printer=True)
+    param_assignments, param_list = print_param(eqs.PARAM)
     body.extend(param_assignments)
-    body.extend(print_trigger(eqs))
+    body.extend(print_trigger(eqs.PARAM))
     body.extend([Assignment(iVar('data', internal_use=True),
                             FunctionCall('inner_J', [symbols('_data_', real=True)] + var_list + param_list))])
     body.extend([Return(coo_2_csc(eqs))])
@@ -22,8 +24,9 @@ def print_J(eqs: SymEquations):
 
 
 def print_inner_J(eqs: SymEquations):
-    var_assignments, var_list = print_var(eqs, numba_printer=True)
-    param_assignments, param_list = print_param(eqs, numba_printer=True)
+    var_assignments, var_list = print_var(eqs.var_address,
+                                          eqs.nstep)
+    param_assignments, param_list = print_param(eqs.PARAM)
     args = []
     for var in var_list + param_list:
         args.append(symbols(var.name, real=True))
@@ -61,30 +64,16 @@ def print_inner_J(eqs: SymEquations):
             'code_sub_inner_J': code_sub_inner_J_blocks}
 
 
-def parse_row_col_data(jac: Jac):
-    row = np.zeros(jac.JacEleNum, dtype=int)
-    col = np.zeros(jac.JacEleNum, dtype=int)
-    data = np.zeros(jac.JacEleNum, dtype=float)
-    addr_by_ele_0 = 0
-    for eqn_name, jbs_row in jac.blocks.items():
-        for var, jb in jbs_row.items():
-            addr_by_ele = slice(addr_by_ele_0, addr_by_ele_0 + jb.SpEleSize)
-            row[addr_by_ele] = jb.SpEqnAddr.copy()
-            col[addr_by_ele] = jb.SpVarAddr.copy()
-            if jb.IsDeriNumber:
-                data[addr_by_ele] = jb.DeriExpr
-            addr_by_ele_0 += jb.SpEleSize
-    return row, col, data
-
-
 def print_F(eqs: SymEquations):
-    fp = print_func_prototype(eqs, 'F_')
+    fp = print_F_J_prototype(eqs.__class__.__name__,
+                             'F_')
     body = []
-    var_assignments, var_list = print_var(eqs, numba_printer=True)
+    var_assignments, var_list = print_var(eqs.var_address,
+                                          eqs.nstep)
     body.extend(var_assignments)
-    param_assignments, param_list = print_param(eqs, numba_printer=True)
+    param_assignments, param_list = print_param(eqs.PARAM)
     body.extend(param_assignments)
-    body.extend(print_trigger(eqs))
+    body.extend(print_trigger(eqs.PARAM))
     body.extend(
         [Return(FunctionCall('inner_F', [symbols('_F_', real=True)] + var_list + param_list))])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
@@ -92,14 +81,17 @@ def print_F(eqs: SymEquations):
 
 
 def print_inner_F(eqs: SymEquations):
-    var_assignments, var_list = print_var(eqs, numba_printer=True)
-    param_assignments, param_list = print_param(eqs, numba_printer=True)
+    var_assignments, var_list = print_var(eqs.var_address,
+                                          eqs.nstep)
+    param_assignments, param_list = print_param(eqs.PARAM)
     args = []
     for var in var_list + param_list:
         args.append(symbols(var.name, real=True))
     fp = FunctionPrototype(real, 'inner_F', [symbols('_F_', real=True)] + args)
     body = []
-    body.extend(print_eqn_assignment(eqs, True))
+    body.extend(print_eqn_assignment(eqs.EQNs,
+                                     eqs.a,
+                                     True))
     temp = iVar('_F_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)

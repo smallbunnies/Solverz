@@ -75,6 +75,7 @@ def test_module_printer():
 
     shutil.rmtree(test_folder_path)
 
+
 test_module_printer()
 
 
