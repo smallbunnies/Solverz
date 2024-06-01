@@ -47,7 +47,7 @@ def print_J(eqs: SymEquations, sparse=False):
                      Assignment(iVar('col', internal_use=True), SolList()),
                      Assignment(iVar('data', internal_use=True), SolList())])
         body.extend(print_J_blocks(eqs.jac, True))
-        body.append(Return(coo_2_csc(eqs)))
+        body.append(Return(coo_2_csc(eqs.eqn_size, eqs.vsize)))
     Jd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(Jd, fully_qualified_modules=False)
 

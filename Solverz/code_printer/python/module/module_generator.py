@@ -22,11 +22,25 @@ def render_modules(eqs: SymEquations, *xys, name, directory=None, numba=False):
     print(f"Printing python codes of {eqs.name}...")
     eqs.FormJac(*xys)
     p = parse_p(eqs.PARAM)
-    code_F = print_F(eqs)
-    code_inner_F = print_inner_F(eqs)
-    code_sub_inner_F = print_sub_inner_F(eqs)
-    code_J = print_J(eqs)
-    inner_J = print_inner_J(eqs)
+    code_F = print_F(eqs.__class__.__name__,
+                     eqs.var_address,
+                     eqs.PARAM,
+                     eqs.nstep)
+    code_inner_F = print_inner_F(eqs.EQNs,
+                                 eqs.a,
+                                 eqs.var_address,
+                                 eqs.PARAM,
+                                 eqs.nstep)
+    code_sub_inner_F = print_sub_inner_F(eqs.EQNs)
+    code_J = print_J(eqs.__class__.__name__,
+                     eqs.eqn_size,
+                     eqs.var_address,
+                     eqs.PARAM,
+                     eqs.nstep)
+    inner_J = print_inner_J(eqs.var_address,
+                            eqs.PARAM,
+                            eqs.jac,
+                            eqs.nstep)
     code_inner_J = inner_J['code_inner_J']
     code_sub_inner_J = inner_J['code_sub_inner_J']
     custom_func = dict()

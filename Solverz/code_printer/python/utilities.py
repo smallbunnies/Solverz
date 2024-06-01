@@ -163,10 +163,10 @@ def print_eqn_assignment(EQNs: Dict[str, Eqn],
 
 class coo_2_csc(Symbol):
 
-    def __new__(cls, eqs: SymEquations):
-        obj = Symbol.__new__(cls, f'coo_2_csc: {eqs.name}')
-        obj.eqn_size = eqs.eqn_size
-        obj.vsize = eqs.vsize
+    def __new__(cls, eqn_size: int, vsize: int):
+        obj = Symbol.__new__(cls, f'coo_2_csc')
+        obj.eqn_size = eqn_size
+        obj.vsize = vsize
         return obj
 
     def _numpycode(self, printer, **kwargs):
