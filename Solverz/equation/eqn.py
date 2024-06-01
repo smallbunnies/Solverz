@@ -56,7 +56,9 @@ class Eqn:
                 temp_dict[symbol_.name0] = symbol_.symbol0
                 temp_dict.update(symbol_.SymInIndex)
 
-        return temp_dict
+        # to sort in lexicographic order
+        sorted_dict = {key: temp_dict[key] for key in sorted(temp_dict)}
+        return sorted_dict
 
     def lambdify(self) -> Callable:
         return splambdify(self.SYMBOLS.values(), self.RHS, [numerical_interface, 'numpy'])

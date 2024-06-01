@@ -154,7 +154,7 @@ def print_eqn_assignment(EQNs: Dict[str, Eqn],
             _F_ = iVar('_F_', internal_use=True)
             eqn_declaration.append(Assignment(_F_[eqn_address],
                                               FunctionCall(f'inner_F{int(count)}', list(eqn.SYMBOLS.values()))))
-            print(list(eqn.SYMBOLS))
+
             count = count + 1
         else:
             eqn_declaration.append(Assignment(_F_[eqn_address], eqn.RHS))
