@@ -21,7 +21,7 @@ jobs:
     - name: Install Main Repository as Dependency using Git URL
       run: |
         pip install --upgrade pip setuptools wheel
-        pip install git+https://github.com/rzyu45/${{github.repository}}.git@${{ github.sha }}
+        pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
 
     - name: Run Tests
       run: |
