@@ -8,7 +8,7 @@ import pytest
 from sympy import sin
 from sympy.codegen.ast import Assignment, AddAugmentedAssignment
 
-from Solverz import Model, Var
+from Solverz import Model, Var, AliasVar
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import DAE, AE
 from Solverz.equation.param import Param
@@ -136,9 +136,25 @@ def test_print_F_J():
     m.f1 = Ode('f1', f=m.v, diff_var=m.h)
     m.f2 = Ode('f2', f=m.g, diff_var=m.v)
     bball, y0 = m.create_instance()
-    assert print_J(bball) == expected_J_den
-    assert print_J(bball, True) == expected_J_sp
-    assert print_F(bball) == expected_F
+    assert print_J(bball.__class__.__name__,
+                   bball.jac,
+                   bball.a,
+                   bball.var_address,
+                   bball.PARAM,
+                   bball.nstep) == expected_J_den
+    assert print_J(bball.__class__.__name__,
+                   bball.jac,
+                   bball.a,
+                   bball.var_address,
+                   bball.PARAM,
+                   bball.nstep,
+                   True) == expected_J_sp
+    assert print_F(bball.__class__.__name__,
+                   bball.EQNs,
+                   bball.a,
+                   bball.var_address,
+                   bball.PARAM,
+                   bball.nstep) == expected_F
     nbball = made_numerical(bball, y0, sparse=True)
     np.testing.assert_allclose(nbball.F(0, y0, nbball.p),
                                np.array([20, -9.8]))
@@ -147,6 +163,94 @@ def test_print_F_J():
     nbball = made_numerical(bball, y0, sparse=False)
     np.testing.assert_allclose(nbball.J(0, y0, nbball.p),
                                np.array([[0., 1.], [0., 0.]]))
+
+
+expected_J_den_fdae = """def J_(t, y_, p_, y_0):
+    p = y_[0:3]
+    q = y_[3:6]
+    p_tag_0 = y_0[0:3]
+    q_tag_0 = y_0[3:6]
+    J_ = zeros((6, 6))
+    J_[0:2,1:3] += diagflat(ones(2))
+    J_[2:4,0:2] += diagflat(-ones(2))
+    J_[4:5,2:3] += -ones(1)
+    J_[5:6,2:3] += ones(1)
+    return J_
+""".strip()
+
+expected_J_sp_fdae = """def J_(t, y_, p_, y_0):
+    p = y_[0:3]
+    q = y_[3:6]
+    p_tag_0 = y_0[0:3]
+    q_tag_0 = y_0[3:6]
+    row = []
+    col = []
+    data = []
+    row.extend([0, 1])
+    col.extend([1, 2])
+    data.extend(ones(2))
+    row.extend([2, 3])
+    col.extend([0, 1])
+    data.extend(-ones(2))
+    row.extend([4])
+    col.extend([2])
+    data.extend(-ones(1))
+    row.extend([5])
+    col.extend([2])
+    data.extend(ones(1))
+    return coo_array((data, (row, col)), (6, 6)).tocsc()
+""".strip()
+
+expected_F_fdae = """def F_(t, y_, p_, y_0):
+    p = y_[0:3]
+    q = y_[3:6]
+    p_tag_0 = y_0[0:3]
+    q_tag_0 = y_0[3:6]
+    _F_ = zeros((6, ))
+    _F_[0:2] = -p_tag_0[0:2] + p[1:3]
+    _F_[2:4] = p_tag_0[1:3] - p[0:2]
+    _F_[4:5] = p_tag_0[0] - p[2]
+    _F_[5:6] = -p_tag_0[0] + p[2]
+    return _F_
+""".strip()
+
+
+def test_print_F_J_FDAE():
+    m = Model()
+    m.p = Var('p', value=[2, 3, 4])
+    m.q = Var('q', value=[0, 1, 2])
+    m.p0 = AliasVar('p', init=m.p)
+    m.q0 = AliasVar('q', init=m.q)
+
+    m.ae1 = Eqn('cha1',
+                m.p[1:3] - m.p0[0:2])
+
+    m.ae2 = Eqn('cha2',
+                m.p0[1:3] - m.p[0:2])
+    m.ae3 = Eqn('cha3',
+                m.p0[0] - m.p[2])
+    m.ae4 = Eqn('cha4',
+                m.p[2] - m.p0[0])
+    fdae, y0 = m.create_instance()
+    assert print_J(fdae.__class__.__name__,
+                   fdae.jac,
+                   fdae.a,
+                   fdae.var_address,
+                   fdae.PARAM,
+                   fdae.nstep) == expected_J_den_fdae
+    assert print_J(fdae.__class__.__name__,
+                   fdae.jac,
+                   fdae.a,
+                   fdae.var_address,
+                   fdae.PARAM,
+                   fdae.nstep,
+                   True) == expected_J_sp_fdae
+    assert print_F(fdae.__class__.__name__,
+                   fdae.EQNs,
+                   fdae.a,
+                   fdae.var_address,
+                   fdae.PARAM,
+                   fdae.nstep) == expected_F_fdae
 
 
 def test_made_numerical():

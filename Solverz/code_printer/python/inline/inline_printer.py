@@ -9,17 +9,23 @@ from Solverz.code_printer.python.utilities import *
 # %%
 
 
-def print_F(eqs: SymEquations):
-    fp = print_F_J_prototype(eqs.__class__.__name__,
-                             'F_')
+def print_F(eqs_type: str,
+            EQNs: Dict[str, Eqn],
+            EqnAddr: Address,
+            var_addr: Address,
+            PARAM: Dict[str, ParamBase],
+            nstep: int = 0):
+    fp = print_F_J_prototype(eqs_type,
+                             'F_',
+                             nstep)
     body = []
-    body.extend(print_var(eqs.var_address,
-                          eqs.nstep)[0])
-    param_decla = print_param(eqs.PARAM)[0]
+    body.extend(print_var(var_addr,
+                          nstep)[0])
+    param_decla = print_param(PARAM)[0]
     body.extend(param_decla)
-    body.extend(print_trigger(eqs.PARAM))
-    body.extend(print_eqn_assignment(eqs.EQNs,
-                                     eqs.a,
+    body.extend(print_trigger(PARAM))
+    body.extend(print_eqn_assignment(EQNs,
+                                     EqnAddr,
                                      False))
     temp = iVar('_F_', internal_use=True)
     body.extend([Return(temp)])
@@ -27,27 +33,34 @@ def print_F(eqs: SymEquations):
     return pycode(fd, fully_qualified_modules=False)
 
 
-def print_J(eqs: SymEquations, sparse=False):
-    fp = print_F_J_prototype(eqs.__class__.__name__,
-                             'J_')
+def print_J(eqs_type: str,
+            jac: Jac,
+            EqnAddr: Address,
+            var_addr: Address,
+            PARAM: Dict[str, ParamBase],
+            nstep: int = 0,
+            sparse=False):
+    fp = print_F_J_prototype(eqs_type,
+                             'J_',
+                             nstep)
     # initialize temp
     temp = iVar('J_', internal_use=True)
     body = list()
-    body.extend(print_var(eqs.var_address,
-                          eqs.nstep)[0])
-    param_decla = print_param(eqs.PARAM)[0]
+    body.extend(print_var(var_addr,
+                          nstep)[0])
+    param_decla = print_param(PARAM)[0]
     body.extend(param_decla)
-    body.extend(print_trigger(eqs.PARAM))
+    body.extend(print_trigger(PARAM))
     if not sparse:
-        body.append(Assignment(temp, zeros(eqs.eqn_size, eqs.vsize)))
-        body.extend(print_J_blocks(eqs.jac, False))
+        body.append(Assignment(temp, zeros(EqnAddr.total_size, var_addr.total_size)))
+        body.extend(print_J_blocks(jac, False))
         body.append(Return(temp))
     else:
         body.extend([Assignment(iVar('row', internal_use=True), SolList()),
                      Assignment(iVar('col', internal_use=True), SolList()),
                      Assignment(iVar('data', internal_use=True), SolList())])
-        body.extend(print_J_blocks(eqs.jac, True))
-        body.append(Return(coo_2_csc(eqs.eqn_size, eqs.vsize)))
+        body.extend(print_J_blocks(jac, True))
+        body.append(Return(coo_2_csc(EqnAddr.total_size, var_addr.total_size)))
     Jd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(Jd, fully_qualified_modules=False)
 
@@ -85,8 +98,19 @@ def made_numerical(eqs: SymEquations, y: Vars, sparse=False, output_code=False):
     """
     print(f"Printing numerical codes of {eqs.name}")
     eqs.FormJac(y)
-    code_F = print_F(eqs)
-    code_J = print_J(eqs, sparse)
+    code_F = print_F(eqs.__class__.__name__,
+                     eqs.EQNs,
+                     eqs.a,
+                     eqs.var_address,
+                     eqs.PARAM,
+                     eqs.nstep)
+    code_J = print_J(eqs.__class__.__name__,
+                     eqs.jac,
+                     eqs.a,
+                     eqs.var_address,
+                     eqs.PARAM,
+                     eqs.nstep,
+                     sparse)
     custom_func = dict()
     custom_func.update(numerical_interface)
     custom_func.update(parse_trigger_func(eqs.PARAM))
