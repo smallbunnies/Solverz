@@ -1,17 +1,11 @@
-# This workflow will install Python dependencies (if not cached), run tests and lint with a variety of Python versions
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
-
-name: Python package
+name: Run tests
 
 on: [push]
 
 jobs:
-  build:
+  built_in_tests:
 
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ windows-latest ]
+    runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v3

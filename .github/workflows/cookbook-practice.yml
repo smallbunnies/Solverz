@@ -1,0 +1,27 @@
+name: Run tests in cookbook
+
+on: [push]
+
+jobs:
+  tests_in_cookbook:
+
+    steps:
+    - name: Checkout Test Repository
+      uses: actions/checkout@v3
+      with:
+        repository: 'rzyu45/Solverz-Cookbook'
+        ref: 'main'
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip' # caching pip dependencies
+
+    - name: Install Main Repository as Dependency using Git URL
+      run: |
+        git_url_with_commit="https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.zip#egg=Solverz"
+        pip install --upgrade pip setuptools wheel
+        pip install "$git_url_with_commit"
+
+    - name: Run Tests
+      run: |
+        pytest

@@ -19,12 +19,13 @@ jobs:
         with:
           submodules: true
           lfs: false
-      - name: Bulid Docs
+      - name: Deploy Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
           cache: 'pip' # caching pip dependencies
-      - run: |
+      - name: Build Docs
+        run: |
           pip install -r requirements.txt
           cd docs
           pip install -r requirements.txt
@@ -38,9 +39,9 @@ jobs:
           action: "upload"
           ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
           # For more information regarding Static Web App workflow configurations, please visit: https://aka.ms/swaworkflowconfig
-          app_location: "/" # App source code path
-          api_location: "" # Api source code path - optional
-          output_location: "docs/build/html" # Built app content directory - optional
+          app_location: "docs/build/html" # App source code path
+          output_location: "" # Built app content directory - optional
+          skip_app_build: true
           ###### End of Repository/Build Configurations ######
 
   close_pull_request_job:
