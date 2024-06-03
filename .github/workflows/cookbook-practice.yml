@@ -20,9 +20,8 @@ jobs:
 
     - name: Install Main Repository as Dependency using Git URL
       run: |
-        git_url_with_commit="https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.zip#egg=Solverz"
         pip install --upgrade pip setuptools wheel
-        pip install "$git_url_with_commit"
+        pip install git+https://github.com/rzyu45/Solverz-dev.git@To-extend-matrix-calculus-to
 
     - name: Run Tests
       run: |
