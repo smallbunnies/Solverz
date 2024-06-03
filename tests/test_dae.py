@@ -13,7 +13,7 @@ dae = DAE([f, g])
 z = as_Vars([x, y])
 ndae = made_numerical(dae, z)
 
-df = pd.read_excel('instances/dae_test.xlsx',
+df = pd.read_excel('tests/dae_test.xlsx',
                    sheet_name=None,
                    engine='openpyxl'
                    )

@@ -1,0 +1,28 @@
+name: Run tests in cookbook
+
+on: [push]
+
+jobs:
+  tests_in_cookbook:
+
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Test Repository
+      uses: actions/checkout@v3
+      with:
+        repository: 'rzyu45/Solverz-Cookbook'
+        ref: 'main'
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip' # caching pip dependencies
+
+    - name: Install Main Repository as Dependency using Git URL
+      run: |
+        pip install --upgrade pip setuptools wheel
+        pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
+
+    - name: Run Tests
+      run: |
+        pytest
