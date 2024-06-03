@@ -13,6 +13,7 @@ from Solverz.sym_algebra.functions import Mat_Mul, Slice, F
 from Solverz.sym_algebra.matrix_calculus import MixedEquationDiff
 from Solverz.sym_algebra.transform import finite_difference, semi_descritize
 from Solverz.num_api.custom_function import numerical_interface
+from Solverz.variable.ssymbol import sSym2Sym
 
 
 def sVar2Var(var: Union[Var, iVar, List[iVar, Var]]) -> Union[iVar, List[iVar]]:
@@ -55,7 +56,9 @@ class Eqn:
                 temp_dict[symbol_.name0] = symbol_.symbol0
                 temp_dict.update(symbol_.SymInIndex)
 
-        return temp_dict
+        # to sort in lexicographic order
+        sorted_dict = {key: temp_dict[key] for key in sorted(temp_dict)}
+        return sorted_dict
 
     def lambdify(self) -> Callable:
         return splambdify(self.SYMBOLS.values(), self.RHS, [numerical_interface, 'numpy'])
@@ -148,8 +151,8 @@ class Ode(Eqn):
     def __init__(self, name: str,
                  f,
                  diff_var: Union[iVar, IdxVar, Var]):
-        super().__init__(name, sVar2Var(f))
-        diff_var = sVar2Var(diff_var)
+        super().__init__(name, sSym2Sym(f))
+        diff_var = sSym2Sym(diff_var)
         self.diff_var = diff_var
         self.LHS = Derivative(diff_var, t)
 

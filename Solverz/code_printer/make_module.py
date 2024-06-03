@@ -1,6 +1,6 @@
 from typing import List
 
-from Solverz.code_printer.py_printer import render_modules as py_module_renderer
+from Solverz.code_printer.python import py_module_renderer
 from Solverz.equation.equations import AE, FDAE, DAE
 from Solverz.variable.variables import Vars
 
