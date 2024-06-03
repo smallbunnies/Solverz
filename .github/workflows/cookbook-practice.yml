@@ -5,6 +5,8 @@ on: [push]
 jobs:
   tests_in_cookbook:
 
+    runs-on: windows-latest
+
     steps:
     - name: Checkout Test Repository
       uses: actions/checkout@v3
