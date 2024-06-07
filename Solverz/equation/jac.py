@@ -263,6 +263,9 @@ class JacBlock:
                         self.DenDeriExpr = self.DeriExprBc
 
 
+    def __repr__(self):
+        return f"Jacblock with DeriExpr {self.DeriExpr.__repr__()}"
+
 def slice2array(s: slice) -> np.ndarray:
     return np.arange(s.start, s.stop)
 
