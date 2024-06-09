@@ -4,6 +4,7 @@ from sympy import Integer, Expr
 from Solverz.sym_algebra.symbols import iVar, IdxVar, Para
 from Solverz.equation.jac import Jac, JacBlock
 from Solverz.utilities.address import Address
+from Solverz.utilities.type_checker import is_zero
 
 SolVar = Union[iVar, IdxVar]
 
@@ -48,24 +49,27 @@ class Hvp:
                                     f"Unknown Derivative type {jb.DiffVarType}!"
                                 )
                     case _:
-                        raise TypeError(
-                            f"Unknown DiffVarType {jb.DiffVarType}!")
+                        raise TypeError(f"Unknown DiffVarType {jb.DiffVarType}!")
             self.eqn_column[eqn_name] = expr
 
         # derive Jac
         for eqn_name, jbs_row in self.jac0.blocks.items():
             for var, jb in jbs_row.items():
                 DeriExpr = self.eqn_column[eqn_name].diff(jb.DiffVar)
-                if not DeriExpr.equals(0):
-                    self.jac1.add_block(eqn_name,
-                                        var,
-                                        JacBlock(eqn_name,
-                                                 jb.EqnAddr,
-                                                 jb.DiffVar,
-                                                 jb.DiffVarValue,
-                                                 jb.VarAddr,
-                                                 DeriExpr,
-                                                 jb.Value0))
+                if not is_zero(DeriExpr):
+                    self.jac1.add_block(
+                        eqn_name,
+                        var,
+                        JacBlock(
+                            eqn_name,
+                            jb.EqnAddr,
+                            jb.DiffVar,
+                            jb.DiffVarValue,
+                            jb.VarAddr,
+                            DeriExpr,
+                            jb.Value0,
+                        ),
+                    )
 
         self.blocks = self.jac1.blocks
 

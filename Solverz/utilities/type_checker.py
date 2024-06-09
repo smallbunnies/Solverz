@@ -32,3 +32,7 @@ def is_scalar(a):
             return True
     else:
         return False
+
+
+def is_zero(a):
+    return a == 0
