@@ -33,10 +33,22 @@ from .dependency import setting, p_, y
 import time
 from Solverz.num_api.num_eqn import nAE
 mdl = nAE(F_, J_, p_)
+
+try:
+    from .num_func import Hvp_
+    mdl.Hvp = Hvp_
+    has_hvp = True
+except ImportError:
+    has_hvp = False
 print("Compiling model test_eqn1...")
 start = time.perf_counter()
+
 mdl.F(y, p_)
 mdl.J(y, p_)
+if has_hvp:
+    from numpy import ones_like
+    v = ones_like(y)
+    mdl.Hvp(y, p_, v)
 end = time.perf_counter()
 print(f'Compiling time elapsed: {end-start}s')
 """
