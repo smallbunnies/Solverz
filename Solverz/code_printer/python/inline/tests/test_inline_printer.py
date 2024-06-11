@@ -274,7 +274,7 @@ def test_made_numerical():
         [[2, 1], [2, 0.54030231]]), rtol=1e-8)
 
 
-def test_hvp():
+def test_hvp_printer():
     jac = Jac()
     x = iVar("x")
     jac.add_block(
