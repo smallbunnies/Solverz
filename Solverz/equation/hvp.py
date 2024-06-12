@@ -12,7 +12,7 @@ SolVar = Union[iVar, IdxVar]
 class Hvp:
 
     def __init__(self, jac: Jac) -> None:
-        self.blocks: Dict[str, Dict[SolVar, JacBlock]] = dict()
+        self.blocks_sorted: Dict[str, Dict[SolVar, JacBlock]] = dict()
         self.jac0 = jac
         self.jac1 = Jac()
 
@@ -71,7 +71,7 @@ class Hvp:
                         ),
                     )
 
-        self.blocks = self.jac1.blocks
+        self.blocks_sorted = self.jac1.blocks_sorted
 
 
 def parse_den_var_addr(den_var_addr: slice):

@@ -163,7 +163,7 @@ def inner_Hvp2(c, v_):
 """
 
 
-def test_AE_module_printer_with_hvp():
+def test_AE_module_generator_with_hvp():
     m = Model()
     m.x = Var('x', [1, 1])
     m.c = Param('c', 2)
@@ -241,10 +241,10 @@ expected_J = """def J_(t, y_, p_, y_0):
 
 expected_inner_J = """@njit(cache=True)
 def inner_J(_data_, p, q, p_tag_0, q_tag_0, pb, qb):
-    _data_[0:81] = inner_J0(p, p_tag_0, q, q_tag_0)
-    _data_[81:162] = inner_J1(p, p_tag_0, q, q_tag_0)
-    _data_[162:243] = inner_J2(p, p_tag_0, q, q_tag_0)
-    _data_[243:324] = inner_J3(p, p_tag_0, q, q_tag_0)
+    _data_[2:83] = inner_J0(p, p_tag_0, q, q_tag_0)
+    _data_[83:164] = inner_J1(p, p_tag_0, q, q_tag_0)
+    _data_[164:245] = inner_J2(p, p_tag_0, q, q_tag_0)
+    _data_[245:326] = inner_J3(p, p_tag_0, q, q_tag_0)
     return _data_
 """
 

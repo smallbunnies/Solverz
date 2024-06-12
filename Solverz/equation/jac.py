@@ -15,6 +15,8 @@ class Jac:
 
     def __init__(self):
         self.blocks: Dict[str, Dict[SolVar, JacBlock]] = dict()
+        self.is_sorted = False
+        self.__blocks_sorted: Dict[str, Dict[SolVar, JacBlock]] = dict()
 
     def add_block(self,
                   eqn_name: str,
@@ -25,6 +27,26 @@ class Jac:
         else:
             self.blocks[eqn_name] = dict()
             self.blocks[eqn_name][diff_var] = jb
+        self.is_sorted = False
+
+    def sort_blocks(self):
+        sorted_blocks = dict()
+        for eqn_name in sorted(self.blocks):
+            dict_var_jb = self.blocks[eqn_name]
+            # SolVar cannot be directly used in sorted, so translate it to string first, then recover
+            dict_varname_var = {var.__repr__(): var for var in dict_var_jb.keys()}
+            sorted_blocks[eqn_name] = {dict_varname_var[varname]: dict_var_jb[dict_varname_var[varname]] for varname in
+                                       sorted(dict_varname_var)}
+        self.__blocks_sorted = sorted_blocks
+        self.is_sorted = True
+
+    @property
+    def blocks_sorted(self) -> Dict[str, Dict[SolVar, JacBlock]]:
+        if self.is_sorted:
+            return self.__blocks_sorted
+        else:
+            self.sort_blocks()
+            return self.__blocks_sorted
 
     @property
     def JacEleNum(self) -> int:
@@ -41,11 +63,13 @@ class Jac:
         """
         Parse the row, col and data for sparse coo-jac construction.
         """
+        if not self.is_sorted:
+            self.sort_blocks()
         row = np.zeros(self.JacEleNum, dtype=int)
         col = np.zeros(self.JacEleNum, dtype=int)
         data = np.zeros(self.JacEleNum, dtype=float)
         addr_by_ele_0 = 0
-        for eqn_name, jbs_row in self.blocks.items():
+        for eqn_name, jbs_row in self.blocks_sorted.items():
             for var, jb in jbs_row.items():
                 addr_by_ele = slice(addr_by_ele_0, addr_by_ele_0 + jb.SpEleSize)
                 row[addr_by_ele] = jb.SpEqnAddr.copy()
@@ -262,9 +286,9 @@ class JacBlock:
                                 raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
                         self.DenDeriExpr = self.DeriExprBc
 
-
     def __repr__(self):
         return f"Jacblock with DeriExpr {self.DeriExpr.__repr__()}"
+
 
 def slice2array(s: slice) -> np.ndarray:
     return np.arange(s.start, s.stop)

@@ -30,7 +30,7 @@ def print_Hvp(eqs_type: str,
 
 def print_inner_Hvp(var_addr: Address,
                     PARAM: Dict[str, ParamBase],
-                    jac: Hvp,
+                    hvp: Hvp,
                     nstep: int = 0):
     var_assignments, var_list = print_var(var_addr,
                                           nstep)
@@ -45,7 +45,7 @@ def print_inner_Hvp(var_addr: Address,
     code_sub_inner_Hvp_blocks = []
     count = 0
     addr_by_ele_0 = 0
-    for eqn_name, jbs_row in jac.blocks.items():
+    for eqn_name, jbs_row in hvp.blocks_sorted.items():
         for var, jb in jbs_row.items():
             rhs = jb.SpDeriExpr
             SymbolsInDeri_ = list(Eqn(f'temp' + eqn_name + var.name, rhs).SYMBOLS.values())
@@ -112,7 +112,7 @@ def print_inner_J(var_addr: Address,
     code_sub_inner_J_blocks = []
     count = 0
     addr_by_ele_0 = 0
-    for eqn_name, jbs_row in jac.blocks.items():
+    for eqn_name, jbs_row in jac.blocks_sorted.items():
         for var, jb in jbs_row.items():
             rhs = jb.SpDeriExpr
             SymbolsInDeri_ = list(Eqn(f'temp' + eqn_name + var.name, rhs).SYMBOLS.values())

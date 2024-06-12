@@ -65,7 +65,7 @@ def test_hvp():
 
     h = Hvp(jac)
     v_ = Para("v_", internal_use=True)
-    assert h.blocks['a'][x[0]].DeriExpr == v_[0]*exp(x[0])
+    assert h.blocks_sorted['a'][x[0]].DeriExpr == v_[0]*exp(x[0])
     # ISSUE: the two symbolic expressions below cannot be equal, we believe this is a sympy issue.
-    assert h.blocks['a'][x[1]].DeriExpr.__repr__() == (-v_[1]*sin(x[1])).__repr__()
-    assert h.blocks['b'][x[1]].DeriExpr == 2*v_[1]
+    assert h.blocks_sorted['a'][x[1]].DeriExpr.__repr__() == (-v_[1]*sin(x[1])).__repr__()
+    assert h.blocks_sorted['b'][x[1]].DeriExpr == 2*v_[1]

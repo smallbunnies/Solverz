@@ -1,5 +1,6 @@
 from sympy import Number as SymNumber, Integer
 import numpy as np
+from numpy import integer as NpInteger
 from numbers import Number as PyNumber
 
 
@@ -13,7 +14,7 @@ def is_number(num):
 
 
 def is_integer(num):
-    if isinstance(num, (int, Integer)):
+    if isinstance(num, (int, Integer, NpInteger)):
         return True
     else:
         return False

@@ -68,7 +68,7 @@ def print_J(eqs_type: str,
 
 def print_J_blocks(jac: Jac, sparse: bool):
     eqn_declaration = []
-    for eqn_name, jbs_row in jac.blocks.items():
+    for eqn_name, jbs_row in jac.blocks_sorted.items():
         for var, jb in jbs_row.items():
             eqn_declaration.extend(print_J_block(jb,
                                                  sparse))
