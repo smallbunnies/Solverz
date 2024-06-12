@@ -6,6 +6,7 @@ from typing import Union, List, Dict, Tuple
 from copy import deepcopy
 
 import numpy as np
+from Solverz.equation.hvp import Hvp
 from sympy import Symbol, Integer, Expr, Number as SymNumber
 from scipy.sparse import csc_array, coo_array
 # from cvxopt import spmatrix, matrix

@@ -67,7 +67,8 @@ def SymbolExtractor(index) -> Dict:
 
 
 Solverz_internal_name = ['y_', 'F_', 'p_', 'J_',
-                         'row', 'col', 'data', '_F_', 'data_', 'Hvp_', 'v_']
+                         'row', 'col', 'data', '_F_', 'data_', 'Hvp_', 'v_', 'row_hvp', 'col_hvp', 'data_hvp',
+                         '_data_', '_data_hvp']
 
 
 class SolSymBasic(Symbol):

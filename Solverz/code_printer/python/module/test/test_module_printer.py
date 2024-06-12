@@ -9,10 +9,155 @@ from Solverz.sym_algebra.symbols import iVar, Para
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.param import Param, TimeSeriesParam
 from Solverz.equation.jac import Jac, JacBlock
+from Solverz.equation.hvp import Hvp
+from Solverz.sym_algebra.functions import exp, cos
 from Solverz.utilities.address import Address
 from sympy.codegen.ast import FunctionDefinition, Return
 from Solverz.code_printer.python.module.module_printer import (print_J, print_inner_J, print_F,
-                                                               print_inner_F, print_sub_inner_F)
+                                                               print_inner_F, print_sub_inner_F,
+                                                               print_Hvp, print_inner_Hvp)
+
+expected_AE_Hvp = """def Hvp_(y_, p_, v_):
+    omega = y_[0:10]
+    delta = y_[10:15]
+    x = y_[15:18]
+    y = y_[18:25]
+    ax = p_["ax"]
+    lam = p_["lam"]
+    ax = ax_trigger_func(x)
+    data_hvp = inner_Hvp(_data_hvp, v_, omega, delta, x, y, ax, lam)
+    return coo_array((data_hvp, (row_hvp, col_hvp)), (25, 25)).tocsc()
+""".strip()
+expected_FDAE_Hvp = """def Hvp_(t, y_, p_, v_, y_0):
+    omega = y_[0:10]
+    delta = y_[10:15]
+    x = y_[15:18]
+    y = y_[18:25]
+    omega_tag_0 = y_0[0:10]
+    delta_tag_0 = y_0[10:15]
+    x_tag_0 = y_0[15:18]
+    y_tag_0 = y_0[18:25]
+    ax = p_["ax"]
+    lam = p_["lam"]
+    ax = ax_trigger_func(x)
+    data_hvp = inner_Hvp(_data_hvp, v_, omega, delta, x, y, omega_tag_0, delta_tag_0, x_tag_0, y_tag_0, ax, lam)
+    return coo_array((data_hvp, (row_hvp, col_hvp)), (25, 25)).tocsc()
+""".strip()
+
+
+def test_print_Hvp():
+    eqs_type = 'AE'
+    VarAddr = Address()
+    VarAddr.add('omega', 10)
+    VarAddr.add('delta', 5)
+    VarAddr.add('x', 3)
+    VarAddr.add('y', 7)
+    Pdict = dict()
+    ax = Param('ax',
+               [0, 1],
+               triggerable=True,
+               trigger_var=['x'],
+               trigger_fun=np.sin)
+    Pdict['ax'] = ax
+    lam = Param('lam', [1, 1, 1])
+    Pdict["lam"] = lam
+
+    with pytest.raises(ValueError, match=re.escape("Hvp matrix, with size (20*25), not square")):
+        print_Hvp(eqs_type,
+                  20,
+                  VarAddr,
+                  Pdict)
+
+    assert print_Hvp(eqs_type,
+                     25,
+                     VarAddr,
+                     Pdict) == expected_AE_Hvp
+
+    assert print_Hvp("FDAE",
+                     25,
+                     VarAddr,
+                     Pdict,
+                     nstep=1) == expected_FDAE_Hvp
+
+
+expected_inner_Hvp = """def inner_Hvp(_data_hvp, v_, x, c):
+    _data_hvp[0:1] = inner_Hvp0(v_, x)
+    _data_hvp[1:2] = inner_Hvp1(v_, x)
+    _data_hvp[2:3] = inner_Hvp2(c, v_)
+    return _data_hvp
+""".strip()
+expected_inner_Hvp0 = """def inner_Hvp0(v_, x):
+    return v_[0]*exp(x[0])*ones(1)
+""".strip()
+expected_inner_Hvp1 = """def inner_Hvp1(v_, x):
+    return -v_[1]*sin(x[1])*ones(1)
+""".strip()
+expected_inner_Hvp2 = """def inner_Hvp2(c, v_):
+    return v_[1]*c*ones(1)
+""".strip()
+
+
+def test_print_inner_Hvp():
+    jac = Jac()
+    x = iVar("x")
+    c = Para('c')
+    jac.add_block(
+        "a",
+        x[0],
+        JacBlock(
+            "a",
+            slice(0, 1),
+            x[0],
+            np.array([1]),
+            slice(0, 2),
+            exp(x[0]),
+            np.array([2.71828183]),
+        ),
+    )
+    jac.add_block(
+        "a",
+        x[1],
+        JacBlock(
+            "a",
+            slice(0, 1),
+            x[1],
+            np.array([1]),
+            slice(0, 2),
+            cos(x[1]),
+            np.array([0.54030231]),
+        ),
+    )
+    jac.add_block(
+        "b",
+        x[0],
+        JacBlock("b",
+                 slice(1, 2),
+                 x[0],
+                 np.ones(1),
+                 slice(0, 2),
+                 Integer(1),
+                 np.array([1])),
+    )
+    jac.add_block(
+        "b",
+        x[1],
+        JacBlock("b", slice(1, 2), x[1], np.ones(1), slice(0, 2), c * x[1], np.array([2])),
+    )
+
+    Pdict = {"c": Param("c", np.array([2.0]))}
+    VarAddr = Address()
+    VarAddr.add('x', 2)
+
+    h = Hvp(jac)
+    code_dict = print_inner_Hvp(VarAddr,
+                                Pdict,
+                                h)
+
+    assert code_dict['code_inner_Hvp'] == expected_inner_Hvp
+    assert code_dict['code_sub_inner_Hvp'][0] == expected_inner_Hvp0
+    assert code_dict['code_sub_inner_Hvp'][1] == expected_inner_Hvp1
+    assert code_dict['code_sub_inner_Hvp'][2] == expected_inner_Hvp2
+
 
 expected = """def J_(t, y_, p_):
     omega = y_[0:10]

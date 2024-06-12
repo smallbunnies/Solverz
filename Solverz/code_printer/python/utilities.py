@@ -208,6 +208,21 @@ class coo_2_csc(Symbol):
         return self._numpycode(printer, **kwargs)
 
 
+class coo_2_csc_hvp(Symbol):
+
+    def __new__(cls, eqn_size: int, vsize: int):
+        obj = Symbol.__new__(cls, f'coo_2_csc')
+        obj.eqn_size = eqn_size
+        obj.vsize = vsize
+        return obj
+
+    def _numpycode(self, printer, **kwargs):
+        return f'coo_array((data_hvp, (row_hvp, col_hvp)), ({self.eqn_size}, {self.vsize})).tocsc()'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
 class coo_array(Function):
 
     @classmethod

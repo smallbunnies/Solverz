@@ -152,8 +152,9 @@ def made_numerical(eqs: SymEquations,
                      sparse)
     code = {'F': code_F, 'J': code_J}
     if make_hvp:
+        eqs.hvp = Hvp(eqs.jac)
         code_HVP = print_Hvp(eqs.__class__.__name__,
-                             Hvp(eqs.jac),
+                             eqs.hvp,
                              eqs.a,
                              eqs.var_address,
                              eqs.PARAM,

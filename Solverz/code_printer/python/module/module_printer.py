@@ -21,9 +21,9 @@ def print_Hvp(eqs_type: str,
     param_assignments, param_list = print_param(PARAM)
     body.extend(param_assignments)
     body.extend(print_trigger(PARAM))
-    body.extend([Assignment(iVar('data', internal_use=True),
-                            FunctionCall('inner_Hvp', [symbols('_data_', real=True)] + var_list + param_list))])
-    body.extend([Return(coo_2_csc(eqn_size, var_addr.total_size))])
+    args = [symbols('_data_hvp', real=True), symbols('v_', real=True)] + var_list + param_list
+    body.extend([Assignment(iVar('data_hvp', internal_use=True), FunctionCall('inner_Hvp', args))])
+    body.extend([Return(coo_2_csc_hvp(eqn_size, var_addr.total_size))])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
 
@@ -38,7 +38,8 @@ def print_inner_Hvp(var_addr: Address,
     args = []
     for var in var_list + param_list:
         args.append(symbols(var.name, real=True))
-    fp = FunctionPrototype(real, 'inner_Hvp', [symbols('_data_', real=True)] + args)
+    fp = FunctionPrototype(real, 'inner_Hvp',
+                           [symbols('_data_hvp', real=True), symbols('v_', real=True)] + args)
     body = []
 
     code_sub_inner_Hvp_blocks = []
@@ -52,11 +53,11 @@ def print_inner_Hvp(var_addr: Address,
             SymbolsInDeri = [symbols(arg.name, real=True) for arg in SymbolsInDeri_]
             addr_by_ele = slice(addr_by_ele_0, addr_by_ele_0 + jb.SpEleSize)
             if not jb.IsDeriNumber:
-                # _data_[0:1] = inner_Hvp0(t1, x)
-                body.append(Assignment(iVar('_data_', internal_use=True)[addr_by_ele],
+                # _data_[0:1] = inner_Hvp0(v_, t1, x)
+                body.append(Assignment(iVar('_data_hvp', internal_use=True)[addr_by_ele],
                                        FunctionCall(f'inner_Hvp{int(count)}', SymbolsInDeri)))
 
-                # def inner_Hvp0(t1, x):
+                # def inner_Hvp0(v_, t1, x):
                 #     return -t1 * pi * cos(pi * x) + 1
                 fp1 = FunctionPrototype(real, f'inner_Hvp{int(count)}', SymbolsInDeri)
                 body1 = [Return(rhs)]
@@ -64,7 +65,7 @@ def print_inner_Hvp(var_addr: Address,
                 code_sub_inner_Hvp_blocks.append(pycode(fd1, fully_qualified_modules=False))
                 count += 1
             addr_by_ele_0 += jb.SpEleSize
-    temp = iVar('_data_', internal_use=True)
+    temp = iVar('_data_hvp', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return {'code_inner_Hvp': pycode(fd, fully_qualified_modules=False),

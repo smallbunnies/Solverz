@@ -54,6 +54,7 @@ def render_modules(eqs: SymEquations,
     code_dict["sub_inner_J"] = J['code_sub_inner_J']
 
     if make_hvp:
+        eqs.hvp = Hvp(eqs.jac)
         code_dict["Hvp"] = print_Hvp(eqs.__class__.__name__,
                                      eqs.eqn_size,
                                      eqs.var_address,
@@ -61,7 +62,7 @@ def render_modules(eqs: SymEquations,
                                      eqs.nstep)
         inner_Hvp = print_inner_Hvp(eqs.var_address,
                                     eqs.PARAM,
-                                    Hvp(eqs.jac),
+                                    eqs.hvp,
                                     eqs.nstep)
         code_dict["inner_Hvp"] = inner_Hvp['code_inner_Hvp']
         code_dict["sub_inner_Hvp"] = inner_Hvp['code_sub_inner_Hvp']
@@ -99,6 +100,15 @@ def render_modules(eqs: SymEquations,
 
     row, col, data = eqs.jac.parse_row_col_data()
     eqn_parameter.update({'row': row, 'col': col, 'data': data})
+    if make_hvp:
+        row_hvp, col_hvp, data_hvp = eqs.hvp.jac1.parse_row_col_data()
+    else:
+        row_hvp = 0
+        col_hvp = 0
+        data_hvp = 0
+    eqn_parameter.update({'row_hvp': row_hvp,
+                          'col_hvp': col_hvp,
+                          'data_hvp': data_hvp})
 
     print(f"Rendering python modules!")
     render_as_modules(name,
@@ -165,6 +175,7 @@ if has_hvp:
     mdl.Hvp({beta})
 """
 
+
 def print_init_code(eqn_type: str, module_name, eqn_param):
     code = 'from .num_func import F_, J_\n'
     code += 'from .dependency import setting, p_, y\n'
@@ -204,6 +215,7 @@ def print_init_code(eqn_type: str, module_name, eqn_param):
 def print_module_code(code_dict: Dict[str, str], numba=False):
     code = 'from .dependency import *\n'
     code += """_data_ = setting["data"]\n"""
+    code += """_data_hvp = setting["data_hvp"]\n"""
     code += """_F_ = zeros_like(y, dtype=float64)"""
     code += '\n\r\n'
     for tfunc in code_dict['tfunc_dict'].values():
@@ -267,6 +279,9 @@ def print_dependency_code(modules):
     code += 'setting = auxiliary["eqn_param"]\n'
     code += 'row = setting["row"]\n'
     code += 'col = setting["col"]\n'
+    code += 'row_hvp = setting["row_hvp"]\n'
+    code += 'col_hvp = setting["col_hvp"]\n'
+    code += 'data_hvp = setting["data_hvp"]\n'
     code += 'p_ = auxiliary["p"]\n'
     code += 'y = auxiliary["vars"]\n'
     return code
