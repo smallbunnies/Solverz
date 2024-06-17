@@ -1,7 +1,7 @@
 import warnings
 
 from Solverz.solvers.nlaesolver.utilities import *
-from Solverz.solvers.daesolver.rodas import Rodas_param
+from Solverz.solvers.daesolver.rodas.param import Rodas_param
 from scipy.sparse import eye_array as speye
 from scipy.sparse.linalg import splu
 from scipy.sparse import csc_array, block_array
@@ -77,10 +77,10 @@ def sicnm(ae: nAE,
 
         if done:
             break
-        K = np.zeros((vsize, rparam.s))
+        K = np.zeros((2*vsize, rparam.s))
 
         if reject == 0:
-            Hvp = ae.Hvp(y0, p, v0)
+            Hvp = ae.HVP(y0, p, v0)
             J = ae.J(y0, p)
 
         dfdt0 = 0
@@ -97,8 +97,8 @@ def sicnm(ae: nAE,
                 b_perm = np.concatenate([np.arange(vsize), lu.perm_r + vsize])
                 dx_perm = np.concatenate([np.arange(vsize), lu.perm_c + vsize])
 
-            L_tilda = block_array([[EYE, ZERO], [P @ N, lu.L]])
-            U_tilda = block_array([[EYE, -dt * rparam.gamma * Q], [ZERO, lu.U]])
+            L_tilda = block_array([[EYE, ZERO], [P @ N, lu.L]], format='csc')
+            U_tilda = block_array([[EYE, -dt * rparam.gamma * Q], [ZERO, lu.U]], format='csc')
         except RuntimeError:
             break
 
