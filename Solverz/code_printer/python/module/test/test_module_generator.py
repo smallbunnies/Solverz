@@ -40,7 +40,7 @@ mdl = nAE(F_, J_, p_)
 
 try:
     from .num_func import Hvp_
-    mdl.Hvp = Hvp_
+    mdl.HVP = Hvp_
     has_hvp = True
 except ImportError:
     has_hvp = False
@@ -52,7 +52,7 @@ mdl.J(y, p_)
 if has_hvp:
     from numpy import ones_like
     v = ones_like(y)
-    mdl.Hvp(y, p_, v)
+    mdl.HVP(y, p_, v)
 end = time.perf_counter()
 print(f'Compiling time elapsed: {end-start}s')
 """
@@ -191,7 +191,7 @@ def test_AE_module_generator_with_hvp():
 
     F0 = mdl.F(y, mdl.p)
     J0 = mdl.J(y, mdl.p)
-    Hvp0 = mdl.Hvp(y, mdl.p, np.ones(2))
+    Hvp0 = mdl.HVP(y, mdl.p, np.ones(2))
     np.testing.assert_allclose(F0, np.array([4.559752813, 2]), rtol=1e-8)
     np.testing.assert_allclose(J0.toarray(), np.array([[2.71828183, 0.54030231],
                                                        [1., 2.]]), rtol=1e-8)

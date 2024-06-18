@@ -146,7 +146,7 @@ def sicnm(ae: nAE,
 
             if np.abs(tend - t) < uround:
                 done = True
-            if np.max(np.abs(ae.F(ynew, p)) < opt.ite_tol):
+            if np.max(np.abs(ae.F(ynew, p))) < opt.ite_tol:
                 done = True
 
             y0 = ynew

@@ -160,7 +160,7 @@ def create_python_module(module_name,
 try_hvp = """
 try:
     from .num_func import Hvp_
-    mdl.Hvp = Hvp_
+    mdl.HVP = Hvp_
     has_hvp = True
 except ImportError:
     has_hvp = False
@@ -172,7 +172,7 @@ mdl.J({alpha})
 if has_hvp:
     from numpy import ones_like
     v = ones_like(y)
-    mdl.Hvp({beta})
+    mdl.HVP({beta})
 """
 
 
