@@ -11,7 +11,6 @@ from scipy.sparse import csc_array, block_array
 def sicnm(ae: nAE,
           y0: np.ndarray,
           opt: Opt = None):
-
     p = ae.p
 
     def F_tilda(y_, v_):
@@ -77,7 +76,7 @@ def sicnm(ae: nAE,
 
         if done:
             break
-        K = np.zeros((2*vsize, rparam.s))
+        K = np.zeros((2 * vsize, rparam.s))
 
         if reject == 0:
             Hvp = ae.HVP(y0, p, v0)
@@ -88,22 +87,34 @@ def sicnm(ae: nAE,
         stats.nfeval = stats.nfeval + 1
 
         try:
+            # partial decomposition
             N = - dt * rparam.gamma * (Hvp + J)
             Lambda = dt * rparam.gamma * (N - J)
             lu = splu(Lambda)
             if nt == 0:
                 P = csc_array((np.ones(vsize), (lu.perm_r, np.arange(vsize))))
                 Q = csc_array((np.ones(vsize), (np.arange(vsize), lu.perm_c)))
-                b_perm = np.concatenate([np.arange(vsize), lu.perm_r + vsize])
-                dx_perm = np.concatenate([np.arange(vsize), lu.perm_c + vsize])
+                # b_perm = np.concatenate([np.arange(vsize), lu.perm_r + vsize])
+                # dx_perm = np.concatenate([np.arange(vsize), lu.perm_c + vsize])
+                P_tilda = block_array([[EYE, ZERO], [ZERO, P]], format='csc')
+                Q_tilda = block_array([[EYE, ZERO], [ZERO, Q]], format='csc')
 
             L_tilda = block_array([[EYE, ZERO], [P @ N, lu.L]], format='csc')
             U_tilda = block_array([[EYE, -dt * rparam.gamma * Q], [ZERO, lu.U]], format='csc')
+
+            # full decomposition
+            # tilde_J = block_array([[ZERO, EYE], [Hvp+J, J]])
+            # tilde_E = M - dt*rparam.gamma*tilde_J
+            # lu = splu(tilde_E)
         except RuntimeError:
             break
 
         stats.ndecomp = stats.ndecomp + 1
-        K[dx_perm, 0] = solve(U_tilda, solve(L_tilda, rhs[b_perm]))
+        # partial decomposition
+        # K[dx_perm, 0] = solve(U_tilda, solve(L_tilda, rhs[b_perm]))
+        K[:, 0] = Q_tilda@(solve(U_tilda, solve(L_tilda, P_tilda@rhs)))
+        # full decomposition
+        # K[:, 0] = lu.solve(rhs)
 
         for j in range(1, rparam.s):
             sum_1 = K @ rparam.alpha[:, j]
@@ -113,7 +124,11 @@ def sicnm(ae: nAE,
 
             rhs = F_tilda(y1, v1) + M @ sum_2 + rparam.g[j] * dfdt0
             stats.nfeval = stats.nfeval + 1
-            K[dx_perm, j] = solve(U_tilda, solve(L_tilda, rhs[b_perm]))
+            # partial decomposition
+            # K[dx_perm, j] = solve(U_tilda, solve(L_tilda, rhs[b_perm]))
+            K[:, j] = Q_tilda @ (solve(U_tilda, solve(L_tilda, P_tilda @ rhs)))
+            # full decomposition
+            # K[:, j] = lu.solve(rhs)
             K[:, j] = K[:, j] - sum_2
 
         sum_1 = K @ (dt * rparam.b)
