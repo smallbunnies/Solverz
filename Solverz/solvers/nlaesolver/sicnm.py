@@ -3,7 +3,7 @@ import warnings
 from Solverz.solvers.nlaesolver.utilities import *
 from Solverz.solvers.daesolver.rodas.param import Rodas_param
 from scipy.sparse import eye_array as speye
-from scipy.sparse.linalg import splu
+from scipy.sparse.linalg import splu, spsolve_triangular
 from scipy.sparse import csc_array, block_array
 
 
@@ -113,6 +113,8 @@ def sicnm(ae: nAE,
         # partial decomposition
         # K[dx_perm, 0] = solve(U_tilda, solve(L_tilda, rhs[b_perm]))
         K[:, 0] = Q_tilda@(solve(U_tilda, solve(L_tilda, P_tilda@rhs)))
+        # not stable be very careful with the following triangular solver
+        # K[:, 0] = Q_tilda@(spsolve_triangular(U_tilda, spsolve_triangular(L_tilda, P_tilda@rhs), False))
         # full decomposition
         # K[:, 0] = lu.solve(rhs)
 
@@ -127,6 +129,8 @@ def sicnm(ae: nAE,
             # partial decomposition
             # K[dx_perm, j] = solve(U_tilda, solve(L_tilda, rhs[b_perm]))
             K[:, j] = Q_tilda @ (solve(U_tilda, solve(L_tilda, P_tilda @ rhs)))
+            # not stable be very careful with the following triangular solver
+            # K[:, j] = Q_tilda @ (spsolve_triangular(U_tilda, spsolve_triangular(L_tilda, P_tilda @ rhs), False))
             # full decomposition
             # K[:, j] = lu.solve(rhs)
             K[:, j] = K[:, j] - sum_2
