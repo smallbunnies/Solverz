@@ -114,6 +114,16 @@ class Mat_Mul(MatrixFunction):
                 temp += '@({operand})'.format(operand=printer._print(arg))
         return r'(' + temp + r')'
 
+    def _octave(self, printer, **kwargs):
+
+        temp = printer._print(self.args[0])
+        for arg in self.args[1:]:
+            if isinstance(arg, (Symbol, Function)):
+                temp += '*{operand}'.format(operand=printer._print(arg))
+            else:
+                temp += '*({operand})'.format(operand=printer._print(arg))
+        return r'(' + temp + r')'
+
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
 
@@ -156,6 +166,9 @@ class Diag(MatrixFunction):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
+
+    def _octave(self, printer, **kwargs):
+        return r'diag(' + printer._print(self.args[0], **kwargs) + r')'
 
 
 # %% Univariate func
@@ -279,6 +292,9 @@ class Sign(UniVarFunc):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
+
+    def _octave(self, printer, **kwargs):
+        return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
 
 
 # %% multi-variate func
