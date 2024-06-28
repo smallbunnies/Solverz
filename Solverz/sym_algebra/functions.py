@@ -297,6 +297,40 @@ class Sign(UniVarFunc):
         return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
 
 
+class heaviside(UniVarFunc):
+    r"""
+    The heaviside step function
+
+        .. math::
+
+            \operatorname{Heaviside}(x)=
+            \begin{cases}
+            1 & x >= 0\\
+            0 & x < 0\\
+            \end{cases}
+
+    which should be distinguished from sympy.Heaviside
+    """
+
+    def fdiff(self, argindex=1):
+        # sign function should be treated as a constant.
+        if argindex == 1:
+            return 0
+        raise ArgumentIndexError(self, argindex)
+
+    def _numpycode(self, printer, **kwargs):
+        return r'Heaviside(' + printer._print(self.args[0], **kwargs) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _octave(self, printer, **kwargs):
+        return r'Heaviside(' + printer._print(self.args[0], **kwargs) + r')'
+
+
 # %% multi-variate func
 @VarParser
 class MulVarFunc(Function):
