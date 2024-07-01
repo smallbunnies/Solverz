@@ -3,7 +3,7 @@ from Solverz.equation.equations import AE, FDAE, DAE
 from Solverz.equation.param import Param, IdxParam, TimeSeriesParam
 from Solverz.sym_algebra.symbols import idx, Para, iVar, iAliasVar
 from Solverz.sym_algebra.functions import (Sign, Abs, transpose, exp, Diag, Mat_Mul, sin, cos, Min, AntiWindUp,
-                                           Saturation, heaviside)
+                                           Saturation, heaviside, ln)
 from Solverz.num_api.custom_function import minmod_flag, minmod
 from Solverz.variable.variables import Vars, TimeVars, as_Vars
 from Solverz.solvers import *

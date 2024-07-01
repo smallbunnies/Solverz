@@ -227,6 +227,21 @@ class exp(UniVarFunc):
         return self._numpycode(printer, **kwargs)
 
 
+class ln(UniVarFunc):
+    r"""
+    The ln function, $ln(x)$.
+    """
+
+    def fdiff(self, argindex=1):
+        return 1 / self.args[0]
+
+    def _numpycode(self, printer, **kwargs):
+        return r'log(' + printer._print(self.args[0]) + r')'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
 class sin(UniVarFunc):
     r"""
     The sine function.
