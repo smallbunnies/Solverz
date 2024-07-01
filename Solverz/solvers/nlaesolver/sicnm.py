@@ -5,6 +5,8 @@ from Solverz.solvers.daesolver.rodas.param import Rodas_param
 from scipy.sparse import eye_array as speye
 from scipy.sparse.linalg import splu, spsolve_triangular
 from scipy.sparse import csc_array, block_array
+from Solverz.solvers.parser import dae_io_parser
+from Solverz.solvers.solution import daesol
 
 
 @ae_io_parser
@@ -38,6 +40,25 @@ def sicnm(ae: nAE,
     y[0, :] = y0
     v0 = solve(ae.J(y0, p), -ae.F(y0, p))
     v[0, :] = v0
+
+    dense_output = False
+    n_tspan = len(tspan)
+    told = t0
+    if n_tspan > 2:
+        dense_output = True
+        inext = 1
+        tnext = tspan[inext]
+
+    events = opt.event
+    haveEvent = True if events is not None else False
+
+    if haveEvent:
+        value, isterminal, direction = events(t, y0)
+    stop = 0
+    nevent = -1
+    te = np.zeros((10001,))
+    ye = np.zeros((10001, vsize))
+    ie = np.zeros((10001,))
 
     # The initial step size
     if opt.hinit is None:
@@ -87,36 +108,40 @@ def sicnm(ae: nAE,
         stats.nfeval = stats.nfeval + 1
 
         try:
-            # partial decomposition
-            N = - dt * rparam.gamma * (Hvp + J)
-            Lambda = dt * rparam.gamma * (N - J)
-            lu = splu(Lambda)
-            if nt == 0:
-                P = csc_array((np.ones(vsize), (lu.perm_r, np.arange(vsize))))
-                Q = csc_array((np.ones(vsize), (np.arange(vsize), lu.perm_c)))
-                # b_perm = np.concatenate([np.arange(vsize), lu.perm_r + vsize])
-                # dx_perm = np.concatenate([np.arange(vsize), lu.perm_c + vsize])
-                P_tilda = block_array([[EYE, ZERO], [ZERO, P]], format='csc')
-                Q_tilda = block_array([[EYE, ZERO], [ZERO, Q]], format='csc')
+            if opt.partial_decompose:
+                # partial decomposition
+                N = - dt * rparam.gamma * (Hvp + J)
+                Lambda = dt * rparam.gamma * (N - J)
+                lu = splu(Lambda)
+                if nt == 0:
+                    P = csc_array((np.ones(vsize), (lu.perm_r, np.arange(vsize))))
+                    Q = csc_array((np.ones(vsize), (np.arange(vsize), lu.perm_c)))
+                    # b_perm = np.concatenate([np.arange(vsize), lu.perm_r + vsize])
+                    # dx_perm = np.concatenate([np.arange(vsize), lu.perm_c + vsize])
+                    P_tilda = block_array([[EYE, ZERO], [ZERO, P]], format='csc')
+                    Q_tilda = block_array([[EYE, ZERO], [ZERO, Q]], format='csc')
 
-            L_tilda = block_array([[EYE, ZERO], [P @ N, lu.L]], format='csc')
-            U_tilda = block_array([[EYE, -dt * rparam.gamma * Q], [ZERO, lu.U]], format='csc')
-
-            # full decomposition
-            # tilde_J = block_array([[ZERO, EYE], [Hvp+J, J]])
-            # tilde_E = M - dt*rparam.gamma*tilde_J
-            # lu = splu(tilde_E)
+                    L_tilda = block_array([[EYE, ZERO], [P @ N, lu.L]], format='csc')
+                    U_tilda = block_array([[EYE, -dt * rparam.gamma * Q], [ZERO, lu.U]], format='csc')
+            else:
+                # full decomposition
+                tilde_J = block_array([[ZERO, EYE], [Hvp + J, J]])
+                tilde_E = M - dt * rparam.gamma * tilde_J
+                lu = splu(tilde_E)
         except RuntimeError:
             break
 
         stats.ndecomp = stats.ndecomp + 1
-        # partial decomposition
-        # K[dx_perm, 0] = solve(U_tilda, solve(L_tilda, rhs[b_perm]))
-        K[:, 0] = Q_tilda@(solve(U_tilda, solve(L_tilda, P_tilda@rhs)))
-        # not stable be very careful with the following triangular solver
-        # K[:, 0] = Q_tilda@(spsolve_triangular(U_tilda, spsolve_triangular(L_tilda, P_tilda@rhs), False))
-        # full decomposition
-        # K[:, 0] = lu.solve(rhs)
+        if opt.partial_decompose:
+            # partial decomposition
+            # K[dx_perm, 0] = solve(U_tilda, solve(L_tilda, rhs[b_perm]))
+            K[:, 0] = Q_tilda@(solve(U_tilda, solve(L_tilda, P_tilda@rhs)))
+            # not stable be very careful with the following triangular solver
+            # K[:, 0] = Q_tilda@(spsolve_triangular(U_tilda, spsolve_triangular(L_tilda, P_tilda@rhs), False))
+        else:
+            # full decomposition
+            K[:, 0] = lu.solve(rhs)
+            # K[:, 0] = solve(tilde_E, rhs)
 
         for j in range(1, rparam.s):
             sum_1 = K @ rparam.alpha[:, j]
@@ -126,13 +151,18 @@ def sicnm(ae: nAE,
 
             rhs = F_tilda(y1, v1) + M @ sum_2 + rparam.g[j] * dfdt0
             stats.nfeval = stats.nfeval + 1
-            # partial decomposition
-            # K[dx_perm, j] = solve(U_tilda, solve(L_tilda, rhs[b_perm]))
-            K[:, j] = Q_tilda @ (solve(U_tilda, solve(L_tilda, P_tilda @ rhs)))
-            # not stable be very careful with the following triangular solver
-            # K[:, j] = Q_tilda @ (spsolve_triangular(U_tilda, spsolve_triangular(L_tilda, P_tilda @ rhs), False))
-            # full decomposition
-            # K[:, j] = lu.solve(rhs)
+
+            if opt.partial_decompose:
+                # partial decomposition
+                # K[dx_perm, j] = solve(U_tilda, solve(L_tilda, rhs[b_perm]))
+                K[:, j] = Q_tilda @ (solve(U_tilda, solve(L_tilda, P_tilda @ rhs)))
+                # not stable be very careful with the following triangular solver
+                # K[:, j] = Q_tilda @ (spsolve_triangular(U_tilda, spsolve_triangular(L_tilda, P_tilda @ rhs), False))
+            else:
+                # full decomposition
+                K[:, j] = lu.solve(rhs)
+                # K[:, j] = solve(tilde_E, rhs)
+
             K[:, j] = K[:, j] - sum_2
 
         sum_1 = K @ (dt * rparam.b)
@@ -154,10 +184,97 @@ def sicnm(ae: nAE,
             reject = 0
             t = t + dt
             stats.nstep = stats.nstep + 1
-            nt = nt + 1
-            T[nt] = t
-            y[nt] = ynew
-            v[nt] = vnew
+            # events
+            if haveEvent:
+                valueold = value
+                value, isterminal, direction = events(t, ynew)
+                value_save = value
+                ff = np.where(value * valueold < 0)[0]
+                if ff.size > 0:
+                    for i in ff:
+                        v0_ = valueold[i]
+                        v1_ = value[i]
+                        detect = 1
+                        if direction[i] < 0 and v0_ <= v1_:
+                            detect = 0
+                        if direction[i] > 0 and v0_ >= v1_:
+                            detect = 0
+                        if detect:
+                            iterate = 1
+                            tL = told
+                            tR = t
+                            if np.abs(v1_ - v0_) > uround:
+                                tevent = told - v0_ * dt / (v1_ - v0_)  # initial guess for tevent
+                            else:
+                                iterate = 0
+                                tevent = t
+                                ynext = ynew
+
+                            tol = 128 * np.max([np.spacing(told), np.spacing(t)])
+                            tol = np.min([tol, np.abs(t - told)])
+                            while iterate > 0:
+                                iterate = iterate + 1
+                                tau = (tevent - told) / dt
+                                ynext = y0 + (tau * dt * K @ (rparam.b + (tau - 1) * (rparam.c + tau * (rparam.d + tau * rparam.e))))[0:vsize]
+                                value, isterminal, direction = events(tevent, ynext)
+                                if v1_ * value[i] < 0:
+                                    tL = tevent
+                                    tevent = 0.5 * (tevent + tR)
+                                    v0_ = value[i]
+                                elif v0_ * value[i] < 0:
+                                    tR = tevent
+                                    tevent = 0.5 * (tL + tevent)
+                                    v1_ = value[i]
+                                else:
+                                    iterate = 0
+                                if (tR - tL) < tol:
+                                    iterate = 0
+                                if iterate > 100:
+                                    print(f"Lost Event in interval [{told}, {t}].\n")
+                                    break
+                            if np.abs(tevent - told) < opt.event_duration:
+                                # We're not going to find events closer than tol.
+                                break
+                            t = tevent
+                            ynew = ynext
+                            nevent += 1
+                            te[nevent] = tevent
+                            ie[nevent] = i
+                            ye[nevent] = ynext
+                            value, isterminal, direction = events(tevent, ynext)
+                            value = value_save
+                            if isterminal[i]:
+                                if dense_output:
+                                    if tnext >= tevent:
+                                        tnext = tevent
+                                stop = 1
+                                break
+
+            if dense_output:  # dense_output
+                while t >= tnext > told:
+                    tau = (tnext - told) / dt
+                    ynext = y0 + tau * dt * K @ (rparam.b + (tau - 1) * (rparam.c + tau * (rparam.d + tau * rparam.e)))
+                    nt = nt + 1
+                    T[nt] = tnext
+                    y[nt] = ynext
+
+                    if haveEvent and stop:
+                        if tnext >= tevent:
+                            break
+
+                    inext = inext + 1
+                    if inext <= n_tspan - 1:
+                        tnext = tspan[inext]
+                        if haveEvent and stop:
+                            if tnext >= tevent:
+                                tnext = tevent
+                    else:
+                        tnext = tend + dt
+            else:
+                nt = nt + 1
+                T[nt] = t
+                y[nt] = ynew
+                v[nt] = vnew
 
             if nt == 10000:
                 warnings.warn("Time steps more than 10000! Rodas breaks. Try input a smaller tspan!")
@@ -166,6 +283,8 @@ def sicnm(ae: nAE,
             if np.abs(tend - t) < uround:
                 done = True
             if np.max(np.abs(ae.F(ynew, p))) < opt.ite_tol:
+                done = True
+            if stop:
                 done = True
 
             y0 = ynew
@@ -180,4 +299,14 @@ def sicnm(ae: nAE,
 
     T = T[0:nt + 1]
     y = y[0:nt + 1]
-    return aesol(y[-1], stats=stats)
+
+    sol = aesol(y[-1], stats=stats)
+
+    stats.T = T
+    stats.y = y
+    if haveEvent:
+        stats.te = te[0:nevent + 1]
+        stats.ye = ye[0:nevent + 1]
+        stats.ie = ie[0:nevent + 1]
+
+    return sol
