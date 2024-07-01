@@ -41,14 +41,24 @@ def nr_method(eqn: nAE,
     tol = opt.ite_tol
     p = eqn.p
     df = eqn.F(y, p)
-    ite = 0
+
+    stats = Stats('Newton')
+    stats.nfeval += 1
+
     # main loop
     while max(abs(df)) > tol:
-        ite = ite + 1
         y = y - solve(eqn.J(y, p), df)
+        stats.ndecomp += 1
         df = eqn.F(y, p)
-        if ite >= 100:
+        stats.nfeval += 1
+        stats.nstep += 1
+
+        if stats.nstep >= 100:
             print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
+            stats.succeed = False
             break
 
-    return aesol(y, ite)
+    if np.any(np.isnan(y)):
+        stats.succeed = False
+
+    return aesol(y, stats)

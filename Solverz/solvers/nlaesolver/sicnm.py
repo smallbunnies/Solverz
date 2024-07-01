@@ -20,7 +20,7 @@ def sicnm(ae: nAE,
 
     if opt is None:
         opt = Opt()
-    stats = Stats(opt.scheme)
+    stats = Stats('Sicnm based on ' + opt.scheme)
 
     rparam = Rodas_param(opt.scheme)
     vsize = y0.shape[0]
@@ -82,11 +82,13 @@ def sicnm(ae: nAE,
         if np.abs(dt) < uround:
             print(f"Error exit of RODAS at time = {t}: step size too small h = {dt}.\n")
             stats.ret = 'failed'
+            stats.succeed = False
             break
 
         if reject > 100:
             print(f"Step rejected over 100 times at time = {t}.\n")
             stats.ret = 'failed'
+            stats.succeed = False
             break
 
         # Stretch the step if within 10% of T-t.
@@ -129,6 +131,7 @@ def sicnm(ae: nAE,
                 tilde_E = M - dt * rparam.gamma * tilde_J
                 lu = splu(tilde_E)
         except RuntimeError:
+            stats.succeed = False
             break
 
         stats.ndecomp = stats.ndecomp + 1
@@ -278,6 +281,7 @@ def sicnm(ae: nAE,
 
             if nt == 10000:
                 warnings.warn("Time steps more than 10000! Rodas breaks. Try input a smaller tspan!")
+                stats.succeed = False
                 done = True
 
             if np.abs(tend - t) < uround:
