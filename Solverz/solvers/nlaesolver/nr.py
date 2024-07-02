@@ -36,7 +36,7 @@ def nr_method(eqn: nAE,
 
     """
     if opt is None:
-        opt = Opt(ite_tol=1e-8)
+        opt = Opt()
 
     tol = opt.ite_tol
     p = eqn.p

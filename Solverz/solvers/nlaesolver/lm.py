@@ -42,7 +42,7 @@ def lm(eqn: nAE,
     if opt is None:
         opt = Opt()
 
-    stats = Stats()
+    stats = Stats('Levenberg–Marquardt')
 
     tol = opt.ite_tol
     p = eqn.p
