@@ -21,3 +21,5 @@ Solverz/Scripts
 Solverz/share
 *.nbc
 *.nbi
+/Solverz.egg-info
+Solverz/_version.py
