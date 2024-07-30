@@ -58,8 +58,8 @@ For example, the expressions $x_0x_1+\sin(x_2)$ can be implemented by
 >>> m.x[0]*m.x[1]+sin(m.x[2])
 x[0]*x[1] + sin(x[2])
 ```
-Currently, functions like `sin`, `cos`, `Abs`, `Sign`, `exp`, just to name a few, are supported. You can refer to [api reference](https://docs.solverz.org/reference/index.html) for all supported functions and their detailed implementations.
-If you want to write your own functions, refer to [advanced usage](https://docs.solverz.org/advanced.html). And you can contact us so that we can make it a Solverz built-in funtion.
+Currently, functions like `sin`, `cos`, `Abs`, `Sign`, `exp`, just to name a few, are supported. You can refer to [api reference](https://doc.solverz.org/reference/index.html) for all supported functions and their detailed implementations.
+If you want to write your own functions, refer to [advanced usage](https://doc.solverz.org/advanced.html). And you can contact us so that we can make it a Solverz built-in funtion.
 
 A special case of Variables is the `AliasVar`, that is, the alias variables. In Solverz, the `AliasVar` is used to denote the historical value of some variable, which is useful in finite difference equations. 
 For example, one can use the following codes to declare `AliasVar`.
@@ -268,7 +268,7 @@ The current solvers are summarized below.
 2. `implicit_trapezoid()` the [implicit trapezoidal method](https://en.wikipedia.org/wiki/Trapezoidal_rule_(differential_equations)).
 3. `Rodas()` the stiffly accurate Rosenbrock method with adaptive step size, dense output and event detection. One can use it the same as the Ode-series solvers in Matlab. This is the most stable solver in Solverz.
 
-The detailed usage of these solvers can be found in [api reference](https://docs.solverz.org/reference/index.html).
+The detailed usage of these solvers can be found in [api reference](https://doc.solverz.org/reference/index.html).
 
 It also a good idea to use solvers provided by scipy and other python packages since Solverz has derived the generic 
 numerical interfaces.
