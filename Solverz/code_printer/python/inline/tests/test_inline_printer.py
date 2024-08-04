@@ -45,7 +45,7 @@ def test_jb_printer_scalar_var_scalar_deri():
     assert symJb[2] == extend(data, iVar('y') * Ones(3))
     symJb = print_J_block(jb, False)
     assert symJb[0] == AddAugmentedAssignment(
-        J_[0:3, 1:2], iVar('y') * Ones(3))
+        J_[0:3, 1], iVar('y') * Ones(3))
 
 
 def test_jb_printer_vector_var_vector_deri():
@@ -96,7 +96,7 @@ def test_jbs_printer():
     assert symJbs[4] == extend(col, SolList(7, 8, 9, 10, 11, 12, 13, 14, 15))
     assert symJbs[5] == extend(data, y ** 2)
     symJbs = print_J_blocks(jac, False)
-    assert symJbs[0] == AddAugmentedAssignment(J_[0:3, 1:2], y * Ones(3))
+    assert symJbs[0] == AddAugmentedAssignment(J_[0:3, 1], y * Ones(3))
     assert symJbs[1] == AddAugmentedAssignment(J_[3:12, 7:16], Diag(y ** 2))
 
 
@@ -105,7 +105,7 @@ expected_J_den = """def J_(t, y_, p_):
     v = y_[1:2]
     g = p_["g"]
     J_ = zeros((2, 2))
-    J_[0:1,1:2] += ones(1)
+    J_[0:1,1] += ones(1)
     return J_
 """.strip()
 
@@ -178,8 +178,8 @@ expected_J_den_fdae = """def J_(t, y_, p_, y_0):
     J_ = zeros((6, 6))
     J_[0:2,1:3] += diagflat(ones(2))
     J_[2:4,0:2] += diagflat(-ones(2))
-    J_[4:5,2:3] += -ones(1)
-    J_[5:6,2:3] += ones(1)
+    J_[4:5,2] += -ones(1)
+    J_[5:6,2] += ones(1)
     return J_
 """.strip()
 

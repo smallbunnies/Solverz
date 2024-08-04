@@ -74,7 +74,9 @@ class Hvp:
         self.blocks_sorted = self.jac1.blocks_sorted
 
 
-def parse_den_var_addr(den_var_addr: slice):
+def parse_den_var_addr(den_var_addr: slice | int):
+    if isinstance(den_var_addr, int):
+        den_var_addr = slice(den_var_addr, den_var_addr + 1)
     if den_var_addr.stop - den_var_addr.start == 1:
         return den_var_addr.start
     else:
