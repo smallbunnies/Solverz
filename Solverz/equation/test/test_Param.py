@@ -1,6 +1,8 @@
 import numpy as np
+from scipy.sparse import coo_array
 
 from Solverz.equation.param import Param, IdxParam, TimeSeriesParam
+from Solverz.utilities.testing import assert_allclose_sparse
 
 
 def test_Param():
@@ -20,14 +22,14 @@ def test_Param():
     assert Ts3.v.__str__() == '[[1.]\n [2.]\n [3.]]'
 
     Ts4 = Param(name='Ts', value=[1, 2, 3], dim=2, sparse=True)
-    assert Ts4.v.__str__() == '  (0, 0)\t1.0\n  (1, 0)\t2.0\n  (2, 0)\t3.0'
+    assert_allclose_sparse(Ts4.v, coo_array(np.array([1, 2, 3]).reshape((-1, 1)).astype(float)))
 
     Ts5 = Param(name='Ts', value=[1, 2, 3], dim=2, sparse=False)
     assert Ts5.v.__str__() == '[[1.]\n [2.]\n [3.]]'
 
-    A = np.array([[1, 0], [2, 9], [0, 3]])
-    A = Param(name='A', value=A, dim=2, sparse=True)
-    assert A.v.__str__() == '  (0, 0)\t1.0\n  (1, 0)\t2.0\n  (1, 1)\t9.0\n  (2, 1)\t3.0'
+    v = np.array([[1, 0], [2, 9], [0, 3]])
+    A = Param(name='A', value=v, dim=2, sparse=True)
+    assert_allclose_sparse(A.v, coo_array(v))
 
     # test of IdxParam
     f = IdxParam(name='f',
