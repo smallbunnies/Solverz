@@ -203,7 +203,25 @@ def J_(y_, p_):
     return coo_array((data, (row,col)), (1, 1)).tocsc()
 ```
 
-Similarly, `Solverz.nFDAE` and `Solverz.nDAE` are respectively the numerical equation abstraction of FDAE and DAE, with the `F` and `J` attributes being the numerical interfaces. The `Solverz.nFDAE` instance has a `nstep` attribure to denote the number of historical time steps that is required. Currently, `nstep` can only be one. 
+Similarly, `Solverz.nFDAE` and `Solverz.nDAE` are respectively the numerical equation abstraction of FDAE and DAE, with the `F` and `J` attributes being the numerical interfaces. The `Solverz.nFDAE` instance has a `nstep` attribure to denote the number of historical time steps that is required. Currently, `nstep` can only be one.
+
+Sometimes, one wants to use the second derivative information. Since Release/0.1, Solverz is able to derive the Hessian-vector product, with formula 
+
+
+```{math}
+\frac{\partial }{\partial y}\left(J(y)z\right)=H(y)\otimes z
+```
+
+where the Hessian tensor
+
+```{math}
+H(y)=\left(\frac{\partial \nabla g_i(y)^\mathrm{T}}{y_j}\right)_{ij}
+```
+
+and $J(y)$ is the original Jacobian.
+
+One can call the `HVP()` method of numerical equations after generating numerical modules with `make_hvp=True`. A successful attempt of using `HVP` to improve the robustness of AE's solution can be found in [Solverz' cookbook](https://cook.solverz.org/ae/pf/pf.html).
+
 #### Sparse matrix
 In most cases, the Jacobian is a sparse matrix in which most of the elements are zero. 
 The sparse matrices can be decomposed very efficiently using a sparse solver. 
