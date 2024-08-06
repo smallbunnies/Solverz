@@ -13,6 +13,59 @@ from Solverz.solvers.solution import daesol
 def sicnm(ae: nAE,
           y0: np.ndarray,
           opt: Opt = None):
+    r"""
+    The semi-implicit continuous Newton method [1]_. The philosophy is to rewrite the algebraic equation
+
+
+        .. math::
+
+            0=g(y)
+        
+    as the differential algebraic equations
+
+        .. math::
+
+            \begin{aligned}
+                \dot{y}&=z \\
+                0&=J(y)z+g(y)
+            \end{aligned},
+
+    with $y_0$ being the initial value guess and $z_0=-J(y_0)^{-1}g(y_0)$, where $z$ is an intermediate variable introduced. Then the DAEs are solved by Rodas. SICNM is found to be more robust than the Newton's method, for which the theoretical proof can be found in my paper [1]_. In addition, the non-iterative nature of Rodas guarantees the efficiency.
+
+    One can change the rodas scheme according to the ones implemented in the DAE version of Rodas.
+    
+    SICNM used the Hessian-vector product (HVP) interface of the algebraic equation models, the `make_hvp` flag should be set to `True` when printing numerical modules. 
+
+    An illustrative example of SICNM can be found in the `power flow section <https://cook.solverz.org/ae/pf/pf.html>`_ of Solverz' cookbook.
+
+    Parameters
+    ==========
+
+    eqn : nAE
+        Numerical AE object.
+
+    y : np.ndarray
+        The initial values of variables
+
+    opt : Opt
+        The solver options, including:
+
+        - ite_tol: 1e-8(default)|float
+            The iteration error tolerance.
+
+    Returns
+    =======
+
+    sol : aesol
+        The aesol object.
+
+    References
+    ==========
+
+    .. [1] R. Yu, W. Gu, S. Lu, and Y. Xu, “Semi-implicit continuous newton method for power flow analysis,” 2023, arXiv:2312.02809.
+
+
+    """
     p = ae.p
 
     def F_tilda(y_, v_):
