@@ -71,7 +71,7 @@ def test_jb_scalar_var_scalar_deri():
                   np.array([1]))
 
     assert jb.DenEqnAddr == slice(0, 3)
-    assert jb.DenVarAddr == slice(1, 2)
+    assert jb.DenVarAddr == 1
     assert jb.DenDeriExpr == iVar('y') * Ones(3)
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([1, 1, 1]))
@@ -89,7 +89,7 @@ def test_jb_scalar_var_scalar_deri():
                   np.array([1]))
 
     assert jb.DenEqnAddr == slice(0, 3)
-    assert jb.DenVarAddr == slice(2, 3)
+    assert jb.DenVarAddr == 2
     assert jb.DenDeriExpr == iVar('y') * Ones(3)
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
@@ -107,7 +107,7 @@ def test_jb_scalar_var_scalar_deri():
                   np.array([1]))
 
     assert jb.DenEqnAddr == slice(0, 3)
-    assert jb.DenVarAddr == slice(2, 3)
+    assert jb.DenVarAddr == 2
     assert jb.DenDeriExpr == iVar('y') * Ones(3)
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
@@ -128,7 +128,7 @@ def test_jb_scalar_var_vector_deri():
                   np.array([1, 1, 1]))
 
     assert jb.DenEqnAddr == slice(0, 3)
-    assert jb.DenVarAddr == slice(1, 2)
+    assert jb.DenVarAddr == 1
     assert jb.DenDeriExpr == iVar('y')
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([1, 1, 1]))
@@ -146,7 +146,7 @@ def test_jb_scalar_var_vector_deri():
                   np.array([1, 1, 1]))
 
     assert jb.DenEqnAddr == slice(0, 3)
-    assert jb.DenVarAddr == slice(2, 3)
+    assert jb.DenVarAddr == 2
     assert jb.DenDeriExpr == iVar('y')
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))
@@ -164,7 +164,7 @@ def test_jb_scalar_var_vector_deri():
                   np.array([1, 1, 1]))
 
     assert jb.DenEqnAddr == slice(0, 3)
-    assert jb.DenVarAddr == slice(2, 3)
+    assert jb.DenVarAddr == 2
     assert jb.DenDeriExpr == iVar('y')
     assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
     assert_allclose(jb.SpVarAddr, np.array([2, 2, 2]))

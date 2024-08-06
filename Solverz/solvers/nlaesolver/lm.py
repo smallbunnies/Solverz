@@ -23,7 +23,7 @@ def lm(eqn: nAE,
     opt : Opt
         The solver options, including:
 
-        - ite_tol: 1e-8(default)|float
+        - ite_tol: 1e-5(default)|float
             The iteration error tolerance.
 
     Returns
@@ -40,12 +40,16 @@ def lm(eqn: nAE,
 
     """
     if opt is None:
-        opt = Opt(ite_tol=1e-8)
+        opt = Opt()
+
+    stats = Stats('Levenberg–Marquardt')
 
     tol = opt.ite_tol
     p = eqn.p
 
     # optimize.root func cannot handle callable jac that returns scipy.sparse.csc_array
     sol = optimize.root(lambda x: eqn.F(x, p), y, jac=lambda x: eqn.J(x, p).toarray(), method='lm', tol=tol)
+    stats.succeed = sol.success
+    stats.nfeval = sol.nfev
 
-    return aesol(sol.x, sol.njev)
+    return aesol(sol.x, stats)

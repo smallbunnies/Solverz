@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import List, Union, Dict, Tuple
 
-import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import sympy as sp
@@ -331,6 +330,7 @@ def draw_dag_as_tree(G, pos=None):
     nx.draw_networkx_labels(G, pos)
     nx.draw_networkx_edges(G, pos, arrowstyle='-|>', arrowsize=15)
 
+    import matplotlib.pyplot as plt
     plt.axis('off')
     plt.show()
 

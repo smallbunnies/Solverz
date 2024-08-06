@@ -8,3 +8,4 @@ from Solverz.variable.variables import Vars
 from Solverz.solvers.option import Opt
 from Solverz.solvers.parser import ae_io_parser
 from Solverz.solvers.solution import aesol
+from Solverz.solvers.stats import Stats

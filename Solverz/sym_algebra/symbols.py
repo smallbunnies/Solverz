@@ -66,7 +66,9 @@ def SymbolExtractor(index) -> Dict:
     return temp
 
 
-Solverz_internal_name = ['y_', 'F_', 'p_', 'J_', 'row', 'col', 'data', '_F_', 'data_']
+Solverz_internal_name = ['y_', 'F_', 'p_', 'J_',
+                         'row', 'col', 'data', '_F_', 'data_', 'Hvp_', 'v_', 'row_hvp', 'col_hvp', 'data_hvp',
+                         '_data_', '_data_hvp']
 
 
 class SolSymBasic(Symbol):
@@ -78,7 +80,8 @@ class SolSymBasic(Symbol):
     def __new__(cls, name: str, value=None, dim: int = 1, internal_use=False):
         if any([name == built_in_name for built_in_name in Solverz_internal_name]):
             if not internal_use:
-                raise ValueError(f"Solverz built-in name {name}, cannot be used as variable name.")
+                raise ValueError(
+                    f"Solverz built-in name {name}, cannot be used as variable name.")
         obj = Symbol.__new__(cls, f'{name}')
         obj.name = f'{name}'
         obj.dim = dim
@@ -127,13 +130,18 @@ class IdxSymBasic(Symbol):
                 stop = index.stop
                 step = index.step
                 if any([isinstance(arg, (idx, Expr)) for arg in [start, stop, step]]):
-                    start = IndexCodePrinter(start, printer) if start is not None else None
-                    stop = IndexCodePrinter(stop, printer) if stop is not None else None
-                    step = IndexCodePrinter(step, printer) if step is not None else None
+                    start = IndexCodePrinter(
+                        start, printer) if start is not None else None
+                    stop = IndexCodePrinter(
+                        stop, printer) if stop is not None else None
+                    step = IndexCodePrinter(
+                        step, printer) if step is not None else None
                     return 'sol_slice({i}, {j}, {k})'.format(i=start, j=stop, k=step)
                 else:
-                    start = IndexCodePrinter(start, printer) if start is not None else ''
-                    stop = IndexCodePrinter(stop, printer) if stop is not None else ''
+                    start = IndexCodePrinter(
+                        start, printer) if start is not None else ''
+                    stop = IndexCodePrinter(
+                        stop, printer) if stop is not None else ''
                     slice_str = '{i}:{j}'.format(i=start, j=stop)
                     slice_str += f':{IndexCodePrinter(step, printer)}' if step is not None else ''
                     return slice_str
@@ -142,7 +150,8 @@ class IdxSymBasic(Symbol):
             if len(self.index) != 2:
                 raise ValueError("Support only two element tuples!")
             else:
-                temp = IndexCodePrinter(self.index[0], printer) + ',' + IndexCodePrinter(self.index[1], printer)
+                temp = IndexCodePrinter(
+                    self.index[0], printer) + ',' + IndexCodePrinter(self.index[1], printer)
         else:
             temp = IndexCodePrinter(self.index, printer)
 

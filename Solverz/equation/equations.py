@@ -6,6 +6,7 @@ from typing import Union, List, Dict, Tuple
 from copy import deepcopy
 
 import numpy as np
+from Solverz.equation.hvp import Hvp
 from sympy import Symbol, Integer, Expr, Number as SymNumber
 from scipy.sparse import csc_array, coo_array
 # from cvxopt import spmatrix, matrix
@@ -16,6 +17,7 @@ from Solverz.sym_algebra.symbols import iVar, idx, IdxVar, Para, iAliasVar
 from Solverz.sym_algebra.functions import Slice
 from Solverz.variable.variables import Vars
 from Solverz.utilities.address import Address, combine_Address
+from Solverz.utilities.type_checker import is_integer
 from Solverz.num_api.Array import Array
 from Solverz.equation.jac import Jac, JacBlock
 
@@ -540,25 +542,14 @@ class DAE(Equations):
                 elif isinstance(diff_var, IdxVar):
                     var_idx = diff_var.index
                     var_name = diff_var.name0
-                    if isinstance(var_idx, (np.integer, int, Integer)):
+                    if is_integer(var_idx):
                         variable_address = self.var_address.v[var_name][var_idx: var_idx + 1]
                     elif isinstance(var_idx, str):
                         variable_address = self.var_address.v[var_name][np.ix_(self.PARAM[var_idx].v.reshape((-1,)))]
                     elif isinstance(var_idx, slice):
-                        temp = []
-                        if var_idx.start is not None:
-                            temp.append(var_idx.start)
-                        if var_idx.stop is not None:
-                            temp.append(var_idx.stop)
-                        if var_idx.step is not None:
-                            temp.append(var_idx.step)
-                        temp_func = Eqn('To evaluate var_idx of variable' + diff_var.name, Slice(*temp))
-                        variable_address = self.var_address.v[var_name][
-                            temp_func.NUM_EQN(*self.obtain_eqn_args(temp_func))]
+                        variable_address = self.var_address.v[var_name][var_idx]
                     elif isinstance(var_idx, Expr):
-                        temp_func = Eqn('To evaluate var_idx of variable' + diff_var.name, var_idx)
-                        args = self.obtain_eqn_args(temp_func)
-                        variable_address = self.var_address.v[var_name][temp_func.NUM_EQN(*args).reshape(-1, )]
+                        raise TypeError(f"Index of {diff_var} cannot be sympy.Expr!")
                     elif isinstance(var_idx, list):
                         variable_address = self.var_address.v[var_name][var_idx]
                     else:

@@ -16,6 +16,7 @@ from numbers import Number
 from Solverz.equation.eqn import Eqn
 from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDAE, DAE as SymDAE, AE as SymAE
 from Solverz.equation.jac import JacBlock, Jac
+from Solverz.equation.hvp import Hvp
 from Solverz.equation.param import TimeSeriesParam, ParamBase
 from Solverz.sym_algebra.symbols import iVar, SolDict, Para, idx, IdxSymBasic
 from Solverz.sym_algebra.functions import Arange
@@ -127,9 +128,36 @@ def print_F_J_prototype(eqs_type: str, func_name: str, nstep=0):
     if eqs_type == 'FDAE' and nstep == 0:
         raise ValueError("nstep of FDAE should be greater than 0!")
     elif eqs_type == 'FDAE' and nstep > 0:
-        xtra_args.extend([symbols('y_' + f'{i}', real=True) for i in range(nstep)])
+        xtra_args.extend(
+            [symbols('y_' + f'{i}', real=True) for i in range(nstep)])
     elif eqs_type != 'FDAE' and nstep > 0:
-        raise TypeError(f"Only FDAE supports the case where nstep > 0! Not {eqs_type}")
+        raise TypeError(
+            f"Only FDAE supports the case where nstep > 0! Not {eqs_type}")
+    else:  # eqs_type != 'FDAE' and nstep == 0
+        pass
+
+    fp = FunctionPrototype(real, func_name, args + xtra_args)
+    return fp
+
+
+def print_Hvp_prototype(eqs_type: str, func_name: str = 'Hvp_', nstep=0):
+    t, y_, p_, v_ = symbols('t y_ p_ v_', real=True)
+    if eqs_type == 'DAE' or eqs_type == 'FDAE':
+        args = [t, y_, p_, v_]
+    elif eqs_type == 'AE':
+        args = [y_, p_, v_]
+    else:
+        raise TypeError(f"Unknown equation type {eqs_type}")
+    xtra_args = []
+
+    if eqs_type == 'FDAE' and nstep == 0:
+        raise ValueError("nstep of FDAE should be greater than 0!")
+    elif eqs_type == 'FDAE' and nstep > 0:
+        xtra_args.extend(
+            [symbols('y_' + f'{i}', real=True) for i in range(nstep)])
+    elif eqs_type != 'FDAE' and nstep > 0:
+        raise TypeError(
+            f"Only FDAE supports the case where nstep > 0! Not {eqs_type}")
     else:  # eqs_type != 'FDAE' and nstep == 0
         pass
 
@@ -153,7 +181,8 @@ def print_eqn_assignment(EQNs: Dict[str, Eqn],
             for var in list(eqn.expr.free_symbols):
                 if isinstance(var, IdxSymBasic):
                     if isinstance(var.index, (idx, list)):
-                        raise ValueError(f"Numba printer does not accept idx or list index {var.index}")
+                        raise ValueError(
+                            f"Numba printer does not accept idx or list index {var.index}")
             _F_ = iVar('_F_', internal_use=True)
             eqn_declaration.append(Assignment(_F_[eqn_address],
                                               FunctionCall(f'inner_F{int(count)}', list(eqn.SYMBOLS.values()))))
@@ -179,12 +208,28 @@ class coo_2_csc(Symbol):
         return self._numpycode(printer, **kwargs)
 
 
+class coo_2_csc_hvp(Symbol):
+
+    def __new__(cls, eqn_size: int, vsize: int):
+        obj = Symbol.__new__(cls, f'coo_2_csc')
+        obj.eqn_size = eqn_size
+        obj.vsize = vsize
+        return obj
+
+    def _numpycode(self, printer, **kwargs):
+        return f'coo_array((data_hvp, (row_hvp, col_hvp)), ({self.eqn_size}, {self.vsize})).tocsc()'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
 class coo_array(Function):
 
     @classmethod
     def eval(cls, *args):
         if len(args) > 1:
-            raise ValueError(f"Solverz' coo_array object accepts only one inputs.")
+            raise ValueError(
+                f"Solverz' coo_array object accepts only one inputs.")
 
     def _numpycode(self, printer, **kwargs):
         return f'coo_array({printer._print(self.args[0])})'

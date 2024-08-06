@@ -82,6 +82,12 @@ def minmod_flag(*args):
     return np.select(conditions, choice_list, 3)
 
 
+@implements_nfunc('Heaviside')
+@njit
+def Heaviside(x):
+    return np.where(x >= 0, 1.0, 0.0)
+
+
 @implements_nfunc('switch')
 @njit
 def switch(*args):

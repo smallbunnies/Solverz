@@ -1,7 +1,7 @@
 import numpy as np
-from scipy.sparse import csc_array
-
+from scipy.sparse import csc_array, coo_array
 from Solverz.num_api.Array import Array
+from Solverz.utilities.testing import assert_allclose_sparse
 
 
 def test_Array():
@@ -10,7 +10,8 @@ def test_Array():
     assert Array(x1, dim=1, dtype=float).__repr__() == 'array([1.])'
     assert Array(x1, dim=2, dtype=float).__repr__() == 'array([[1.]])'
     assert Array(x1, dim=2, sparse=False, dtype=float).__repr__() == 'array([[1.]])'
-    assert Array(x1, dim=2, sparse=True, dtype=float).__str__() == '  (0, 0)\t1.0'
+    assert_allclose_sparse(Array(x1, dim=2, sparse=True, dtype=float),
+                           coo_array(np.array(x1).reshape((-1, 1)).astype(float)))
 
     # input as list
     x2 = [1, 2, 3]
@@ -21,7 +22,8 @@ def test_Array():
         Array(x2, dim=1, sparse=True)
     except ValueError as e:
         assert e.args[0] == 'Cannot create sparse matrix with dim: 1'
-    assert Array(x2, dim=2, sparse=True, dtype=float).__str__() == '  (0, 0)\t1.0\n  (1, 0)\t2.0\n  (2, 0)\t3.0'
+    assert_allclose_sparse(Array(x2, dim=2, sparse=True, dtype=float),
+                           coo_array(np.array(x2).reshape((-1, 1)).astype(float)))
 
     x2 = [[1, 0], [2, 9], [0, 3]]
     try:
@@ -54,7 +56,7 @@ def test_Array():
 
     # input as numpy.ndarray
     x4 = np.array([[1, 0], [2, 9], [0, 3]])
-    assert Array(x4, sparse=True).__str__() == '  (0, 0)\t1.0\n  (1, 0)\t2.0\n  (1, 1)\t9.0\n  (2, 1)\t3.0'
+    assert_allclose_sparse(Array(x4, sparse=True), coo_array(x4.astype(float)))
     try:
         Array(x4, dim=1, sparse=True)
     except ValueError as e:
@@ -62,7 +64,8 @@ def test_Array():
 
     assert Array(np.array([1.0, 2.0, 3.0]), dtype=int, dim=2).__str__() == '[[1]\n [2]\n [3]]'
     assert Array(np.array([1.0, 2.0, 3.0]), dtype=int, dim=1).__str__() == '[1 2 3]'
-    assert Array(np.array([1.0, 2.0, 3.0]),
-                 dtype=int,
-                 dim=2,
-                 sparse=True).__str__() == '  (0, 0)\t1\n  (1, 0)\t2\n  (2, 0)\t3'
+    assert_allclose_sparse(Array(np.array([1.0, 2.0, 3.0]),
+                                 dtype=int,
+                                 dim=2,
+                                 sparse=True),
+                           coo_array(np.array([1.0, 2.0, 3.0]).reshape((-1, 1)).astype(float)))

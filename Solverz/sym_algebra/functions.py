@@ -114,6 +114,16 @@ class Mat_Mul(MatrixFunction):
                 temp += '@({operand})'.format(operand=printer._print(arg))
         return r'(' + temp + r')'
 
+    def _octave(self, printer, **kwargs):
+
+        temp = printer._print(self.args[0])
+        for arg in self.args[1:]:
+            if isinstance(arg, (Symbol, Function)):
+                temp += '*{operand}'.format(operand=printer._print(arg))
+            else:
+                temp += '*({operand})'.format(operand=printer._print(arg))
+        return r'(' + temp + r')'
+
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
 
@@ -156,6 +166,9 @@ class Diag(MatrixFunction):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
+
+    def _octave(self, printer, **kwargs):
+        return r'diag(' + printer._print(self.args[0], **kwargs) + r')'
 
 
 # %% Univariate func
@@ -209,6 +222,21 @@ class exp(UniVarFunc):
 
     def _numpycode(self, printer, **kwargs):
         return r'exp(' + printer._print(self.args[0]) + r')'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class ln(UniVarFunc):
+    r"""
+    The ln function, $ln(x)$.
+    """
+
+    def fdiff(self, argindex=1):
+        return 1 / self.args[0]
+
+    def _numpycode(self, printer, **kwargs):
+        return r'log(' + printer._print(self.args[0]) + r')'
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
@@ -279,6 +307,43 @@ class Sign(UniVarFunc):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
+
+    def _octave(self, printer, **kwargs):
+        return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
+
+
+class heaviside(UniVarFunc):
+    r"""
+    The heaviside step function
+
+        .. math::
+
+            \operatorname{Heaviside}(x)=
+            \begin{cases}
+            1 & x >= 0\\
+            0 & x < 0\\
+            \end{cases}
+
+    which should be distinguished from sympy.Heaviside
+    """
+
+    def fdiff(self, argindex=1):
+        # sign function should be treated as a constant.
+        if argindex == 1:
+            return 0
+        raise ArgumentIndexError(self, argindex)
+
+    def _numpycode(self, printer, **kwargs):
+        return r'Heaviside(' + printer._print(self.args[0], **kwargs) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _octave(self, printer, **kwargs):
+        return r'Heaviside(' + printer._print(self.args[0], **kwargs) + r')'
 
 
 # %% multi-variate func

@@ -15,6 +15,9 @@ class aesol:
         self.y = y
         self.stats = stats
 
+    def __repr__(self):
+        return f'ae solution using {self.stats.scheme}, succeed: {self.stats.succeed}'
+
 
 class daesol:
     __slots__ = ['T', 'Y', 'te', 'ie', 'ye', 'stats']
