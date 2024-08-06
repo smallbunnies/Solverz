@@ -1,4 +1,4 @@
-from Solverz import Eqn, AE, nr_method, as_Vars, iVar, made_numerical
+from Solverz import Eqn, AE, nr_method, as_Vars, iVar, made_numerical, Opt
 
 x = iVar(name='x', value=2)
 
@@ -7,7 +7,7 @@ f = AE(name='F',
        eqn=e)
 y = as_Vars(x)
 nf = made_numerical(f, y)
-sol = nr_method(nf, y)
+sol = nr_method(nf, y, Opt(ite_tol=1e-8))
 
 
 def test_nr_method():

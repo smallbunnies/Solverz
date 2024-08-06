@@ -20,7 +20,7 @@ def continuous_nr(eqn: nAE,
     opt : Opt
         The solver options, including:
 
-        - ite_tol: 1e-8(default)|float
+        - ite_tol: 1e-5(default)|float
             The iteration error tolerance.
 
     Returns
@@ -39,6 +39,8 @@ def continuous_nr(eqn: nAE,
     p = eqn.p
     if opt is None:
         opt = Opt()
+
+    stats = Stats('CNM based on ERK4')
 
     dt = 1
     hmax = 1.7
@@ -66,6 +68,7 @@ def continuous_nr(eqn: nAE,
     # atol and rtol can not be too small
     ite = 0
     df = eqn.F(y, p)
+    stats.nfeval += 1
     while max(abs(df)) > tol:
         ite = ite + 1
         err = 2
@@ -80,6 +83,9 @@ def continuous_nr(eqn: nAE,
             ynew = y + dt * (a61 * k1 + a63 * k3 + a64 * k4 + a65 * k5 + a66 * k6)  # y6 has nothing to do with k7
             k7 = f(ynew, p)
             kE = k1 * e1 + k3 * e3 + k4 * e4 + k5 * e5 + k6 * e6 + k7 * e7
+
+            stats.nfeval += 7
+            stats.ndecomp += 7
 
             # error control
             # error estimation
@@ -99,6 +105,7 @@ def continuous_nr(eqn: nAE,
 
         y = ynew
         df = eqn.F(y, p)
+        stats.nfeval += 1
 
         if nofailed:  # Enlarge step size if no failure is met
             temp = 1.25 * (err / rtol) ** Pow
@@ -110,6 +117,12 @@ def continuous_nr(eqn: nAE,
         dt = np.min([dt, hmax])
 
         if ite > 100:
+            print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
+            stats.succeed = False
             break
 
-    return aesol(y, ite)
+    if np.any(np.isnan(y)):
+        stats.succeed = False
+    stats.nstep = ite
+
+    return aesol(y, stats)

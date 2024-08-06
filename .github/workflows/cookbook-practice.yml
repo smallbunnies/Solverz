@@ -1,6 +1,11 @@
 name: Run tests in cookbook
 
-on: [push]
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - '*'
 
 jobs:
   tests_in_cookbook:

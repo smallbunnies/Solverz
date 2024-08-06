@@ -18,7 +18,8 @@ class Opt:
                  stats=False,
                  step_size=1e-3,
                  event: Callable = None,
-                 event_duration=1e-8):
+                 event_duration=1e-8,
+                 partial_decompose=False):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety
@@ -35,3 +36,4 @@ class Opt:
         self.step_size = step_size
         self.event = event
         self.event_duration = event_duration
+        self.partial_decompose = partial_decompose

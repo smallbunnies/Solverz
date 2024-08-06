@@ -10,13 +10,13 @@ name = "Solverz"
 dynamic = ["version"]
 dependencies = [
     "sympy>=1.11.1",
-    "numba == 0.58.1",
-    "numpy>=1.26.3",
-    "scipy>=1.12.0",
+    "numba >= 0.58.1",
+    "numpy>=2.0.0",
+    "scipy>=1.14.0",
     "dill >= 0.3.7",
     "pandas>=1.4.2",
     "openpyxl>=3.0.10",
-    "matplotlib>=3.5.2",
+    "matplotlib==3.9.0",
     "tqdm>=4.64.1",
     "pytest>=7.2.2",
     "pytest-datadir>=1.5.0",

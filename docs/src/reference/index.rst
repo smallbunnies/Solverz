@@ -35,6 +35,8 @@ AE solver
 
 .. autofunction:: Solverz.solvers.nlaesolver.lm.lm
 
+.. autofunction:: Solverz.solvers.nlaesolver.sicnm.sicnm
+
 FDAE solver
 ===========
 

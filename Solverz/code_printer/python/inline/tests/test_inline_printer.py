@@ -15,9 +15,12 @@ from Solverz.equation.param import Param
 from Solverz.sym_algebra.symbols import iVar, idx, Para
 from Solverz.variable.variables import combine_Vars, as_Vars
 from Solverz.equation.jac import JacBlock, Ones, Jac
-from Solverz.sym_algebra.functions import Diag
+from Solverz.equation.hvp import Hvp
+from Solverz.sym_algebra.functions import Diag, sin, cos, exp
 from Solverz.code_printer.python.inline.inline_printer import print_J_block, extend, SolList, print_J_blocks, print_J, \
-    print_F, made_numerical
+    print_F, print_Hvp, made_numerical, Solverzlambdify
+from Solverz.utilities.address import Address
+from Solverz.num_api.custom_function import numerical_interface
 
 # %%
 row = iVar('row', internal_use=True)
@@ -41,7 +44,8 @@ def test_jb_printer_scalar_var_scalar_deri():
     assert symJb[1] == extend(col, SolList(1, 1, 1))
     assert symJb[2] == extend(data, iVar('y') * Ones(3))
     symJb = print_J_block(jb, False)
-    assert symJb[0] == AddAugmentedAssignment(J_[0:3, 1:2], iVar('y') * Ones(3))
+    assert symJb[0] == AddAugmentedAssignment(
+        J_[0:3, 1], iVar('y') * Ones(3))
 
 
 def test_jb_printer_vector_var_vector_deri():
@@ -57,7 +61,8 @@ def test_jb_printer_vector_var_vector_deri():
     assert symJb[1] == extend(col, SolList(*np.arange(0, 9).tolist()))
     assert symJb[2] == extend(data, iVar('y'))
     symJb = print_J_block(jb, False)
-    assert symJb[0] == AddAugmentedAssignment(iVar('J_', internal_use=True)[1:10, 0:9], Diag(iVar('y')))
+    assert symJb[0] == AddAugmentedAssignment(
+        iVar('J_', internal_use=True)[1:10, 0:9], Diag(iVar('y')))
 
 
 def test_jbs_printer():
@@ -91,7 +96,7 @@ def test_jbs_printer():
     assert symJbs[4] == extend(col, SolList(7, 8, 9, 10, 11, 12, 13, 14, 15))
     assert symJbs[5] == extend(data, y ** 2)
     symJbs = print_J_blocks(jac, False)
-    assert symJbs[0] == AddAugmentedAssignment(J_[0:3, 1:2], y * Ones(3))
+    assert symJbs[0] == AddAugmentedAssignment(J_[0:3, 1], y * Ones(3))
     assert symJbs[1] == AddAugmentedAssignment(J_[3:12, 7:16], Diag(y ** 2))
 
 
@@ -100,7 +105,7 @@ expected_J_den = """def J_(t, y_, p_):
     v = y_[1:2]
     g = p_["g"]
     J_ = zeros((2, 2))
-    J_[0:1,1:2] += ones(1)
+    J_[0:1,1] += ones(1)
     return J_
 """.strip()
 
@@ -173,8 +178,8 @@ expected_J_den_fdae = """def J_(t, y_, p_, y_0):
     J_ = zeros((6, 6))
     J_[0:2,1:3] += diagflat(ones(2))
     J_[2:4,0:2] += diagflat(-ones(2))
-    J_[4:5,2:3] += -ones(1)
-    J_[5:6,2:3] += ones(1)
+    J_[4:5,2] += -ones(1)
+    J_[5:6,2] += ones(1)
     return J_
 """.strip()
 
@@ -263,5 +268,73 @@ def test_made_numerical():
     nF, code = made_numerical(F, y, sparse=True, output_code=True)
     F0 = nF.F(y, nF.p)
     J0 = nF.J(y, nF.p)
-    np.testing.assert_allclose(F0, np.array([2 * 1 + 1, 1 + np.sin(1)]), rtol=1e-8)
-    np.testing.assert_allclose(J0.toarray(), np.array([[2, 1], [2, 0.54030231]]), rtol=1e-8)
+    np.testing.assert_allclose(F0, np.array(
+        [2 * 1 + 1, 1 + np.sin(1)]), rtol=1e-8)
+    np.testing.assert_allclose(J0.toarray(), np.array(
+        [[2, 1], [2, 0.54030231]]), rtol=1e-8)
+
+
+def test_hvp_printer():
+    jac = Jac()
+    x = iVar("x")
+    jac.add_block(
+        "a",
+        x[0],
+        JacBlock(
+            "a",
+            slice(0, 1),
+            x[0],
+            np.array([1]),
+            slice(0, 2),
+            exp(x[0]),
+            np.array([2.71828183]),
+        ),
+    )
+    jac.add_block(
+        "a",
+        x[1],
+        JacBlock(
+            "a",
+            slice(0, 1),
+            x[1],
+            np.array([1]),
+            slice(0, 2),
+            cos(x[1]),
+            np.array([0.54030231]),
+        ),
+    )
+    jac.add_block(
+        "b",
+        x[0],
+        JacBlock("b",
+                 slice(1, 2),
+                 x[0],
+                 np.ones(1),
+                 slice(0, 2),
+                 1,
+                 np.array([1])),
+    )
+    jac.add_block(
+        "b",
+        x[1],
+        JacBlock("b", slice(1, 2), x[1], np.ones(1),
+                 slice(0, 2), 2 * x[1], np.array([2])),
+    )
+
+    h = Hvp(jac)
+    eqn_addr = Address()
+    eqn_addr.add('a', 1)
+    eqn_addr.add('b', 1)
+    var_addr = Address()
+    var_addr.add('x', 2)
+
+    code = print_Hvp('AE',
+                     h,
+                     eqn_addr,
+                     var_addr,
+                     dict())
+
+    HVP = Solverzlambdify(code, 'Hvp_', [numerical_interface, 'numpy'])
+    np.testing.assert_allclose(HVP(np.array([1, 2]), dict(), np.array([1, 1])).toarray(),
+                               np.array([[2.71828183, -0.90929743],
+                                         [0.,  2.]]))

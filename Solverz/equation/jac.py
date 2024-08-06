@@ -15,6 +15,8 @@ class Jac:
 
     def __init__(self):
         self.blocks: Dict[str, Dict[SolVar, JacBlock]] = dict()
+        self.is_sorted = False
+        self.__blocks_sorted: Dict[str, Dict[SolVar, JacBlock]] = dict()
 
     def add_block(self,
                   eqn_name: str,
@@ -25,6 +27,26 @@ class Jac:
         else:
             self.blocks[eqn_name] = dict()
             self.blocks[eqn_name][diff_var] = jb
+        self.is_sorted = False
+
+    def sort_blocks(self):
+        sorted_blocks = dict()
+        for eqn_name in sorted(self.blocks):
+            dict_var_jb = self.blocks[eqn_name]
+            # SolVar cannot be directly used in sorted, so translate it to string first, then recover
+            dict_varname_var = {var.__repr__(): var for var in dict_var_jb.keys()}
+            sorted_blocks[eqn_name] = {dict_varname_var[varname]: dict_var_jb[dict_varname_var[varname]] for varname in
+                                       sorted(dict_varname_var)}
+        self.__blocks_sorted = sorted_blocks
+        self.is_sorted = True
+
+    @property
+    def blocks_sorted(self) -> Dict[str, Dict[SolVar, JacBlock]]:
+        if self.is_sorted:
+            return self.__blocks_sorted
+        else:
+            self.sort_blocks()
+            return self.__blocks_sorted
 
     @property
     def JacEleNum(self) -> int:
@@ -41,11 +63,13 @@ class Jac:
         """
         Parse the row, col and data for sparse coo-jac construction.
         """
+        if not self.is_sorted:
+            self.sort_blocks()
         row = np.zeros(self.JacEleNum, dtype=int)
         col = np.zeros(self.JacEleNum, dtype=int)
         data = np.zeros(self.JacEleNum, dtype=float)
         addr_by_ele_0 = 0
-        for eqn_name, jbs_row in self.blocks.items():
+        for eqn_name, jbs_row in self.blocks_sorted.items():
             for var, jb in jbs_row.items():
                 addr_by_ele = slice(addr_by_ele_0, addr_by_ele_0 + jb.SpEleSize)
                 row[addr_by_ele] = jb.SpEqnAddr.copy()
@@ -88,7 +112,7 @@ class JacBlock:
         self.SpEleSize = 0
         self.SpDeriExpr: Expr = Integer(0)
         self.DenEqnAddr: slice = slice(0)
-        self.DenVarAddr: slice = slice(0)
+        self.DenVarAddr: slice | int = slice(0)
         self.DenDeriExpr: Expr = Integer(0)
 
         EqnSize = self.EqnAddr.stop - self.EqnAddr.start
@@ -247,20 +271,23 @@ class JacBlock:
                     case 'vector' | 'scalar':
                         self.DenEqnAddr = self.EqnAddr
                         if isinstance(self.DiffVar, iVar):
-                            self.DenVarAddr = self.VarAddr
+                            self.DenVarAddr = self.VarAddr.start
                         else:
                             if isinstance(self.DiffVar.index, slice):
                                 VarArange = slice2array(self.VarAddr)[self.DiffVar.index]
                                 if VarArange.size > 1:
                                     raise ValueError(f"Length of scalar variable {self.DiffVar} > 1!")
                                 else:
-                                    self.DenVarAddr = slice(VarArange[0], VarArange[-1] + 1)
+                                    self.DenVarAddr = VarArange[0]
                             elif is_integer(self.DiffVar.index):
                                 idx = int(slice2array(self.VarAddr)[self.DiffVar.index])
-                                self.DenVarAddr = slice(idx, idx + 1)
+                                self.DenVarAddr = idx
                             else:
                                 raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
                         self.DenDeriExpr = self.DeriExprBc
+
+    def __repr__(self):
+        return f"Jacblock with DeriExpr {self.DeriExpr.__repr__()}"
 
 
 def slice2array(s: slice) -> np.ndarray:

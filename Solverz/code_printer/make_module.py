@@ -11,6 +11,7 @@ class module_printer:
                  variables: Vars | List[Vars],
                  name: str,
                  lang='python',
+                 make_hvp=False,
                  directory=None,
                  jit=False):
         self.name = name
@@ -20,6 +21,7 @@ class module_printer:
             self.variables = [variables]
         else:
             self.variables = variables
+        self.make_hvp = make_hvp
         self.directory = directory
         self.jit = jit
 
@@ -29,6 +31,7 @@ class module_printer:
                                *self.variables,
                                name=self.name,
                                directory=self.directory,
-                               numba=self.jit)
+                               numba=self.jit,
+                               make_hvp=self.make_hvp)
         else:
             raise NotImplemented(f"{self.lang} module renderer not implemented!")
