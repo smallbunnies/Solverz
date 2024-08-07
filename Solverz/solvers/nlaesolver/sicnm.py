@@ -50,7 +50,7 @@ def sicnm(ae: nAE,
     opt : Opt
         The solver options, including:
 
-        - ite_tol: 1e-8(default)|float
+        - ite_tol: 1e-5(default)|float
             The iteration error tolerance.
 
     Returns
