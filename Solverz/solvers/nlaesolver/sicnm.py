@@ -28,7 +28,8 @@ def sicnm(ae: nAE,
             \begin{aligned}
                 \dot{y}&=z \\
                 0&=J(y)z+g(y)
-            \end{aligned},
+            \end{aligned}
+
 
     with $y_0$ being the initial value guess and $z_0=-J(y_0)^{-1}g(y_0)$, where $z$ is an intermediate variable introduced. Then the DAEs are solved by Rodas. SICNM is found to be more robust than the Newton's method, for which the theoretical proof can be found in my paper [1]_. In addition, the non-iterative nature of Rodas guarantees the efficiency.
 
@@ -41,10 +42,11 @@ def sicnm(ae: nAE,
     Parameters
     ==========
 
-    eqn : nAE
+    ae : nAE
         Numerical AE object.
 
-    y : np.ndarray
+    y0 : np.ndarray
+
         The initial values of variables
 
     opt : Opt

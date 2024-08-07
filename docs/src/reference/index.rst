@@ -23,6 +23,10 @@ Functions
 
 .. autoclass:: Solverz.sym_algebra.functions.Saturation
 
+.. autoclass:: Solverz.sym_algebra.functions.heaviside
+
+.. autoclass:: Solverz.sym_algebra.functions.ln
+
 Solvers
 -------
 
