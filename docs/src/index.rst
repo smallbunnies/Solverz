@@ -14,7 +14,7 @@ If you are new to Solverz, start with the :ref:`introductory example <intro>`.
 If you find Solverz intriguing, just :ref:`get started <gettingstarted>`.
 
 Additional Solverz paradigms covering multiple areas can be found in
-`Solverz' Cookbook <https://cookbook.solverz.org>`_:
+`Solverz' Cookbook <https://cook.solverz.org>`_:
 
 ==================================================================
 

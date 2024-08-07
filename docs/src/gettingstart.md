@@ -21,7 +21,7 @@ The basic steps of a simple modeling and solution process are:
 3. Apply solver
 4. Interrogate solver results
 
-These steps and the philosophy behind Soverz are explained as follows.
+These steps and the philosophy behind Solverz are explained as follows.
 ## Symbolic Modelling
 The modelling starts with declaring an empty Model with
 ```python
@@ -139,7 +139,7 @@ Moreover, by overloading operators, `y0` can be used for addition, subtraction, 
 ## From Symbolic to Numerical
 ### Numerical Equations
 To directly use the symbolic equations for computation is too slow. Alternatively, you should use the numerical equations 
-derived by the Solverz, which are optimized for efficient simulation. 
+derived by Solverz, which are optimized for efficient simulation. 
 Specifically, Solverz prints all the symbolic expressions to well-organized python functions based on mature 
 libraries such as numpy, scipy and numba. 
 
@@ -272,12 +272,15 @@ Currently, dynamic compilation is not supported in `made_numerical`.
 Solverz provides basic solvers for the solutions of AE, FDAE and DAE. 
 We are working hard on implementing more mature solvers. Please feel free to contact us if you have any good idea~
 
-The current solvers are summarized below. 
+Below is an overview of the built-in solvers.
+
 ### AE solvers
 
 1. `nr_method()` the Newton-Raphson method 
 2. `continuous_nr()` the continuous Newton method, which is more robust compared with the Newton-Raphson
 3. `lm()` the Levenberg-Marquardt method provided by `scipy.optimize.root`. Only dense Jacobian is allowed, which may be time-consuming.
+4. `sicnm()` the semi-implicit version of continuous Newton method. It possesses both the implicit stability and explicit computation overhead, which shows both robustness and efficiency. Please make Hessian-vector product if you want to use it.
+
 ### FDAE solver
 `fdae_solver()`
 ### DAE solvers
