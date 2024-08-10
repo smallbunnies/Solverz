@@ -18,5 +18,6 @@ sphinxcontrib-qthelp
 sphinxcontrib-serializinghtml
 sphinx-reredirects
 sympy
+numpydoc
 chardet
 
