@@ -4,7 +4,6 @@ matplotlib
 matplotlib-inline
 mpmath
 myst-parser
-scipy
 Sphinx
 sphinx-autobuild
 sphinx-copybutton
@@ -18,6 +17,5 @@ sphinxcontrib-jquery
 sphinxcontrib-qthelp
 sphinxcontrib-serializinghtml
 sphinx-reredirects
-sympy
 chardet
 
