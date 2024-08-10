@@ -9,10 +9,10 @@ import time
 
 import sympy
 
-sys.path = ['ext'] + sys.path
 sys.path.extend(['..\\..\\Solverz'])
 # This command is for linux (Ubuntu 22.04.2 LTS), which cannot recognise relative path of Solverz library.
 sys.path.insert(0, os.path.abspath('../..'))
+sys.path.insert(0, os.path.abspath('../ext'))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
