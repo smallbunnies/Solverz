@@ -14,6 +14,7 @@ from Solverz.sym_algebra.matrix_calculus import MixedEquationDiff
 from Solverz.sym_algebra.transform import finite_difference, semi_descritize
 from Solverz.num_api.custom_function import numerical_interface
 from Solverz.variable.ssymbol import sSym2Sym
+from Solverz.utilities.type_checker import is_zero
 
 
 def sVar2Var(var: Union[Var, iVar, List[iVar, Var]]) -> Union[iVar, List[iVar]]:
@@ -76,18 +77,20 @@ class Eqn:
                     diff = MixedEquationDiff(self.RHS, symbol_)
                 else:
                     diff = self.RHS.diff(symbol_)
-                self.derivatives[symbol_.name] = EqnDiff(name=f'Diff {self.name} w.r.t. {symbol_.name}',
-                                                         eqn=diff,
-                                                         diff_var=symbol_,
-                                                         var_idx=idx_.name if isinstance(idx_, idx) else idx_)
+                if not is_zero(diff):
+                    self.derivatives[symbol_.name] = EqnDiff(name=f'Diff {self.name} w.r.t. {symbol_.name}',
+                                                             eqn=diff,
+                                                             diff_var=symbol_,
+                                                             var_idx=idx_.name if isinstance(idx_, idx) else idx_)
             elif isinstance(symbol_, iVar):
                 if self.mixed_matrix_vector:
                     diff = MixedEquationDiff(self.RHS, symbol_)
                 else:
                     diff = self.RHS.diff(symbol_)
-                self.derivatives[symbol_.name] = EqnDiff(name=f'Diff {self.name} w.r.t. {symbol_.name}',
-                                                         eqn=diff,
-                                                         diff_var=symbol_)
+                if not is_zero(diff):
+                    self.derivatives[symbol_.name] = EqnDiff(name=f'Diff {self.name} w.r.t. {symbol_.name}',
+                                                             eqn=diff,
+                                                             diff_var=symbol_)
 
     @property
     def expr(self):

@@ -294,6 +294,17 @@ def test_jb_vector_var_scalar_deri():
                       iVar('y'),
                       np.array([1]))
 
+def test_jb_vector_var_zero_deri():
+
+    with pytest.raises(ValueError,
+                       match=re.escape("We wont allow 0.0 derivative!")):
+        jb = JacBlock('a',
+                      slice(0, 3),
+                      iVar('x'),
+                      np.ones(3),
+                      slice(1, 4),
+                      0.,
+                      np.array([0]))
 
 # %% vector var and vector derivative
 def test_jb_vector_var_vector_deri():

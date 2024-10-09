@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 from typing import Dict
 from copy import deepcopy
+from .type_checker import is_integer
 
 
 def combine_Address(a1: Address, a2: Address) -> Address:
@@ -55,6 +56,28 @@ class Address:
             start = np.sum(self.length_array[0:idx])
             address_list.append(np.arange(start, start + self.length_array[idx], dtype=int))
         self.v_cache = dict(zip(self.object_list, address_list))
+
+    def inquiry_eqn_name(self, addr: int):
+        """
+        Given eqn address (number), find the equation name.
+        """
+        if not is_integer(addr):
+            raise ValueError(f"Address should be integer but {addr}!")
+        if addr < 0:
+            raise ValueError(f"No negative address allowed!")
+
+        current_sum = -1 # The address should start from 0
+        for i, value in enumerate(self.length_array):
+            current_sum += value
+            if current_sum >= addr:
+                break
+        if addr > current_sum:
+            raise ValueError(f"Input address bigger than maximum address {current_sum}!")
+        eqn_name = self.object_list[i]
+        if addr in self.v[eqn_name].tolist():
+            return eqn_name
+        else:
+            raise ValueError(f"How could this happen?")
 
     @property
     def v(self) -> Dict[str, np.ndarray]:

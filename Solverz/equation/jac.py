@@ -5,7 +5,7 @@ import warnings
 
 from sympy import Expr, Function, Integer
 from Solverz.sym_algebra.symbols import iVar, IdxVar
-from Solverz.utilities.type_checker import is_vector, is_scalar, is_integer, is_number, PyNumber
+from Solverz.utilities.type_checker import is_vector, is_scalar, is_integer, is_number, PyNumber, is_zero
 from Solverz.sym_algebra.functions import Diag
 
 SolVar = Union[iVar, IdxVar]
@@ -99,6 +99,9 @@ class JacBlock:
         1. a diagonal matrix
         2. a matrix
         """
+        if is_zero(DeriExpr):
+            raise ValueError(f"We wont allow {DeriExpr} derivative!")
+
         self.EqnName = EqnName
         self.EqnAddr: slice = EqnAddr
         self.DiffVar: SolVar = DiffVar
