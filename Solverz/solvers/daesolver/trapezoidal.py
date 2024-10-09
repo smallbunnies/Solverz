@@ -50,21 +50,23 @@ def implicit_trapezoid(dae: nDAE,
     nt = 0
     tt = T_initial
     t0 = tt
+    Nt = int((T_end-T_initial)/dt) + 1
 
-    y = np.zeros((10000, y0.shape[0]))
+    y = np.zeros((Nt, y0.shape[0]))
     y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
     y[0, :] = y0
-    T = np.zeros((10000,))
+    T = np.zeros((Nt,))
+    T[0] = t0
 
     p = dae.p
-    while abs(tt - T_end) > abs(dt) / 10:
+    while T_end - tt > abs(dt) / 10:
         My0 = dae.M @ y0
         F0 = dae.F(t0, y0, p).copy()
         ae = nAE(lambda y_, p_: dt / 2 * (dae.F(t0 + dt, y_, p_) + F0) - dae.M @ y_ + My0,
                  lambda y_, p_: -dae.M + dt / 2 * dae.J(t0 + dt, y_, p_),
                  p)
 
-        sol = nr_method(ae, y0, Opt(stats=True))
+        sol = nr_method(ae, y0, Opt(stats=True, ite_tol=opt.ite_tol))
         y1 = sol.y
         stats.ndecomp = stats.ndecomp + sol.stats.nstep
         stats.nfeval = stats.nfeval + sol.stats.nstep

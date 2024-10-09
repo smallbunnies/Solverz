@@ -1,4 +1,5 @@
 from sympy import Number as SymNumber, Integer
+from sympy import Float
 import numpy as np
 from numpy import integer as NpInteger
 from numbers import Number as PyNumber
@@ -36,4 +37,7 @@ def is_scalar(a):
 
 
 def is_zero(a):
-    return a == 0
+    if is_number(a):
+        return Float(a) == Float(0)
+    else:
+        return False

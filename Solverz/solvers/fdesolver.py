@@ -67,7 +67,7 @@ def fdae_solver(fdae: nFDAE,
     T = np.zeros((nstep,))
     T[0] = t0
     if opt.pbar:
-        bar = tqdm.tqdm(total=tend)
+        bar = tqdm.tqdm(total=tend-t0)
 
     done = False
     p = fdae.p

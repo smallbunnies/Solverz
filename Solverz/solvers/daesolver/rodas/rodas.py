@@ -44,6 +44,8 @@ def Rodas(dae: nDAE,
             Initial step size
         - hmax: None(default)|float
             Maximum step size.
+        - pbar: False(default)|bool
+            To display progress bar
 
     Returns
     =======
@@ -69,6 +71,8 @@ def Rodas(dae: nDAE,
     tspan = np.array(tspan)
     tend = tspan[-1]
     t0 = tspan[0]
+    if t0 > tend:
+        raise ValueError(f't0: {t0} > tend: {tend}')
     if opt.hmax is None:
         opt.hmax = np.abs(tend - t0)
     nt = 0
@@ -80,6 +84,9 @@ def Rodas(dae: nDAE,
     y = np.zeros((10001, vsize))
     y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
     y[0, :] = y0
+
+    if opt.pbar:
+        pbar = tqdm(total=tend - t0)
 
     dense_output = False
     n_tspan = len(tspan)
@@ -185,6 +192,7 @@ def Rodas(dae: nDAE,
             reject = 0
             told = t
             t = t + dt
+
             stats.nstep = stats.nstep + 1
             # events
             if haveEvent:
@@ -261,6 +269,9 @@ def Rodas(dae: nDAE,
                     T[nt] = tnext
                     y[nt] = ynext
 
+                    if opt.pbar:
+                        pbar.update(T[nt] - T[nt - 1])
+
                     if haveEvent and stop:
                         if tnext >= tevent:
                             break
@@ -277,6 +288,9 @@ def Rodas(dae: nDAE,
                 nt = nt + 1
                 T[nt] = t
                 y[nt] = ynew
+
+                if opt.pbar:
+                    pbar.update(T[nt] - T[nt - 1])
 
             if nt == 10000:
                 warnings.warn("Time steps more than 10000! Rodas breaks. Try input a smaller tspan!")
@@ -295,6 +309,10 @@ def Rodas(dae: nDAE,
 
     T = T[0:nt + 1]
     y = y[0:nt + 1]
+
+    if opt.pbar:
+        pbar.close()
+
     if haveEvent:
         te = te[0:nevent + 1]
         ye = ye[0:nevent + 1]
