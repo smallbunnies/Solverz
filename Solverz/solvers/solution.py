@@ -54,8 +54,7 @@ class daesol:
 
         elif is_number(item):
             item = int(item)
-            if self.ie is not None:
-                return daesol(self.T[item], self.Y[item])
+            return daesol(self.T[item], self.Y[item])
         else:
             raise NotImplementedError(f"Index type {type(item)} not implemented!")
 
