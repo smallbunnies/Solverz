@@ -110,6 +110,11 @@ def switch(*args):
         raise ValueError(f"Length of Input array not consistent {shapes}")
     return np.select(conditions, choice_list, 0)
 
+@implements_nfunc('Saturation')
+@njit(cache=True)
+def Saturation(x, xmin, xmax):
+    x = np.asarray(x).reshape((-1,))
+    return np.clip(x, xmin, xmax)
 
 @implements_nfunc('SolIn')
 @njit(cache=True)

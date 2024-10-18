@@ -391,9 +391,20 @@ class Saturation(MulVarFunc):
             \end{cases}
     """
 
-    @classmethod
-    def eval(cls, v, vmin, vmax):
-        return v * In(v, vmin, vmax) + vmax * GreaterThan(v, vmax) + vmin * LessThan(v, vmin)
+    def fdiff(self, argindex=1):
+        if argindex == 1:
+            return In(*self.args)
+        else:
+            return Integer(0)
+
+    def _numpycode(self, printer, **kwargs):
+        return r'Saturation(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
 
 
 class AntiWindUp(MulVarFunc):

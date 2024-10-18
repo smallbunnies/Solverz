@@ -6,7 +6,7 @@
 Solverz supports three types of equality constraints, which are respectively
 
 1. Algebraic Equations (AEs) with general formula $0=F(y,p)$
-2. Finite Difference Algebraic Equations (FDAEs) with general formula $0=F(y,p,y_0)$
+2. Finite Difference Algebraic Equations (FDAEs) with general formula $0=F(t,y,p,y_0)$
 3. Differential Algebraic Equations (DAEs) with general formula $M\dot{y}=F(t,y,p)$
 
 where $y$ is the known variable, $F$ is the mapping, $p$ is the parameter set of your models, $y_0$ is the previous time node value of $y$, $M$is the singular mass matrix.
