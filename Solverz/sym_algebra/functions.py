@@ -179,6 +179,15 @@ class UniVarFunc(Function):
         if len(args) != 1:
             raise TypeError(f'Supports one operand while {len(args)} input!')
 
+    def _numpycode(self, printer, **kwargs):
+        pass
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
 
 class Abs(UniVarFunc):
     r"""
@@ -208,9 +217,6 @@ class Abs(UniVarFunc):
     def _numpycode(self, printer, **kwargs):
         return r'abs(' + printer._print(self.args[0]) + r')'
 
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
 
 class exp(UniVarFunc):
     r"""
@@ -223,9 +229,6 @@ class exp(UniVarFunc):
     def _numpycode(self, printer, **kwargs):
         return r'exp(' + printer._print(self.args[0]) + r')'
 
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
 
 class ln(UniVarFunc):
     r"""
@@ -237,9 +240,6 @@ class ln(UniVarFunc):
 
     def _numpycode(self, printer, **kwargs):
         return r'log(' + printer._print(self.args[0]) + r')'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
 
 
 class sin(UniVarFunc):
@@ -256,9 +256,6 @@ class sin(UniVarFunc):
     def _numpycode(self, printer, **kwargs):
         return r'sin(' + printer._print(self.args[0]) + r')'
 
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
 
 class cos(UniVarFunc):
     r"""
@@ -273,9 +270,6 @@ class cos(UniVarFunc):
 
     def _numpycode(self, printer, **kwargs):
         return r'cos(' + printer._print(self.args[0]) + r')'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
 
 
 class Sign(UniVarFunc):
@@ -301,12 +295,6 @@ class Sign(UniVarFunc):
 
     def _numpycode(self, printer, **kwargs):
         return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
 
     def _octave(self, printer, **kwargs):
         return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
@@ -336,12 +324,6 @@ class heaviside(UniVarFunc):
     def _numpycode(self, printer, **kwargs):
         return r'Heaviside(' + printer._print(self.args[0], **kwargs) + r')'
 
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
     def _octave(self, printer, **kwargs):
         return r'Heaviside(' + printer._print(self.args[0], **kwargs) + r')'
 
@@ -349,7 +331,16 @@ class heaviside(UniVarFunc):
 # %% multi-variate func
 @VarParser
 class MulVarFunc(Function):
-    pass
+
+    def _numpycode(self, printer, **kwargs):
+        return (f'{self.__class__.__name__}' + r'(' +
+                ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')')
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
 
 
 class minmod_flag(MulVarFunc):
@@ -369,12 +360,6 @@ class switch(MulVarFunc):
 
     def _numpycode(self, printer, **kwargs):
         return r'switch(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
 
 
 class Saturation(MulVarFunc):
@@ -399,12 +384,6 @@ class Saturation(MulVarFunc):
 
     def _numpycode(self, printer, **kwargs):
         return r'Saturation(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
 
 
 class AntiWindUp(MulVarFunc):
@@ -483,12 +462,6 @@ class In(MulVarFunc):
     def _numpycode(self, printer, **kwargs):
         return r'SolIn(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
 
 class GreaterThan(MulVarFunc):
     """
@@ -504,12 +477,6 @@ class GreaterThan(MulVarFunc):
 
     def _numpycode(self, printer, **kwargs):
         return r'SolGreaterThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
 
 
 class LessThan(MulVarFunc):
@@ -527,12 +494,6 @@ class LessThan(MulVarFunc):
     def _numpycode(self, printer, **kwargs):
         return r'SolLessThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
 
 class And(MulVarFunc):
     """
@@ -548,12 +509,6 @@ class And(MulVarFunc):
 
     def _numpycode(self, printer, **kwargs):
         return r'And(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
 
 
 class Or(MulVarFunc):
@@ -571,12 +526,6 @@ class Or(MulVarFunc):
     def _numpycode(self, printer, **kwargs):
         return r'Or(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
 
 class Not(MulVarFunc):
     """
@@ -591,12 +540,6 @@ class Not(MulVarFunc):
 
     def _numpycode(self, printer, **kwargs):
         return r'Not(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
 
 
 # %% custom func of equation printer
