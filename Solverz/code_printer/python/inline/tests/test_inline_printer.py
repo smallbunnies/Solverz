@@ -141,6 +141,7 @@ def test_print_F_J():
     m.f1 = Ode('f1', f=m.v, diff_var=m.h)
     m.f2 = Ode('f2', f=m.g, diff_var=m.v)
     bball, y0 = m.create_instance()
+    bball.FormJac(y0)
     assert print_J(bball.__class__.__name__,
                    bball.jac,
                    bball.a,
@@ -237,6 +238,7 @@ def test_print_F_J_FDAE():
     m.ae4 = Eqn('cha4',
                 m.p[2] - m.p0[0])
     fdae, y0 = m.create_instance()
+    fdae.FormJac(y0)
     assert print_J(fdae.__class__.__name__,
                    fdae.jac,
                    fdae.a,
