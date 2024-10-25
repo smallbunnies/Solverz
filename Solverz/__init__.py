@@ -1,4 +1,4 @@
-from Solverz.equation.eqn import Eqn, Ode, HyperbolicPde
+from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import AE, FDAE, DAE
 from Solverz.equation.param import Param, IdxParam, TimeSeriesParam
 from Solverz.sym_algebra.symbols import idx, Para, iVar, iAliasVar

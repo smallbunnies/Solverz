@@ -11,17 +11,10 @@ from Solverz.sym_algebra.symbols import iVar, Para, IdxVar, idx, IdxPara, iAlias
 from Solverz.variable.ssymbol import Var
 from Solverz.sym_algebra.functions import Mat_Mul, Slice, F
 from Solverz.sym_algebra.matrix_calculus import MixedEquationDiff
-from Solverz.sym_algebra.transform import finite_difference, semi_descritize
 from Solverz.num_api.custom_function import numerical_interface
 from Solverz.variable.ssymbol import sSym2Sym
 from Solverz.utilities.type_checker import is_zero
 
-
-def sVar2Var(var: Union[Var, iVar, List[iVar, Var]]) -> Union[iVar, List[iVar]]:
-    if isinstance(var, list):
-        return [arg.symbol if isinstance(arg, Var) else arg for arg in var]
-    else:
-        return var.symbol if isinstance(var, Var) else var
 
 
 class Eqn:
@@ -36,7 +29,7 @@ class Eqn:
             raise ValueError("Equation name must be string!")
         self.name: str = name
         self.LHS = 0
-        self.RHS = sympify(eqn)
+        self.RHS = sympify(sSym2Sym(eqn))
         self.SYMBOLS: Dict[str, Symbol] = self.obtain_symbols()
 
         # if the eqn has Mat_Mul, then label it as mixed-matrix-vector equation
@@ -154,7 +147,7 @@ class Ode(Eqn):
     def __init__(self, name: str,
                  f,
                  diff_var: Union[iVar, IdxVar, Var]):
-        super().__init__(name, sSym2Sym(f))
+        super().__init__(name, f)
         diff_var = sSym2Sym(diff_var)
         self.diff_var = diff_var
         self.LHS = Derivative(diff_var, t)
