@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Union, List, Dict, Callable
 
 import numpy as np
-from sympy import Symbol, Expr, latex, Derivative, sympify
+from sympy import Symbol, Expr, latex, Derivative, sympify, Function
 from sympy import lambdify as splambdify
 from sympy.abc import t, x
 
 from Solverz.sym_algebra.symbols import iVar, Para, IdxVar, idx, IdxPara, iAliasVar, IdxAliasVar
 from Solverz.variable.ssymbol import Var
-from Solverz.sym_algebra.functions import Mat_Mul, Slice, F
+from Solverz.sym_algebra.functions import Mat_Mul, Slice
 from Solverz.sym_algebra.matrix_calculus import MixedEquationDiff
 from Solverz.num_api.custom_function import numerical_interface
 from Solverz.variable.ssymbol import sSym2Sym
@@ -127,7 +127,7 @@ class EqnDiff(Eqn):
                 self.var_idx_func = Eqn('To evaluate var_idx of variable' + self.diff_var.name, Slice(*temp))
             elif isinstance(self.var_idx, Expr):
                 self.var_idx_func = Eqn('To evaluate var_idx of variable' + self.diff_var.name, self.var_idx)
-        self.LHS = Derivative(F, diff_var)
+        self.LHS = Derivative(Function('F'), diff_var)
         self.dim = -1
         self.v_type = ''
 

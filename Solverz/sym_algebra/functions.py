@@ -6,14 +6,6 @@ from sympy.core.function import ArgumentIndexError
 from Solverz.variable.ssymbol import sSym2Sym
 
 
-# %% miscellaneous
-class F(Function):
-    """
-    For the usage of denoting the function being differentiated in EqnDiff object only
-    """
-    pass
-
-
 # %%
 def VarParser(cls):
     # To convert non-sympy symbols to sympy symbols
