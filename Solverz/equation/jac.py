@@ -6,7 +6,7 @@ import warnings
 from sympy import Expr, Function, Integer
 from Solverz.sym_algebra.symbols import iVar, IdxVar
 from Solverz.utilities.type_checker import is_vector, is_scalar, is_integer, is_number, PyNumber, is_zero
-from Solverz.sym_algebra.functions import Diag
+from Solverz.sym_algebra.functions import Diag, Ones
 
 SolVar = Union[iVar, IdxVar]
 
@@ -297,27 +297,5 @@ def slice2array(s: slice) -> np.ndarray:
     return np.arange(s.start, s.stop)
 
 
-class Ones(Function):
-    r"""
-    The all-one vector to broadcast scalars to a vector
-    For example, 2 -> 2*Ones(eqn_size)
-    The derivative is d(Ones(eqn_size))/dx=0
-    """
 
-    @classmethod
-    def eval(cls, x):
-        if not isinstance(x, Integer):
-            raise ValueError("The arg of Ones() should be integer.")
 
-    def _eval_derivative(self, s):
-        return 0
-
-    def _numpycode(self, printer, **kwargs):
-        x = self.args[0]
-        return r'ones(' + printer._print(x, **kwargs) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)

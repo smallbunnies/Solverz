@@ -11,7 +11,7 @@ from Solverz.code_printer.python.utilities import parse_p, parse_trigger_func
 from Solverz.code_printer.python.module.module_printer import print_F, print_inner_F, print_sub_inner_F, \
     print_J, print_inner_J, print_Hvp, print_inner_Hvp
 from Solverz.equation.equations import Equations as SymEquations
-from Solverz.num_api.custom_function import numerical_interface
+from Solverz.num_api.module_parser import modules
 from Solverz.variable.variables import Vars, combine_Vars
 from Solverz.equation.hvp import Hvp
 
@@ -67,8 +67,7 @@ def render_modules(eqs: SymEquations,
         code_dict["inner_Hvp"] = inner_Hvp['code_inner_Hvp']
         code_dict["sub_inner_Hvp"] = inner_Hvp['code_sub_inner_Hvp']
 
-    custom_func = dict()
-    custom_func.update(numerical_interface)
+
 
     def print_trigger_func_code():
         code_tfuc = dict()
@@ -117,7 +116,7 @@ def render_modules(eqs: SymEquations,
                       p,
                       eqn_parameter,
                       y,
-                      [custom_func, 'numpy'],
+                      modules,
                       numba,
                       directory)
     print('Complete!')
@@ -265,16 +264,24 @@ def print_module_code(code_dict: Dict[str, str], numba=False):
 
     return code
 
+#
+code_from_SolMuseum="""
+try:
+    import SolMuseum.num_api as SolMF
+except ImportError as e:
+    pass
 
+"""
 def print_dependency_code(modules):
     code = "import os\n"
     code += "current_module_dir = os.path.dirname(os.path.abspath(__file__))\n"
     code += 'from Solverz import load\n'
     code += 'auxiliary = load(f"{current_module_dir}\\\\param_and_setting.pkl")\n'
     code += 'from numpy import *\n'
-    code += 'from numpy import abs\n'
-    code += 'from Solverz.num_api.custom_function import *\n'  # import Solverz built-in func
-    code += 'from scipy.sparse import *\n'
+    code += 'import numpy as np\n'
+    code += 'import Solverz.num_api.custom_function as SolCF\n'  # import Solverz built-in func
+    code += code_from_SolMuseum
+    code += 'import scipy.sparse as sps\n'
     code += 'from numba import njit\n'
     code += 'setting = auxiliary["eqn_param"]\n'
     code += 'row = setting["row"]\n'

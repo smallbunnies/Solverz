@@ -4,7 +4,7 @@ from sympy.utilities.lambdify import _import, _module_present, _get_namespace
 
 from Solverz.variable.variables import Vars
 from Solverz.code_printer.python.utilities import *
-
+from Solverz.num_api.module_parser import modules
 
 # %%
 
@@ -162,12 +162,11 @@ def made_numerical(eqs: SymEquations,
                              sparse)
         code['HVP'] = code_HVP
     custom_func = dict()
-    custom_func.update(numerical_interface)
     custom_func.update(parse_trigger_func(eqs.PARAM))
-    F = Solverzlambdify(code_F, 'F_', modules=[custom_func, 'numpy'])
-    J = Solverzlambdify(code_J, 'J_', modules=[custom_func, 'numpy'])
+    F = Solverzlambdify(code_F, 'F_', modules=[custom_func]+modules)
+    J = Solverzlambdify(code_J, 'J_', modules=[custom_func]+modules)
     if make_hvp:
-        HVP = Solverzlambdify(code_HVP, 'Hvp_', modules=[custom_func, 'numpy'])
+        HVP = Solverzlambdify(code_HVP, 'Hvp_', modules=[custom_func]+modules)
     p = parse_p(eqs.PARAM)
     print('Complete!')
     if isinstance(eqs, SymAE) and not isinstance(eqs, SymFDAE):

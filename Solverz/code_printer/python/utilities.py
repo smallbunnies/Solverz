@@ -18,11 +18,10 @@ from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDA
 from Solverz.equation.jac import JacBlock, Jac
 from Solverz.equation.hvp import Hvp
 from Solverz.equation.param import TimeSeriesParam, ParamBase
-from Solverz.sym_algebra.symbols import iVar, SolDict, Para, idx, IdxSymBasic
-from Solverz.sym_algebra.functions import Arange
+from Solverz.sym_algebra.symbols import *
+from Solverz.sym_algebra.functions import *
 from Solverz.utilities.address import Address
 from Solverz.utilities.type_checker import is_number
-from Solverz.num_api.custom_function import numerical_interface
 from Solverz.num_api.num_eqn import nAE, nFDAE, nDAE
 
 
@@ -193,71 +192,5 @@ def print_eqn_assignment(EQNs: Dict[str, Eqn],
     return eqn_declaration
 
 
-class coo_2_csc(Symbol):
-
-    def __new__(cls, eqn_size: int, vsize: int):
-        obj = Symbol.__new__(cls, f'coo_2_csc')
-        obj.eqn_size = eqn_size
-        obj.vsize = vsize
-        return obj
-
-    def _numpycode(self, printer, **kwargs):
-        return f'coo_array((data, (row, col)), ({self.eqn_size}, {self.vsize})).tocsc()'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
 
 
-class coo_2_csc_hvp(Symbol):
-
-    def __new__(cls, eqn_size: int, vsize: int):
-        obj = Symbol.__new__(cls, f'coo_2_csc')
-        obj.eqn_size = eqn_size
-        obj.vsize = vsize
-        return obj
-
-    def _numpycode(self, printer, **kwargs):
-        return f'coo_array((data_hvp, (row_hvp, col_hvp)), ({self.eqn_size}, {self.vsize})).tocsc()'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-
-class coo_array(Function):
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) > 1:
-            raise ValueError(
-                f"Solverz' coo_array object accepts only one inputs.")
-
-    def _numpycode(self, printer, **kwargs):
-        return f'coo_array({printer._print(self.args[0])})'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-
-class extend(Function):
-
-    def _numpycode(self, printer, **kwargs):
-        return f'{printer._print(self.args[0])}.extend({printer._print(self.args[1])})'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-
-class zeros(Function):
-    # print zeros(6,6) as zeros((6,6))
-    # or zeros(6,) as zeros((6,))
-    def _numpycode(self, printer, **kwargs):
-        if len(self.args) == 2:
-            temp1 = printer._print(self.args[0])
-            temp2 = printer._print(self.args[1])
-            return r'zeros((' + temp1 + ', ' + temp2 + r'))'
-        elif len(self.args) == 1:
-            temp = printer._print(self.args[0])
-            return r'zeros((' + temp + ', ' + r'))'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)

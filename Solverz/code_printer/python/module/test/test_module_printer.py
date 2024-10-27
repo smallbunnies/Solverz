@@ -26,7 +26,7 @@ expected_AE_Hvp = """def Hvp_(y_, p_, v_):
     lam = p_["lam"]
     ax = ax_trigger_func(x)
     data_hvp = inner_Hvp(_data_hvp, v_, omega, delta, x, y, ax, lam)
-    return coo_array((data_hvp, (row_hvp, col_hvp)), (25, 25)).tocsc()
+    return sps.coo_array((data_hvp, (row_hvp, col_hvp)), (25, 25)).tocsc()
 """.strip()
 expected_FDAE_Hvp = """def Hvp_(t, y_, p_, v_, y_0):
     omega = y_[0:10]
@@ -41,7 +41,7 @@ expected_FDAE_Hvp = """def Hvp_(t, y_, p_, v_, y_0):
     lam = p_["lam"]
     ax = ax_trigger_func(x)
     data_hvp = inner_Hvp(_data_hvp, v_, omega, delta, x, y, omega_tag_0, delta_tag_0, x_tag_0, y_tag_0, ax, lam)
-    return coo_array((data_hvp, (row_hvp, col_hvp)), (25, 25)).tocsc()
+    return sps.coo_array((data_hvp, (row_hvp, col_hvp)), (25, 25)).tocsc()
 """.strip()
 
 
@@ -87,13 +87,13 @@ expected_inner_Hvp = """def inner_Hvp(_data_hvp, v_, x, c):
     return _data_hvp
 """.strip()
 expected_inner_Hvp0 = """def inner_Hvp0(v_, x):
-    return v_[0]*exp(x[0])*ones(1)
+    return v_[0]*np.exp(x[0])*np.ones(1)
 """.strip()
 expected_inner_Hvp1 = """def inner_Hvp1(v_, x):
-    return -v_[1]*sin(x[1])*ones(1)
+    return -v_[1]*sin(x[1])*np.ones(1)
 """.strip()
 expected_inner_Hvp2 = """def inner_Hvp2(c, v_):
-    return v_[1]*c*ones(1)
+    return v_[1]*c*np.ones(1)
 """.strip()
 
 
@@ -169,7 +169,7 @@ expected = """def J_(t, y_, p_):
     G6 = p_["G6"].get_v_t(t)
     ax = ax_trigger_func(x)
     data = inner_J(_data_, omega, delta, x, y, ax, lam, G6)
-    return coo_array((data, (row, col)), (25, 25)).tocsc()
+    return sps.coo_array((data, (row, col)), (25, 25)).tocsc()
 """.strip()
 expected1 = """def J_(t, y_, p_, y_0):
     omega = y_[0:10]
@@ -185,7 +185,7 @@ expected1 = """def J_(t, y_, p_, y_0):
     G6 = p_["G6"].get_v_t(t)
     ax = ax_trigger_func(x)
     data = inner_J(_data_, omega, delta, x, y, omega_tag_0, delta_tag_0, x_tag_0, y_tag_0, ax, lam, G6)
-    return coo_array((data, (row, col)), (25, 25)).tocsc()
+    return sps.coo_array((data, (row, col)), (25, 25)).tocsc()
 """.strip()
 
 
@@ -234,7 +234,7 @@ expected2 = """def inner_J(_data_, omega, x, y, z, ax, lam, G6):
     return _data_
 """.strip()
 expected3 = """def inner_J0(y):
-    return y*ones(3)
+    return y*np.ones(3)
 """.strip()
 expected4 = """def inner_J1(y):
     return y**2

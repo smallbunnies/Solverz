@@ -11,7 +11,7 @@ from Solverz.sym_algebra.symbols import iVar, Para, IdxVar, idx, IdxPara, iAlias
 from Solverz.variable.ssymbol import Var
 from Solverz.sym_algebra.functions import Mat_Mul, Slice
 from Solverz.sym_algebra.matrix_calculus import MixedEquationDiff
-from Solverz.num_api.custom_function import numerical_interface
+from Solverz.num_api.module_parser import modules
 from Solverz.variable.ssymbol import sSym2Sym
 from Solverz.utilities.type_checker import is_zero
 
@@ -55,7 +55,7 @@ class Eqn:
         return sorted_dict
 
     def lambdify(self) -> Callable:
-        return splambdify(self.SYMBOLS.values(), self.RHS, [numerical_interface, 'numpy'])
+        return splambdify(self.SYMBOLS.values(), self.RHS, modules)
 
     def eval(self, *args: Union[np.ndarray]) -> np.ndarray:
         return self.NUM_EQN(*args)
