@@ -22,6 +22,7 @@ f1 = f.NUM_EQN(np.array([3, 4]))
 assert isinstance(f1, np.ndarray)
 assert f1.ndim == 1
 
+
 def test_discarding_zero_deri():
     # discard zero derivative
     u = Var('u', [1, 1, 1])
@@ -41,3 +42,4 @@ def test_Var_converter():
     g = Ode('g', Var('x'), diff_var=Var('y'))
     assert g.SYMBOLS['x'].__str__() == 'x'
     assert g.diff_var.name == 'y'
+

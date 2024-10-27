@@ -8,6 +8,7 @@ from Solverz.sym_algebra.symbols import iVar, IdxVar
 from Solverz.utilities.type_checker import is_vector, is_scalar, is_integer, is_number, PyNumber, is_zero
 from Solverz.sym_algebra.functions import Diag, Ones
 
+
 SolVar = Union[iVar, IdxVar]
 
 
