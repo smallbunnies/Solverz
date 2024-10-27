@@ -16,7 +16,6 @@ from Solverz.variable.ssymbol import sSym2Sym
 from Solverz.utilities.type_checker import is_zero
 
 
-
 class Eqn:
     """
     The Equation object
