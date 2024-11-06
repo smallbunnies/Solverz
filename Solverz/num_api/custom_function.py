@@ -50,24 +50,24 @@ def minmod(a, b, c):
     return res
 
 
-def minmod_flag(*args):
-    if len(args) != 3:
-        raise ValueError("Input arg length must be 3")
+@njit(cache=True)
+def minmod_flag(a, b, c):
+    """
+    Return the index of minmod_flag
+    """
 
-    shapes = [arg.shape[0] for arg in args]
+    # check the consistency of input length
+    if not (len(a) == len(b) == len(c)):
+        raise ValueError("Input length must be the same!")
 
-    a, b, c = args
-    stacked_array = np.hstack((a, b, c))
-    if all(x == shapes[0] for x in shapes):
-        cd1 = (a > 0) & (b > 0) & (c > 0)
-        cd2 = (a < 0) & (b < 0) & (c < 0)
-        conditions = [cd1,
-                      cd2]
-        choice_list = [np.argmin(stacked_array, axis=0),
-                       np.argmax(stacked_array, axis=0)]
-    else:
-        raise ValueError(f"Length of Input array not consistent {shapes}")
-    return np.select(conditions, choice_list, 3)
+    res = np.zeros_like(a).astype(np.int32)
+
+    for i in range(len(a)):
+        if a[i]*b[i] >0 and a[i]*c[i]>0:
+            res[i] = np.abs(np.array([a[i], b[i], c[i]])).argmin() + 1
+
+    return res
+
 
 
 @njit(cache=True)
@@ -95,6 +95,28 @@ def switch(*args):
     else:
         raise ValueError(f"Length of Input array not consistent {shapes}")
     return np.select(conditions, choice_list, 0)
+
+
+@njit(cache=True)
+def switch_minmod(a, b, c, flag):
+    """
+    Conditionally output the derivatives of minmod according to the flag
+    """
+    if not (len(a) == len(b) == len(c) == len(flag)):
+        raise ValueError("Input length must be the same!")
+
+    res = np.zeros_like(a)
+
+
+    for i in range(len(a)):
+        if flag[i] == 1:
+            res[i] = a[i]
+        elif flag[i] == 2:
+            res[i] = b[i]
+        elif flag[i] == 3:
+            res[i] = c[i]
+
+    return res
 
 
 @njit(cache=True)
