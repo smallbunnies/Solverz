@@ -166,10 +166,12 @@ class Diag(MatrixFunction):
 # %% Univariate func
 @VarParser
 class UniVarFunc(Function):
+    arglength = 1
+
     @classmethod
     def eval(cls, *args):
         if len(args) != 1:
-            raise TypeError(f'Supports one operand while {len(args)} input!')
+            raise TypeError(f'{cls.name} supports {cls.arglength} operand while {len(args)} input!')
 
     def _numpycode(self, printer, **kwargs):
         pass
@@ -322,9 +324,29 @@ class heaviside(UniVarFunc):
         return r'Heaviside(' + printer._print(self.args[0], **kwargs) + r')'
 
 
+class Not(UniVarFunc):
+    """
+    Represents bitwise_not
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '({op1})'.format(op1=printer._print(self.args[0]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'SolCF.Not(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 # %% multi-variate func
 @VarParser
 class MulVarFunc(Function):
+
+    arglength = 3
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != cls.arglength:
+            raise TypeError(f"{cls.__name__} takes {cls.arglength} positional arguments but {len(args)} were given!")
 
     def _numpycode(self, printer, **kwargs):
         return (f'{self.__class__.__name__}' + r'(' +
@@ -335,6 +357,9 @@ class MulVarFunc(Function):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
+
+class minmod(MulVarFunc):
+    arglength = 3
 
 
 class minmod_flag(MulVarFunc):
@@ -410,6 +435,7 @@ class AntiWindUp(MulVarFunc):
             \operatorname{AntiWindUp}(u_{\text {des }}(t), u_{\min }, u_{\max }, e(t)).
 
     """
+    arglength = 4
 
     @classmethod
     def eval(cls, u, umin, umax, e):
@@ -433,6 +459,7 @@ class Min(MulVarFunc):
         \end{cases}\end{split}
 
     """
+    arglength = 2
 
     @classmethod
     def eval(cls, x, y):
@@ -444,6 +471,7 @@ class In(MulVarFunc):
     In(v, vmin, vmax)
         return True if vmin<=v<=vmax
     """
+    arglength = 3
 
     def _eval_derivative(self, s):
         return Integer(0)
@@ -461,6 +489,7 @@ class GreaterThan(MulVarFunc):
     """
     Represents > operator
     """
+    arglength = 2
 
     def _eval_derivative(self, s):
         return Integer(0)
@@ -477,6 +506,7 @@ class LessThan(MulVarFunc):
     """
     Represents < operator
     """
+    arglength = 2
 
     def _eval_derivative(self, s):
         return Integer(0)
@@ -493,6 +523,7 @@ class And(MulVarFunc):
     """
     Represents bitwise_and
     """
+    arglength = 2
 
     def _eval_derivative(self, s):
         return Integer(0)
@@ -509,6 +540,7 @@ class Or(MulVarFunc):
     """
     Represents bitwise_or
     """
+    arglength = 2
 
     def _eval_derivative(self, s):
         return Integer(0)
@@ -521,19 +553,8 @@ class Or(MulVarFunc):
         return r'SolCF.Or(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
 
-class Not(MulVarFunc):
-    """
-    Represents bitwise_not
-    """
 
-    def _eval_derivative(self, s):
-        return Integer(0)
 
-    def _sympystr(self, printer, **kwargs):
-        return '({op1})'.format(op1=printer._print(self.args[0]))
-
-    def _numpycode(self, printer, **kwargs):
-        return r'SolCF.Not(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
 
 # %% custom func of equation printer
