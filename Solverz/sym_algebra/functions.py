@@ -233,6 +233,7 @@ class ln(UniVarFunc):
     def _numpycode(self, printer, **kwargs):
         return r'np.log(' + printer._print(self.args[0]) + r')'
 
+
 # Notice: Do not succeed sympy.sin or cos here because the args of symbolic functions are Solverz.ssymbol.
 # We have to parse them first.
 class sin(UniVarFunc):
@@ -576,6 +577,7 @@ class Arange(Function):
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
 
+
 class Ones(Function):
     r"""
     The all-one vector to broadcast scalars to a vector
@@ -600,8 +602,6 @@ class Ones(Function):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
-
-
 
 
 class coo_array(Function):

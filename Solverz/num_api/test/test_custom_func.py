@@ -1,6 +1,6 @@
 import numpy as np
 
-from Solverz.num_api.custom_function import In, LessThan, GreaterThan, And, Or, Not
+from Solverz.num_api.custom_function import In, LessThan, GreaterThan, And, Or, Not, minmod
 
 
 def test_in():
@@ -49,3 +49,9 @@ def test_not():
     np.testing.assert_allclose(Not(a), np.array([0, 1, 0]))
     np.testing.assert_allclose(Not(1), np.array([0]))
     np.testing.assert_allclose(Not(0), np.array([1]))
+
+def test_minmod():
+    a = np.array([-1, 1, 2, 4.])
+    b = np.array([-3, 2, 0, 0])
+    c = np.array([-5, 3, -1, 1.])
+    np.testing.assert_allclose(minmod(a, b, c), np.array([-1, 1, 0, 0.]))

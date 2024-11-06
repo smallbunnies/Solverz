@@ -34,15 +34,20 @@ def _sign(arg):
     return np.sign(arg)
 
 
+@njit(cache=True)
 def minmod(a, b, c):
-    stacked_array = np.hstack((a, b, c))
-    cd1 = (a > 0) & (b > 0) & (c > 0)
-    cd2 = (a < 0) & (b < 0) & (c < 0)
-    conditions = [cd1,
-                  cd2]
-    choice_list = [np.min(stacked_array, axis=0),
-                   np.max(stacked_array, axis=0)]
-    return np.select(conditions, choice_list, 0)
+
+    # check the consistency of input length
+    if not (len(a) == len(b) == len(c)):
+        raise ValueError("Input length must be the same!")
+
+    res = np.zeros_like(a)
+
+    for i in range(len(a)):
+        if a[i]*b[i] >0 and a[i]*c[i]>0:
+            res[i] = np.min(np.abs(np.array([a[i], b[i], c[i]]))) *np.sign(a[i])
+
+    return res
 
 
 def minmod_flag(*args):
@@ -65,12 +70,12 @@ def minmod_flag(*args):
     return np.select(conditions, choice_list, 3)
 
 
-@njit
+@njit(cache=True)
 def Heaviside(x):
     return np.where(x >= 0, 1.0, 0.0)
 
 
-@njit
+@njit(cache=True)
 def switch(*args):
     flag = args[-1]
     flag_shape = args[-1].shape
