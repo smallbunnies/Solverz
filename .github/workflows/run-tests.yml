@@ -24,4 +24,4 @@ jobs:
         pip install -r requirements.txt
         cd ..
     - run: | # run both independent pytest and doctest
-        pytest -vv
+        pytest

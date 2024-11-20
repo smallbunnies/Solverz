@@ -360,47 +360,12 @@ class MulVarFunc(Function):
         return self._numpycode(printer, **kwargs)
 
 
-class minmod(MulVarFunc):
-    arglength = 3
-
-    def _eval_derivative(self, s):
-        return switch_minmod(*[arg.diff(s) for arg in self.args],
-                             minmod_flag(*self.args))
-
-    def _numpycode(self, printer, **kwargs):
-        return r'SolCF.minmod(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-
-class minmod_flag(MulVarFunc):
-    """
-    Different from `minmod`, minmod function outputs the position of args instead of the values of args.
-    """
-    arglength = 3
-
-    def _eval_derivative(self, s):
-        return Integer(0)
-
-
-    def _numpycode(self, printer, **kwargs):
-        return r'SolCF.minmod_flag(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-
 class switch(MulVarFunc):
     def _eval_derivative(self, s):
         return switch(*[arg.diff(s) for arg in self.args[0:len(self.args) - 1]], self.args[-1])
 
     def _numpycode(self, printer, **kwargs):
         return r'SolCF.switch(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-
-class switch_minmod(MulVarFunc):
-    arglength = 4
-
-    def _eval_derivative(self, s):
-        return switch_minmod(*[arg.diff(s) for arg in self.args[0:len(self.args) - 1]], self.args[-1])
-
-    def _numpycode(self, printer, **kwargs):
-        return r'SolCF.switch_minmod(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
 
 class Saturation(MulVarFunc):
