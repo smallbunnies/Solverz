@@ -4,14 +4,6 @@
 
 Solverz aims to help you model and solve your equations more efficiently.
 
-Solverz supports three types of abstract equation types, that are
-
-- Algebraic Equations (AEs) $0=F(y,p)$
-- Finite Difference Algebraic Equations (FDAEs) $0=F(y,p,y_0)$
-- Differential Algebraic Equations (DAEs) $M\dot{y}=F(t,y,p)$
-
-where $p$ is the parameter set of your models, $y_0$ is the previous time node value of $y$.
-
 Say, we want to know how long it takes for an apple to fall from a tree to the ground. We have the 
 differential equations 
 
