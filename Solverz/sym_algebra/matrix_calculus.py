@@ -9,6 +9,7 @@ from sympy import Expr, Mul, Add, S, Number, Integer, Symbol
 
 from Solverz.sym_algebra.symbols import IdxVar, IdxPara, iVar, Para
 from Solverz.sym_algebra.functions import Mat_Mul, Diag, transpose, Abs, Sign
+from Solverz.num_api.module_parser import modules
 
 
 class TMatrix:
@@ -245,7 +246,7 @@ def obtain_dim(expr) -> int:
                 symbol_dict[symbol] = np.ones((2, 2))
             elif symbol.dim == 1:
                 symbol_dict[symbol] = np.ones((2, 1))
-    temp_expr = sp.lambdify(symbol_dict.keys(), expr)
+    temp_expr = sp.lambdify(symbol_dict.keys(), expr, modules=modules)
     return temp_expr(*symbol_dict.values()).shape[1]
 
 

@@ -36,6 +36,9 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+[tool.pytest.ini_options]
+addopts = "-vv"
+
 [project.urls]
 Homepage = "https://github.com/smallbunnies/Solverz"
 Issues = "https://github.com/smallbunnies/Solverz/issues"

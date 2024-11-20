@@ -2,28 +2,17 @@ from __future__ import annotations
 
 from functools import reduce
 
+import warnings
 import numpy as np
 from numpy import linalg
 from scipy.sparse import diags, csc_array, coo_array, linalg as sla
 from numba import njit
 
+
 # from cvxopt.umfpack import linsolve
 # from cvxopt import matrix, spmatrix
 
-numerical_interface = {'coo_array': coo_array, 'csc_array': csc_array}
 
-
-def implements_nfunc(nfunc_name: str):
-    """Register an DT function implementation for sympy Expr."""
-
-    def decorator(func):
-        numerical_interface[nfunc_name] = func
-        return func
-
-    return decorator
-
-
-@implements_nfunc('sol_slice')
 def sol_slice(*args):
     """
     This is used to convert the slice arguments to int
@@ -31,7 +20,6 @@ def sol_slice(*args):
     return slice(*[int(arg_[0]) if isinstance(arg_, np.ndarray) else arg_ for arg_ in args])
 
 
-@implements_nfunc('Slice')
 def Slice(*args):
     """
     This is used to evaluate the slice index of IdxVar/IdxParam/IdxConst
@@ -39,57 +27,20 @@ def Slice(*args):
     return sol_slice(*args)
 
 
-@implements_nfunc('ix_')
 def ix_(arg: np.ndarray):
     return arg.reshape(-1, )
 
 
-@implements_nfunc('Sign')
 def _sign(arg):
     return np.sign(arg)
 
 
-@implements_nfunc('minmod')
-def minmod(a, b, c):
-    stacked_array = np.hstack((a, b, c))
-    cd1 = (a > 0) & (b > 0) & (c > 0)
-    cd2 = (a < 0) & (b < 0) & (c < 0)
-    conditions = [cd1,
-                  cd2]
-    choice_list = [np.min(stacked_array, axis=0),
-                   np.max(stacked_array, axis=0)]
-    return np.select(conditions, choice_list, 0)
-
-
-@implements_nfunc('minmod_flag')
-def minmod_flag(*args):
-    if len(args) != 3:
-        raise ValueError("Input arg length must be 3")
-
-    shapes = [arg.shape[0] for arg in args]
-
-    a, b, c = args
-    stacked_array = np.hstack((a, b, c))
-    if all(x == shapes[0] for x in shapes):
-        cd1 = (a > 0) & (b > 0) & (c > 0)
-        cd2 = (a < 0) & (b < 0) & (c < 0)
-        conditions = [cd1,
-                      cd2]
-        choice_list = [np.argmin(stacked_array, axis=0),
-                       np.argmax(stacked_array, axis=0)]
-    else:
-        raise ValueError(f"Length of Input array not consistent {shapes}")
-    return np.select(conditions, choice_list, 3)
-
-
-@implements_nfunc('Heaviside')
-@njit
+@njit(cache=True)
 def Heaviside(x):
     return np.where(x >= 0, 1.0, 0.0)
 
 
-@implements_nfunc('switch')
-@njit
+@njit(cache=True)
 def switch(*args):
     flag = args[-1]
     flag_shape = args[-1].shape
@@ -111,49 +62,48 @@ def switch(*args):
     return np.select(conditions, choice_list, 0)
 
 
-@implements_nfunc('SolIn')
 @njit(cache=True)
-def SolIn(x, xmin, xmax):
+def Saturation(x, xmin, xmax):
+    x = np.asarray(x).reshape((-1,))
+    return np.clip(x, xmin, xmax)
+
+
+@njit(cache=True)
+def In(x, xmin, xmax):
     x = np.asarray(x).reshape((-1,))
     return np.bitwise_and(x >= xmin, x <= xmax).astype(np.int32)
 
 
-@implements_nfunc('SolGreaterThan')
 @njit(cache=True)
-def SolGreaterThan(x, y):
+def GreaterThan(x, y):
     x = np.asarray(x).reshape((-1,))
     return (x > y).astype(np.int32)
 
 
-@implements_nfunc('SolLessThan')
 @njit(cache=True)
-def SolLessThan(x, y):
+def LessThan(x, y):
     x = np.asarray(x).reshape((-1,))
     return (x < y).astype(np.int32)
 
 
-@implements_nfunc('And')
 @njit(cache=True)
 def And(x, y):
     x = np.asarray(x).reshape((-1,))
     return x & y
 
 
-@implements_nfunc('Or')
 @njit(cache=True)
 def Or(x, y):
     x = np.asarray(x).reshape((-1,))
     return x | y
 
 
-@implements_nfunc('Not')
 @njit(cache=True)
 def Not(x):
     x = np.asarray(x).reshape((-1,))
     return np.ones_like(x) - x
 
 
-@implements_nfunc('Diag')
 def diag(x) -> np.ndarray:
     """
     Generate diagonal matrix of given vector X
@@ -166,7 +116,6 @@ def diag(x) -> np.ndarray:
         return np.diagflat(x)
 
 
-@implements_nfunc('dConv_s')
 def DT_conv(*args, method='conv') -> np.ndarray:
     r"""
     Perform the convolutions in DT computations.
@@ -205,7 +154,6 @@ def DT_conv(*args, method='conv') -> np.ndarray:
         return np.array(np.real(np.fft.ifft(reduce(lambda a, b: a * b, y))[k - 1]))
 
 
-@implements_nfunc('dLinspace')
 def linspace(start, end) -> np.ndarray:
     r"""
 

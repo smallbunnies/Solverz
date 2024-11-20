@@ -18,9 +18,15 @@ current_module_dir = os.path.dirname(os.path.abspath(__file__))
 from Solverz import load
 auxiliary = load(f"{current_module_dir}\\param_and_setting.pkl")
 from numpy import *
-from numpy import abs
-from Solverz.num_api.custom_function import *
-from scipy.sparse import *
+import numpy as np
+import Solverz.num_api.custom_function as SolCF
+
+try:
+    import SolMuseum.num_api as SolMF
+except ImportError as e:
+    pass
+
+import scipy.sparse as sps
 from numba import njit
 setting = auxiliary["eqn_param"]
 row = setting["row"]
@@ -99,7 +105,7 @@ def test_AE_module_printer():
         inner_F) == '@njit(cache=True)\ndef inner_F(_F_, x):\n    _F_[0:1] = inner_F0(x)\n    _F_[1:2] = inner_F1(x)\n    return _F_\n'
     assert inspect.getsource(inner_F0.func_code) == '@njit(cache=True)\ndef inner_F0(x):\n    return 2*x[0] + x[1]\n'
     assert inspect.getsource(
-        inner_F1.func_code) == '@njit(cache=True)\ndef inner_F1(x):\n    return x[0]**2 + sin(x[1])\n'
+        inner_F1.func_code) == '@njit(cache=True)\ndef inner_F1(x):\n    return x[0]**2 + np.sin(x[1])\n'
     assert inspect.getsource(
         inner_J) == '@njit(cache=True)\ndef inner_J(_data_, x):\n    _data_[2:3] = inner_J0(x)\n    _data_[3:4] = inner_J1(x)\n    return _data_\n'
 
@@ -125,7 +131,7 @@ def test_AE_module_printer():
     assert inspect.getsource(
         inner_F) == 'def inner_F(_F_, x):\n    _F_[0:1] = inner_F0(x)\n    _F_[1:2] = inner_F1(x)\n    return _F_\n'
     assert inspect.getsource(inner_F0) == 'def inner_F0(x):\n    return 2*x[0] + x[1]\n'
-    assert inspect.getsource(inner_F1) == 'def inner_F1(x):\n    return x[0]**2 + sin(x[1])\n'
+    assert inspect.getsource(inner_F1) == 'def inner_F1(x):\n    return x[0]**2 + np.sin(x[1])\n'
     assert inspect.getsource(
         inner_J) == 'def inner_J(_data_, x):\n    _data_[2:3] = inner_J0(x)\n    _data_[3:4] = inner_J1(x)\n    return _data_\n'
 
@@ -136,7 +142,7 @@ expected_Hvp_ = """def Hvp_(y_, p_, v_):
     x = y_[0:2]
     c = p_["c"]
     data_hvp = inner_Hvp(_data_hvp, v_, x, c)
-    return coo_array((data_hvp, (row_hvp, col_hvp)), (2, 2)).tocsc()
+    return sps.coo_array((data_hvp, (row_hvp, col_hvp)), (2, 2)).tocsc()
 """
 
 expected_inner_Hvp = """@njit(cache=True)
@@ -149,17 +155,17 @@ def inner_Hvp(_data_hvp, v_, x, c):
 
 expected_inner_Hvp0 = """@njit(cache=True)
 def inner_Hvp0(v_, x):
-    return v_[0]*exp(x[0])*ones(1)
+    return v_[0]*np.exp(x[0])*np.ones(1)
 """
 
 expected_inner_Hvp1 = """@njit(cache=True)
 def inner_Hvp1(v_, x):
-    return -v_[1]*sin(x[1])*ones(1)
+    return -v_[1]*sin(x[1])*np.ones(1)
 """
 
 expected_inner_Hvp2 = """@njit(cache=True)
 def inner_Hvp2(c, v_):
-    return v_[1]*c*ones(1)
+    return v_[1]*c*np.ones(1)
 """
 
 
@@ -236,7 +242,7 @@ expected_J = """def J_(t, y_, p_, y_0):
     pb = p_["pb"].get_v_t(t)
     qb = p_["qb"]
     data = inner_J(_data_, p, q, p_tag_0, q_tag_0, pb, qb)
-    return coo_array((data, (row, col)), (164, 164)).tocsc()
+    return sps.coo_array((data, (row, col)), (164, 164)).tocsc()
 """
 
 expected_inner_J = """@njit(cache=True)
@@ -333,7 +339,7 @@ expected_J1 = """def J_(t, y_, p_):
     h = y_[0:1]
     v = y_[1:2]
     data = inner_J(_data_, h, v)
-    return coo_array((data, (row, col)), (2, 2)).tocsc()
+    return sps.coo_array((data, (row, col)), (2, 2)).tocsc()
 """
 
 expected_inner_J1 = """@njit(cache=True)

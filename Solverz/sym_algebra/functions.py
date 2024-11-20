@@ -6,14 +6,6 @@ from sympy.core.function import ArgumentIndexError
 from Solverz.variable.ssymbol import sSym2Sym
 
 
-# %% miscellaneous
-class F(Function):
-    """
-    For the usage of denoting the function being differentiated in EqnDiff object only
-    """
-    pass
-
-
 # %%
 def VarParser(cls):
     # To convert non-sympy symbols to sympy symbols
@@ -159,7 +151,7 @@ class Diag(MatrixFunction):
 
     def _numpycode(self, printer, **kwargs):
 
-        return r'diagflat(' + printer._print(self.args[0], **kwargs) + r')'
+        return r'np.diagflat(' + printer._print(self.args[0], **kwargs) + r')'
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
@@ -174,10 +166,21 @@ class Diag(MatrixFunction):
 # %% Univariate func
 @VarParser
 class UniVarFunc(Function):
+    arglength = 1
+
     @classmethod
     def eval(cls, *args):
         if len(args) != 1:
-            raise TypeError(f'Supports one operand while {len(args)} input!')
+            raise TypeError(f'{cls.name} supports {cls.arglength} operand while {len(args)} input!')
+
+    def _numpycode(self, printer, **kwargs):
+        pass
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
 
 
 class Abs(UniVarFunc):
@@ -206,10 +209,7 @@ class Abs(UniVarFunc):
             raise ArgumentIndexError(self, argindex)
 
     def _numpycode(self, printer, **kwargs):
-        return r'abs(' + printer._print(self.args[0]) + r')'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'np.abs(' + printer._print(self.args[0]) + r')'
 
 
 class exp(UniVarFunc):
@@ -221,10 +221,7 @@ class exp(UniVarFunc):
         return exp(*self.args)
 
     def _numpycode(self, printer, **kwargs):
-        return r'exp(' + printer._print(self.args[0]) + r')'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'np.exp(' + printer._print(self.args[0]) + r')'
 
 
 class ln(UniVarFunc):
@@ -236,12 +233,11 @@ class ln(UniVarFunc):
         return 1 / self.args[0]
 
     def _numpycode(self, printer, **kwargs):
-        return r'log(' + printer._print(self.args[0]) + r')'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'np.log(' + printer._print(self.args[0]) + r')'
 
 
+# Notice: Do not succeed sympy.sin or cos here because the args of symbolic functions are Solverz.ssymbol.
+# We have to parse them first.
 class sin(UniVarFunc):
     r"""
     The sine function.
@@ -254,10 +250,7 @@ class sin(UniVarFunc):
             raise ArgumentIndexError(self, argindex)
 
     def _numpycode(self, printer, **kwargs):
-        return r'sin(' + printer._print(self.args[0]) + r')'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'np.sin(' + printer._print(self.args[0]) + r')'
 
 
 class cos(UniVarFunc):
@@ -272,10 +265,7 @@ class cos(UniVarFunc):
             raise ArgumentIndexError(self, argindex)
 
     def _numpycode(self, printer, **kwargs):
-        return r'cos(' + printer._print(self.args[0]) + r')'
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'np.cos(' + printer._print(self.args[0]) + r')'
 
 
 class Sign(UniVarFunc):
@@ -300,16 +290,10 @@ class Sign(UniVarFunc):
         raise ArgumentIndexError(self, argindex)
 
     def _numpycode(self, printer, **kwargs):
-        return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'np.sign(' + printer._print(self.args[0], **kwargs) + r')'
 
     def _octave(self, printer, **kwargs):
-        return r'sign(' + printer._print(self.args[0], **kwargs) + r')'
+        return r'np.sign(' + printer._print(self.args[0], **kwargs) + r')'
 
 
 class heaviside(UniVarFunc):
@@ -334,33 +318,46 @@ class heaviside(UniVarFunc):
         raise ArgumentIndexError(self, argindex)
 
     def _numpycode(self, printer, **kwargs):
+        return r'SolCF.Heaviside(' + printer._print(self.args[0], **kwargs) + r')'
+
+    def _octave(self, printer, **kwargs):
         return r'Heaviside(' + printer._print(self.args[0], **kwargs) + r')'
+
+
+class Not(UniVarFunc):
+    """
+    Represents bitwise_not
+    """
+
+    def _eval_derivative(self, s):
+        return Integer(0)
+
+    def _sympystr(self, printer, **kwargs):
+        return '({op1})'.format(op1=printer._print(self.args[0]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'SolCF.Not(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+
+# %% multi-variate func
+@VarParser
+class MulVarFunc(Function):
+    arglength = 3
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != cls.arglength:
+            raise TypeError(f"{cls.__name__} takes {cls.arglength} positional arguments but {len(args)} were given!")
+
+    def _numpycode(self, printer, **kwargs):
+        return (f'{self.__class__.__name__}' + r'(' +
+                ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')')
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
-
-    def _octave(self, printer, **kwargs):
-        return r'Heaviside(' + printer._print(self.args[0], **kwargs) + r')'
-
-
-# %% multi-variate func
-@VarParser
-class MulVarFunc(Function):
-    pass
-
-
-class minmod_flag(MulVarFunc):
-    """
-    Different from `minmod`, minmod function outputs the position of args instead of the values of args.
-    """
-
-    @classmethod
-    def eval(cls, *args):
-        if len(args) != 3:
-            raise TypeError(f"minmod takes 3 positional arguments but {len(args)} were given!")
 
 
 class switch(MulVarFunc):
@@ -368,13 +365,7 @@ class switch(MulVarFunc):
         return switch(*[arg.diff(s) for arg in self.args[0:len(self.args) - 1]], self.args[-1])
 
     def _numpycode(self, printer, **kwargs):
-        return r'switch(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'SolCF.switch(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
 
 class Saturation(MulVarFunc):
@@ -391,9 +382,14 @@ class Saturation(MulVarFunc):
             \end{cases}
     """
 
-    @classmethod
-    def eval(cls, v, vmin, vmax):
-        return v * In(v, vmin, vmax) + vmax * GreaterThan(v, vmax) + vmin * LessThan(v, vmin)
+    def fdiff(self, argindex=1):
+        if argindex == 1:
+            return In(*self.args)
+        else:
+            return Integer(0)
+
+    def _numpycode(self, printer, **kwargs):
+        return r'SolCF.Saturation(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
 
 class AntiWindUp(MulVarFunc):
@@ -426,6 +422,7 @@ class AntiWindUp(MulVarFunc):
             \operatorname{AntiWindUp}(u_{\text {des }}(t), u_{\min }, u_{\max }, e(t)).
 
     """
+    arglength = 4
 
     @classmethod
     def eval(cls, u, umin, umax, e):
@@ -449,6 +446,7 @@ class Min(MulVarFunc):
         \end{cases}\end{split}
 
     """
+    arglength = 2
 
     @classmethod
     def eval(cls, x, y):
@@ -460,6 +458,7 @@ class In(MulVarFunc):
     In(v, vmin, vmax)
         return True if vmin<=v<=vmax
     """
+    arglength = 3
 
     def _eval_derivative(self, s):
         return Integer(0)
@@ -470,19 +469,14 @@ class In(MulVarFunc):
                                                     op3=printer._print(self.args[2]))
 
     def _numpycode(self, printer, **kwargs):
-        return r'SolIn(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'SolCF.In(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
 
 class GreaterThan(MulVarFunc):
     """
     Represents > operator
     """
+    arglength = 2
 
     def _eval_derivative(self, s):
         return Integer(0)
@@ -492,19 +486,14 @@ class GreaterThan(MulVarFunc):
                                           op2=printer._print(self.args[1]))
 
     def _numpycode(self, printer, **kwargs):
-        return r'SolGreaterThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'SolCF.GreaterThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
 
 class LessThan(MulVarFunc):
     """
     Represents < operator
     """
+    arglength = 2
 
     def _eval_derivative(self, s):
         return Integer(0)
@@ -514,19 +503,14 @@ class LessThan(MulVarFunc):
                                           op2=printer._print(self.args[1]))
 
     def _numpycode(self, printer, **kwargs):
-        return r'SolLessThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'SolCF.LessThan(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
 
 class And(MulVarFunc):
     """
     Represents bitwise_and
     """
+    arglength = 2
 
     def _eval_derivative(self, s):
         return Integer(0)
@@ -536,19 +520,14 @@ class And(MulVarFunc):
                                           op2=printer._print(self.args[1]))
 
     def _numpycode(self, printer, **kwargs):
-        return r'And(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'SolCF.And(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
 
 class Or(MulVarFunc):
     """
     Represents bitwise_or
     """
+    arglength = 2
 
     def _eval_derivative(self, s):
         return Integer(0)
@@ -558,34 +537,7 @@ class Or(MulVarFunc):
                                           op2=printer._print(self.args[1]))
 
     def _numpycode(self, printer, **kwargs):
-        return r'Or(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-
-class Not(MulVarFunc):
-    """
-    Represents bitwise_not
-    """
-
-    def _eval_derivative(self, s):
-        return Integer(0)
-
-    def _sympystr(self, printer, **kwargs):
-        return '({op1})'.format(op1=printer._print(self.args[0]))
-
-    def _numpycode(self, printer, **kwargs):
-        return r'Not(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
-
-    def _lambdacode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
-
-    def _pythoncode(self, printer, **kwargs):
-        return self._numpycode(printer, **kwargs)
+        return r'SolCF.Or(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
 
 # %% custom func of equation printer
@@ -605,7 +557,7 @@ class CSC_array(Function):
             raise TypeError(f"CSC_array takes 1 positional arguments but {len(args)} were given!")
 
     def _numpycode(self, printer, **kwargs):
-        return r'csc_array(' + printer._print(self.args[0]) + r')'
+        return r'scipy.sparse.csc_array(' + printer._print(self.args[0]) + r')'
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
@@ -624,7 +576,73 @@ class Arange(Function):
             raise ValueError(f"Solverz' arange object takes 2 positional arguments but {len(args)} were given!")
 
     def _numpycode(self, printer, **kwargs):
-        return r'arange(' + ', '.join([printer._print(arg) for arg in self.args]) + r')'
+        return r'np.arange(' + ', '.join([printer._print(arg) for arg in self.args]) + r')'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class Ones(Function):
+    r"""
+    The all-one vector to broadcast scalars to a vector
+    For example, 2 -> 2*Ones(eqn_size)
+    The derivative is d(Ones(eqn_size))/dx=0
+    """
+
+    @classmethod
+    def eval(cls, x):
+        if not isinstance(x, Integer):
+            raise ValueError("The arg of Ones() should be integer.")
+
+    def _eval_derivative(self, s):
+        return 0
+
+    def _numpycode(self, printer, **kwargs):
+        x = self.args[0]
+        return r'np.ones(' + printer._print(x, **kwargs) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class coo_array(Function):
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) > 1:
+            raise ValueError(
+                f"Solverz' coo_array object accepts only one inputs.")
+
+    def _numpycode(self, printer, **kwargs):
+        return f'sps.coo_array({printer._print(self.args[0])})'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class extend(Function):
+
+    def _numpycode(self, printer, **kwargs):
+        return f'{printer._print(self.args[0])}.extend({printer._print(self.args[1])})'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class zeros(Function):
+    # print zeros(6,6) as zeros((6,6))
+    # or zeros(6,) as zeros((6,))
+    def _numpycode(self, printer, **kwargs):
+        if len(self.args) == 2:
+            temp1 = printer._print(self.args[0])
+            temp2 = printer._print(self.args[1])
+            return r'np.zeros((' + temp1 + ', ' + temp2 + r'))'
+        elif len(self.args) == 1:
+            temp = printer._print(self.args[0])
+            return r'np.zeros((' + temp + ', ' + r'))'
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)

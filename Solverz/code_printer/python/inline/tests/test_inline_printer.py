@@ -5,22 +5,22 @@ import numpy as np
 from numpy.testing import assert_allclose
 import re
 import pytest
-from sympy import sin
 from sympy.codegen.ast import Assignment, AddAugmentedAssignment
 
-from Solverz import Model, Var, AliasVar
+from Solverz import Model, Var, AliasVar, sin
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import DAE, AE
 from Solverz.equation.param import Param
 from Solverz.sym_algebra.symbols import iVar, idx, Para
 from Solverz.variable.variables import combine_Vars, as_Vars
-from Solverz.equation.jac import JacBlock, Ones, Jac
+from Solverz.equation.jac import JacBlock, Jac
 from Solverz.equation.hvp import Hvp
-from Solverz.sym_algebra.functions import Diag, sin, cos, exp
+from Solverz.sym_algebra.functions import *
 from Solverz.code_printer.python.inline.inline_printer import print_J_block, extend, SolList, print_J_blocks, print_J, \
     print_F, print_Hvp, made_numerical, Solverzlambdify
 from Solverz.utilities.address import Address
-from Solverz.num_api.custom_function import numerical_interface
+from Solverz.num_api.module_parser import modules
+
 
 # %%
 row = iVar('row', internal_use=True)
@@ -104,8 +104,8 @@ expected_J_den = """def J_(t, y_, p_):
     h = y_[0:1]
     v = y_[1:2]
     g = p_["g"]
-    J_ = zeros((2, 2))
-    J_[0:1,1] += ones(1)
+    J_ = np.zeros((2, 2))
+    J_[0:1,1] += np.ones(1)
     return J_
 """.strip()
 
@@ -118,15 +118,15 @@ expected_J_sp = """def J_(t, y_, p_):
     data = []
     row.extend([0])
     col.extend([1])
-    data.extend(ones(1))
-    return coo_array((data, (row, col)), (2, 2)).tocsc()
+    data.extend(np.ones(1))
+    return sps.coo_array((data, (row, col)), (2, 2)).tocsc()
 """.strip()
 
 expected_F = """def F_(t, y_, p_):
     h = y_[0:1]
     v = y_[1:2]
     g = p_["g"]
-    _F_ = zeros((2, ))
+    _F_ = np.zeros((2, ))
     _F_[0:1] = v
     _F_[1:2] = g
     return _F_
@@ -141,6 +141,7 @@ def test_print_F_J():
     m.f1 = Ode('f1', f=m.v, diff_var=m.h)
     m.f2 = Ode('f2', f=m.g, diff_var=m.v)
     bball, y0 = m.create_instance()
+    bball.FormJac(y0)
     assert print_J(bball.__class__.__name__,
                    bball.jac,
                    bball.a,
@@ -175,11 +176,11 @@ expected_J_den_fdae = """def J_(t, y_, p_, y_0):
     q = y_[3:6]
     p_tag_0 = y_0[0:3]
     q_tag_0 = y_0[3:6]
-    J_ = zeros((6, 6))
-    J_[0:2,1:3] += diagflat(ones(2))
-    J_[2:4,0:2] += diagflat(-ones(2))
-    J_[4:5,2] += -ones(1)
-    J_[5:6,2] += ones(1)
+    J_ = np.zeros((6, 6))
+    J_[0:2,1:3] += np.diagflat(np.ones(2))
+    J_[2:4,0:2] += np.diagflat(-np.ones(2))
+    J_[4:5,2] += -np.ones(1)
+    J_[5:6,2] += np.ones(1)
     return J_
 """.strip()
 
@@ -193,17 +194,17 @@ expected_J_sp_fdae = """def J_(t, y_, p_, y_0):
     data = []
     row.extend([0, 1])
     col.extend([1, 2])
-    data.extend(ones(2))
+    data.extend(np.ones(2))
     row.extend([2, 3])
     col.extend([0, 1])
-    data.extend(-ones(2))
+    data.extend(-np.ones(2))
     row.extend([4])
     col.extend([2])
-    data.extend(-ones(1))
+    data.extend(-np.ones(1))
     row.extend([5])
     col.extend([2])
-    data.extend(ones(1))
-    return coo_array((data, (row, col)), (6, 6)).tocsc()
+    data.extend(np.ones(1))
+    return sps.coo_array((data, (row, col)), (6, 6)).tocsc()
 """.strip()
 
 expected_F_fdae = """def F_(t, y_, p_, y_0):
@@ -211,7 +212,7 @@ expected_F_fdae = """def F_(t, y_, p_, y_0):
     q = y_[3:6]
     p_tag_0 = y_0[0:3]
     q_tag_0 = y_0[3:6]
-    _F_ = zeros((6, ))
+    _F_ = np.zeros((6, ))
     _F_[0:2] = -p_tag_0[0:2] + p[1:3]
     _F_[2:4] = p_tag_0[1:3] - p[0:2]
     _F_[4:5] = p_tag_0[0] - p[2]
@@ -237,6 +238,7 @@ def test_print_F_J_FDAE():
     m.ae4 = Eqn('cha4',
                 m.p[2] - m.p0[0])
     fdae, y0 = m.create_instance()
+    fdae.FormJac(y0)
     assert print_J(fdae.__class__.__name__,
                    fdae.jac,
                    fdae.a,
@@ -334,7 +336,7 @@ def test_hvp_printer():
                      var_addr,
                      dict())
 
-    HVP = Solverzlambdify(code, 'Hvp_', [numerical_interface, 'numpy'])
+    HVP = Solverzlambdify(code, 'Hvp_', modules)
     np.testing.assert_allclose(HVP(np.array([1, 2]), dict(), np.array([1, 1])).toarray(),
                                np.array([[2.71828183, -0.90929743],
                                          [0.,  2.]]))
