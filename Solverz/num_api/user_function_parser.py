@@ -16,13 +16,13 @@ def validate_module_paths(paths):
         if not os.path.exists(path):
             raise ValueError(f"The path {path} does not exist.")
 
-            # Check if the path is a file
-            if not os.path.isfile(path):
-                raise ValueError(f"The path {path} is not a file.")
+        # Check if the path is a file
+        if not os.path.isfile(path):
+            raise ValueError(f"The path {path} is not a file.")
 
-            # Check if the file is a Python file
-            if not path.endswith('.py'):
-                raise ValueError(f"The file {path} is not a Python file.")
+        # Check if the file is a Python file
+        if not path.endswith('.py'):
+            raise ValueError(f"The file {path} is not a Python file.")
 
         # If all checks pass, add the path to the valid paths list
         valid_paths.append(path)
@@ -38,12 +38,9 @@ def add_my_module(paths, filename='user_modules.txt'):
         :param paths: List of user-provided module paths
         :param filename: Name of the file to save, default is 'user_modules.txt'
         """
-    try:
-        # Validate paths
-        validated_paths = validate_module_paths(paths)
-    except ValueError as e:
-        print(e)
-        return
+
+    # Validate paths
+    validated_paths = validate_module_paths(paths)
 
     # Get the path to the .Solverz directory in the user's home directory
     user_home = str(Path.home())
