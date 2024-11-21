@@ -18,13 +18,20 @@ except ModuleNotFoundError as e:
     warnings.warn(f'Failed to import num api from SolMuseum: {e}')
 
 # parse user defined functions
-import sys
-sys.path.extend(['D:\\OneDrive\\dev\\myfunc'])
-try:
-    import myfunc
-    module_dict['myfunc'] = myfunc
-except ModuleNotFoundError as e:
-    warnings.warn(f'Failed to import num api from myfunc: {e}')
+from .user_function_parser import load_module_paths
+
+user_module_paths = load_module_paths()
+if user_module_paths:
+    print('User module detected.')
+    import os, sys
+    for path in user_module_paths:
+        module_name = os.path.splitext(os.path.basename(path))[0]
+        module_dir = os.path.dirname(path)
+
+        sys.path.insert(0, module_dir)
+        exec('import ' + module_name)
+        module_dict[module_name] = globals()[module_name]
+
 
 modules = [module_dict, 'numpy']
 # We preserve the 'numpy' here in case one uses functions from sympy instead of from Solverz

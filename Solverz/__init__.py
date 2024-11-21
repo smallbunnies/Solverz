@@ -11,6 +11,7 @@ from Solverz.utilities.io import save, load, save_result
 from Solverz.utilities.profile import count_time
 from Solverz.variable.ssymbol import Var, AliasVar
 from Solverz.model.basic import Model
+from Solverz.num_api.user_function_parser import save_module_paths, reset_module_paths
 
 from importlib.metadata import version, PackageNotFoundError
 
