@@ -124,7 +124,6 @@ It is recommended that one first gets familiar with the [numpy](https://numpy.or
 ```
 The implementation of `SolLessThan()` should be put in the `Solverz.num_api.custom_function` module:
 ```python
-@implements_nfunc('SolLessThan')
 @njit(cache=True)
 def SolLessThan(x, y):
     x = np.asarray(x).reshape((-1,))
