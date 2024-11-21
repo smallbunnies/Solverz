@@ -18,9 +18,9 @@ except ModuleNotFoundError as e:
     warnings.warn(f'Failed to import num api from SolMuseum: {e}')
 
 # parse user defined functions
-from .user_function_parser import load_module_paths
+from .user_function_parser import load_my_module_paths
 
-user_module_paths = load_module_paths()
+user_module_paths = load_my_module_paths()
 if user_module_paths:
     print('User module detected.')
     import os, sys

@@ -1,7 +1,5 @@
 import os
 from pathlib import Path
-import sys
-import importlib.util
 
 
 def validate_module_paths(paths):
@@ -32,7 +30,7 @@ def validate_module_paths(paths):
     return valid_paths
 
 
-def save_module_paths(paths, filename='user_modules.txt'):
+def add_my_module(paths, filename='user_modules.txt'):
     """
         Save user-provided module paths to a specified file, but validate the paths before saving.
         If a path already exists in the file, it will not be added again.
@@ -72,7 +70,7 @@ def save_module_paths(paths, filename='user_modules.txt'):
                 existing_paths.add(path)
 
 
-def load_module_paths(filename='user_modules.txt'):
+def load_my_module_paths(filename='user_modules.txt'):
     """
     Load module paths from a specified file in the .Solverz directory in the user's home directory.
 
@@ -94,7 +92,7 @@ def load_module_paths(filename='user_modules.txt'):
     return paths
 
 
-def reset_module_paths(filename='user_modules.txt'):
+def reset_my_module_paths(filename='user_modules.txt'):
     """
     Reset the user_modules.txt file by clearing its content.
 
