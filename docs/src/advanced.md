@@ -187,6 +187,6 @@ ae = made_numerical(sae, y0, sparse=True)
 We will have the output
 
 ```shell
->>> ae.F(y0)
+>>> ae.F(y0, ae.p)
 array([1.0, 2.0])
 ```
