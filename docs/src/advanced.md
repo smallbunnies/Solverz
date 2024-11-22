@@ -58,7 +58,7 @@ First, we define the numerical interfaces. The derivatives of $\min$ function ar
 \end{cases}.
 ```
 
-Let us create a `myfunc.py` file and put the numerical codes there, which will look like
+Let us create a `myfunc` directory and put the numerical codes in the `myfunc.py` file that looks like
 
 ```python
 # myfunc.py
@@ -101,18 +101,26 @@ def dMindy(x, y):
     return 1-dMindx(x, y)
 ```
 
-where we use `Min` to avoid conflicting with the built-in `min` function, 
-the `@njit(cache)` decorator is used to perform the jit-compilation and hence speed up the numerical codes.
+In `myfunc.py`, we use `Min` to avoid conflicting with the built-in `min` function. 
+The `@njit(cache)` decorator is used to perform the jit-compilation and hence speed up the numerical codes.
 
-Then let us add the path of `myfunc.py` to Solverz, with, for example, 
+Then let us install the `myfunc` module, so that Solverz can import the `myfunc` module. Use the terminal to switch
+to the `myfunc` module directory. Add a `pyproject.toml` file there. 
 
-```python
-from Solverz import add_my_module
-add_my_module([r'D:\myfunc.py'])
+```{note}
+One can clone the `pyproject.toml` file from [example repo](https://github.com/smallbunnies/myfunc).
 ```
 
-Then Solverz would load your functions defined in the `myfunc` module. One can also reset the paths by calling 
-`reset_my_module_paths`.
+Use the following command to install the module.
+
+```shell
+pip install -e .
+```
+
+```{note}
+Because `myfunc` module is installed in the editable mode, one can change the numerical implementations in `myfunc.py`
+with great freedom.
+```
 
 As for the symbolic implementation, let us start by creating a `Min.py` file and subclassing `MulVarFunc` there with
 
@@ -167,13 +175,14 @@ class dMindy(MulVarFunc):
 
 where the `fdiff` function should return the derivative of the function, without considering the chain rule, 
 with respect to the `argindex`-th variable; the `_numpycode` functions define the numerical implementations of the 
-functions. Since `myfunc` module has been added to the Solverz path, the numerical implementations can be called by
+functions. Since the `myfunc` module has been installed, the numerical implementations can be called by
 `myfunc.Min`.
 
-After finish the above procedures, we can finally use the `Min` function in our simulation modelling, with, for example,
+After finish the above procedures, we can finally use the `Min` function in our simulation modelling. An example is as 
+follows.
 
 ```python
-from Solverz import Model, Var, Eqn, made_numerical, MulVarFunc
+from Solverz import Model, Var, Eqn, made_numerical
 from Min import Min
 
 m = Model()
