@@ -25,7 +25,7 @@ jobs:
         pip install -e .
 
 
-    - uname: Return to original repo
+    - name: Return to original repo
       uses: actions/checkout@v3
       with:
         python-version: '3.11'
