@@ -19,9 +19,7 @@ jobs:
         python-version: '3.11'
         cache: 'pip' # caching pip dependencies
     - run: |
-        pip install -r requirements.txt
-        cd docs/
-        pip install -r requirements.txt
-        cd ..
+        pip install -e .
+        pip install git+https://github.com/smallbunnies/myfunc.git@main
     - run: | # run both independent pytest and doctest
         pytest

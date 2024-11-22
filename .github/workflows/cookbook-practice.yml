@@ -27,7 +27,8 @@ jobs:
       run: |
         pip install --upgrade pip setuptools wheel
         pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
+        pip install pytest-xdist
 
     - name: Run Tests
       run: |
-        pytest
+        pytest -n auto
