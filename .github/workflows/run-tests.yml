@@ -13,24 +13,13 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout myfunc Repository
-      uses: actions/checkout@v3
-      with:
-        repository: 'smallbunnies/myfunc'
-        ref: 'main'
+    - uses: actions/checkout@v3
     - uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    - run: |
-        pip install -e .
-
-
-    - name: Return to original repo
-      uses: actions/checkout@v3
       with:
         python-version: '3.11'
         cache: 'pip' # caching pip dependencies
     - run: |
         pip install -e .
+        pip install git+https://github.com/smallbunnies/myfunc.git@main
     - run: | # run both independent pytest and doctest
         pytest
