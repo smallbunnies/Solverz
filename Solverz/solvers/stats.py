@@ -4,6 +4,7 @@ class Stats:
         self.scheme = scheme
         self.nstep = 0
         self.nfeval = 0
+        self.nJeval = 0
         self.ndecomp = 0
         self.nreject = 0
         self.ret = None
@@ -14,5 +15,6 @@ class Stats:
                 f"succeed: {self.succeed}, "
                 f"nstep: {self.nstep}, "
                 f"nfeval: {self.nfeval}, "
+                f"nJeval: {self.nJeval}, "
                 f"ndecomp: {self.ndecomp}, "
                 f"nreject: {self.nreject}.")

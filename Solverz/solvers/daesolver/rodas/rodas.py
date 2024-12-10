@@ -149,6 +149,7 @@ def Rodas(dae: nDAE,
 
         if reject == 0:
             J = dae.J(t, y0, p)
+            stats.nJeval += 1
 
         dfdt0 = dt * dfdt(dae, t, y0)
         rhs = dae.F(t, y0, p) + rparam.g[0] * dfdt0
