@@ -76,6 +76,7 @@ class SolSymBasic(Symbol):
     Basic class for Solverz Symbols
     """
     _iterable = False  # sp.lambdify gets into infinite loop if _iterable == True
+    is_real = True
 
     def __new__(cls, name: str, value=None, dim: int = 1, internal_use=False):
         if any([name == built_in_name for built_in_name in Solverz_internal_name]):
