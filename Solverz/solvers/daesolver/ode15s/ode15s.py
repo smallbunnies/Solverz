@@ -14,7 +14,7 @@ difU = np.array([
     [0, 0, 0, 1, 5],
     [0, 0, 0, 0, -1]
 ])
-kJ = np.arange(1, maxk + 1)
+kJ = np.arange(1, maxk + 1).reshape((1,-1))
 kI = kJ.T
 difU = difU[0:maxk + 1, 0:maxk + 1]
 
@@ -29,7 +29,7 @@ def ode15s(dae: nDAE,
     """
     if opt is None:
         opt = Opt()
-    stats = Stats(opt.scheme)
+    stats = Stats('ode15s')
 
     vsize = y0.shape[0]
     tspan = np.array(tspan)
@@ -43,9 +43,9 @@ def ode15s(dae: nDAE,
     t = t0
     hmin = 16 * np.spacing(t0)
     uround = np.spacing(1.0)
-    T = np.zeros((10001,))
+    T = np.zeros((100001,))
     T[nt] = t0
-    Y = np.zeros((10001, vsize))
+    Y = np.zeros((100001, vsize))
     y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
     yp0 = dae.F(t0, y0, dae.p)
     Y[0, :] = y0
@@ -89,6 +89,7 @@ def ode15s(dae: nDAE,
     else:
         absh = np.minimum(opt.hmax, np.maximum(hmin, absh))
 
+
     dt = absh
 
     M = dae.M
@@ -96,14 +97,14 @@ def ode15s(dae: nDAE,
     done = False
 
     k = 1
-    K = 1
+    K = k
     klast = k
     abshlast = absh
 
     dif = np.zeros((vsize, maxk + 2))
     dif[:, 0] = dt * yp0
 
-    hinvGak = dt * invGa[k]
+    hinvGak = dt * invGa[k-1]
     nconhk = 0
 
     dfdy = dae.J(t, y0, p)
@@ -129,21 +130,21 @@ def ode15s(dae: nDAE,
             at_hmin = True
         else:
             at_hmin = False
-        h = absh
+        dt = absh
 
         # Stretch the step if within 10% of tfinal-t.
         if 1.1 * absh >= abs(tend - t):
-            h = tfinal - t
-            absh = abs(h)
+            dt = tend - t
+            absh = abs(dt)
             done = True
 
         if (absh != abshlast) or (k != klast):
             # Calculate difRU using cumprod and element-wise operations
             ratio = (kI - 1 - kJ * (absh / abshlast)) / kI
-            difRU = np.cumprod(ratio) * difU
-            dif[:, K] = dif[:, K] * difRU[K, K]
+            difRU = np.cumprod(ratio, axis=0) @ difU
+            dif[:, 0:K] = dif[:, 0:K] @ difRU[0:K, 0:K]
 
-            hinvGak = h * invGa[k]
+            hinvGak = dt * invGa[k-1]
             nconhk = 0
             Miter = dae.M - hinvGak * dfdy
 
@@ -162,15 +163,15 @@ def ode15s(dae: nDAE,
 
             while not gotynew:
                 # Compute the constant terms in the equation for y1.
-                psi = dif[:, K] * (G[K] * invGa[k])
+                psi = (dif[:, 0:K] @ (G[0:K].reshape((-1, 1)) * invGa[k-1])).reshape(-1)
 
-                # Predict a solution at t + h.
+                # Predict a solution at t + dt.
                 tnew = t + dt
                 if done:
                     tnew = tend  # Hit end point exactly.
 
-                dt = tnew - t  # Purify h.
-                pred = y0 + np.sum(dif[:, K], axis=0)  # Sum along columns if dif is a 2D array
+                dt = tnew - t  # Purify dt.
+                pred = y0 + np.sum(dif[:, 0:K], 1)
                 y1 = pred.copy()
 
                 # Initialize difkp1 to zero for the iteration to compute y1.
@@ -249,12 +250,12 @@ def ode15s(dae: nDAE,
 
                 if tooslow:
                     stats.nreject += 1
-                    # speed up the iteration by forming new linearization or reducing h
+                    # speed up the iteration by forming new linearization or reducing dt
                     if not Jcurrent:
                         dfdy = dae.J(t, y0, p)
                         stats.nJeval += 1
                     elif absh <= hmin:
-                        print(f"Error exit of RODAS at time = {t}: step size too small h = {dt}.\n")
+                        print(f"Error exit of RODAS at time = {t}: step size too small dt = {dt}.\n")
                         stats.ret = 'failed'
                         break
                     else:
@@ -264,10 +265,10 @@ def ode15s(dae: nDAE,
                         done = False
 
                         ratio = (kI - 1 - kJ * (absh / abshlast)) / kI
-                        difRU = np.cumprod(ratio) * difU
-                        dif[:, K] = dif[:, K] * difRU[K, K]
+                        difRU = np.cumprod(ratio, axis=0) @ difU
+                        dif[:, 0:K] = dif[:, 0:K] @ difRU[0:K, 0:K]
 
-                        hinvGak = dt * invGa[k]
+                        hinvGak = dt * invGa[k-1]
                         nconhk = 0
                     Miter = dae.M - hinvGak * dfdy
 
@@ -280,9 +281,9 @@ def ode15s(dae: nDAE,
 
             # Calculate the error based on normcontrol flag
             if opt.normcontrol:
-                err = np.linalg.norm(difkp1) * invwt * erconst[k]
+                err = np.linalg.norm(difkp1) * invwt * erconst[k-1]
             else:
-                err = np.linalg.norm(difkp1 * invwt, ord=np.inf) * erconst[k]
+                err = np.linalg.norm(difkp1 * invwt, ord=np.inf) * erconst[k-1]
 
             # Check for non-negative constraints and update error if necessary
             # if nonNegative and (err <= rtol) and np.any(ynew[idxNonNegative] < 0):
@@ -298,7 +299,7 @@ def ode15s(dae: nDAE,
                 stats.nreject += 1
 
                 if absh <= hmin:
-                    print(f"Error exit of RODAS at time = {t}: step size too small h = {dt}.\n")
+                    print(f"Error exit of RODAS at time = {t}: step size too small dt = {dt}.\n")
                     stats.ret = 'failed'
                     break
 
@@ -310,31 +311,31 @@ def ode15s(dae: nDAE,
 
                     if k > 1:
                         if opt.normcontrol:
-                            errkm1 = np.linalg.norm(dif[:, k - 1] + difkp1) * invwt * erconst[k - 1]
+                            errkm1 = np.linalg.norm(dif[:, k - 1] + difkp1) * invwt * erconst[k-2]
                         else:
-                            errkm1 = np.linalg.norm((dif[:, k - 1] + difkp1) * invwt, ord=np.inf) * erconst[k - 1]
+                            errkm1 = np.linalg.norm((dif[:, k - 1] + difkp1) * invwt, ord=np.inf) * erconst[k-2]
 
                         hkm1 = absh * max(0.1, 0.769 * (opt.rtol / errkm1) ** (1 / k))  # 1/1.3
 
                         if hkm1 > hopt:
                             hopt = min(absh, hkm1)  # don't allow step size increase
                             k -= 1
-                            K = np.arange(k)
+                            K = k
 
                     absh = max(hmin, hopt)
                 else:
                     absh = max(hmin, 0.5 * absh)
 
-                h = absh
+                dt = absh
 
                 if absh < abshlast:
                     done = False
 
                 ratio = (kI - 1 - kJ * (absh / abshlast)) / kI
-                difRU = np.cumprod(ratio) * difU
-                dif[:, K] = dif[:, K] * difRU[K, K]
+                difRU = np.cumprod(ratio, axis=0) @ difU
+                dif[:, 0:K] = dif[:, 0:K] @ difRU[0:K, 0:K]
 
-                hinvGak = h * invGa[k]
+                hinvGak = dt * invGa[k-1]
                 nconhk = 0
                 Miter = dae.M - hinvGak * dfdy
 
@@ -350,8 +351,8 @@ def ode15s(dae: nDAE,
 
         stats.nstep += 1
 
-        dif[:, k + 2] = difkp1 - dif[:, k + 1]
-        dif[:, k + 1] = difkp1
+        dif[:, k + 1] = difkp1 - dif[:, k]
+        dif[:, k] = difkp1
         for j in range(k, 0, -1):
             dif[:, j - 1] += dif[:, j]
 
@@ -386,9 +387,9 @@ def ode15s(dae: nDAE,
             # reduce order?
             if k > 1:
                 if opt.normcontrol:
-                    errkm1 = np.linalg.norm(dif[:, k - 1]) * invwt * erconst[k - 1]
+                    errkm1 = np.linalg.norm(dif[:, k - 1]) * invwt * erconst[k-2]
                 else:
-                    errkm1 = np.linalg.norm(dif[:, k - 1] * invwt, ord=np.inf) * erconst[k - 1]
+                    errkm1 = np.linalg.norm(dif[:, k - 1] * invwt, ord=np.inf) * erconst[k-2]
 
                 temp = 1.3 * (errkm1 / opt.rtol) ** (1 / k)
                 if temp > 0.1:
@@ -403,9 +404,9 @@ def ode15s(dae: nDAE,
             # increase order?
             if k < maxk:
                 if opt.normcontrol:
-                    errkp1 = np.linalg.norm(dif[:, k + 1]) * invwt * erconst[k + 1]
+                    errkp1 = np.linalg.norm(dif[:, k + 1]) * invwt * erconst[k]
                 else:
-                    errkp1 = np.linalg.norm(dif[:, k + 1] * invwt, ord=np.inf) * erconst[k + 1]
+                    errkp1 = np.linalg.norm(dif[:, k + 1] * invwt, ord=np.inf) * erconst[k]
 
                 temp = 1.4 * (errkp1 / opt.rtol) ** (1 / (k + 2))
                 if temp > 0.1:
@@ -422,7 +423,7 @@ def ode15s(dae: nDAE,
                 absh = hopt
                 if k != kopt:
                     k = kopt
-                    K = np.arange(k)
+                    K = k
 
         # update the integration one step
         t = tnew
