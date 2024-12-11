@@ -47,7 +47,7 @@ def ode15s(dae: nDAE,
     T[nt] = t0
     Y = np.zeros((100001, vsize))
     y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
-    yp0 = dae.F(t0, y0, dae.p)
+    yp0 = getyp0(dae, y0, t0)
     Y[0, :] = y0
 
     if opt.pbar:
@@ -87,7 +87,7 @@ def ode15s(dae: nDAE,
             absh = 1 / rh
         absh = np.maximum(absh, hmin)
     else:
-        absh = np.minimum(opt.hmax, np.maximum(hmin, absh))
+        absh = np.minimum(opt.hmax, np.maximum(hmin, opt.hinit))
 
 
     dt = absh
@@ -122,7 +122,7 @@ def ode15s(dae: nDAE,
     done = False
     at_hmin = False
     while not done:
-        hmin = 16 * np.spacing(t0)
+        hmin = 16 * np.spacing(t)
         absh = np.minimum(opt.hmax, np.maximum(hmin, absh))
         if absh == hmin:
             if at_hmin:
