@@ -171,6 +171,7 @@ def Rodas(dae: nDAE,
             stats.nfeval = stats.nfeval + 1
             sol = lu.solve(rhs)
             K[:, j] = sol - sum_2
+        stats.nsolve += rparam.s
 
         sum_1 = K @ (dt * rparam.b)
         ynew = y0 + sum_1

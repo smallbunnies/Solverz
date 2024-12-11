@@ -19,7 +19,9 @@ class Opt:
                  step_size=1e-3,
                  event: Callable = None,
                  event_duration=1e-8,
-                 partial_decompose=False):
+                 partial_decompose=False,
+                 ode15smaxit=4,
+                 normcontrol=False):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety
@@ -37,3 +39,5 @@ class Opt:
         self.event = event
         self.event_duration = event_duration
         self.partial_decompose = partial_decompose
+        self.ode15smaxit = ode15smaxit
+        self.normcontrol = normcontrol

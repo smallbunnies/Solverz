@@ -7,6 +7,7 @@ class Stats:
         self.nJeval = 0
         self.ndecomp = 0
         self.nreject = 0
+        self.nsolve = 0
         self.ret = None
         self.succeed = True
 
@@ -17,4 +18,5 @@ class Stats:
                 f"nfeval: {self.nfeval}, "
                 f"nJeval: {self.nJeval}, "
                 f"ndecomp: {self.ndecomp}, "
-                f"nreject: {self.nreject}.")
+                f"nreject: {self.nreject}."
+                f"nsolve: {self.nsolve}")

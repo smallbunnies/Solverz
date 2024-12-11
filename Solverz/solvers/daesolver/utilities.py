@@ -4,6 +4,7 @@ from typing import Union, List
 
 import numpy as np
 from numpy import abs, linalg
+from scipy.sparse import diags_array
 from tqdm import tqdm
 
 from Solverz.equation.equations import DAE
