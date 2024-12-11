@@ -81,9 +81,9 @@ def Rodas(dae: nDAE,
     uround = np.spacing(1.0)
     T = np.zeros((10001,))
     T[nt] = t0
-    y = np.zeros((10001, vsize))
+    Y = np.zeros((10001, vsize))
     y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
-    y[0, :] = y0
+    Y[0, :] = y0
 
     if opt.pbar:
         pbar = tqdm(total=tend - t0)
@@ -268,7 +268,7 @@ def Rodas(dae: nDAE,
                     ynext = y0 + tau * dt * K @ (rparam.b + (tau - 1) * (rparam.c + tau * (rparam.d + tau * rparam.e)))
                     nt = nt + 1
                     T[nt] = tnext
-                    y[nt] = ynext
+                    Y[nt] = ynext
 
                     if opt.pbar:
                         pbar.update(T[nt] - T[nt - 1])
@@ -288,7 +288,7 @@ def Rodas(dae: nDAE,
             else:
                 nt = nt + 1
                 T[nt] = t
-                y[nt] = ynew
+                Y[nt] = ynew
 
                 if opt.pbar:
                     pbar.update(T[nt] - T[nt - 1])
@@ -309,7 +309,7 @@ def Rodas(dae: nDAE,
         dt = np.min([opt.hmax, np.max([hmin, dtnew])])
 
     T = T[0:nt + 1]
-    y = y[0:nt + 1]
+    Y = Y[0:nt + 1]
 
     if opt.pbar:
         pbar.close()
@@ -318,9 +318,9 @@ def Rodas(dae: nDAE,
         te = te[0:nevent + 1]
         ye = ye[0:nevent + 1]
         ie = ie[0:nevent + 1]
-        return daesol(T, y, te, ye, ie, stats)
+        return daesol(T, Y, te, ye, ie, stats)
     else:
-        return daesol(T, y, stats=stats)
+        return daesol(T, Y, stats=stats)
 
 
 def dfdt(dae: nDAE, t, y):
