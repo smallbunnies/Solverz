@@ -21,7 +21,8 @@ class Opt:
                  event_duration=1e-8,
                  partial_decompose=False,
                  ode15smaxit=4,
-                 normcontrol=False):
+                 normcontrol=False,
+                 numJac=False):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety
@@ -41,3 +42,4 @@ class Opt:
         self.partial_decompose = partial_decompose
         self.ode15smaxit = ode15smaxit
         self.normcontrol = normcontrol
+        self.numJac = numJac

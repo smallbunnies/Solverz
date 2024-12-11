@@ -43,9 +43,9 @@ def ode15s(dae: nDAE,
     t = t0
     hmin = 16 * np.spacing(t0)
     uround = np.spacing(1.0)
-    T = np.zeros((100001,))
+    T = np.zeros((10001,))
     T[nt] = t0
-    Y = np.zeros((100001, vsize))
+    Y = np.zeros((10001, vsize))
     y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
     yp0 = getyp0(dae, y0, t0)
     Y[0, :] = y0
@@ -107,7 +107,19 @@ def ode15s(dae: nDAE,
     hinvGak = dt * invGa[k-1]
     nconhk = 0
 
-    dfdy = dae.J(t, y0, p)
+    if opt.numJac:
+        Fty, dFdyt, nfevals = numjac(lambda t_,y_: dae.F(t_,y_, p),
+                                     t,
+                                     y0,
+                                     dae.F(t, y0, p),
+                                     1e-5 * np.ones_like(y0),
+                                     0,
+                                     0,
+                                     0,
+                                     0)
+        dfdy = dFdyt[:, 0:vsize]
+    else:
+        dfdy = dae.J(t, y0, p)
     stats.nJeval += 1
     Miter = dae.M - hinvGak * dfdy
 
@@ -252,7 +264,19 @@ def ode15s(dae: nDAE,
                     stats.nreject += 1
                     # speed up the iteration by forming new linearization or reducing dt
                     if not Jcurrent:
-                        dfdy = dae.J(t, y0, p)
+                        if opt.numJac:
+                            Fty, dFdyt, nfevals = numjac(lambda t_,y_: dae.F(t_,y_, p),
+                                                         t,
+                                                         y0,
+                                                         dae.F(t, y0, p),
+                                                         1e-5 * np.ones_like(y0),
+                                                         0,
+                                                         0,
+                                                         0,
+                                                         0)
+                            dfdy = dFdyt[:, 0:vsize]
+                        else:
+                            dfdy = dae.J(t, y0, p)
                         stats.nJeval += 1
                     elif absh <= hmin:
                         print(f"Error exit of RODAS at time = {t}: step size too small dt = {dt}.\n")

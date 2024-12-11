@@ -17,3 +17,4 @@ from Solverz.solvers.stats import Stats
 from Solverz.variable.variables import TimeVars
 from Solverz.solvers.solution import daesol
 from Solverz.solvers.daesolver.daeic import DaeIc, getyp0
+from Solverz.num_api.numjac import numjac
