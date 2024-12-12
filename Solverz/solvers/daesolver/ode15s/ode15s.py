@@ -1,6 +1,8 @@
 import warnings
 
 from Solverz.solvers.daesolver.utilities import *
+from .ntrp15s import ntrp15s
+
 
 maxk = 5
 G = np.array([1, 3 / 2, 11 / 6, 25 / 12, 137 / 60])
@@ -14,7 +16,7 @@ difU = np.array([
     [0, 0, 0, 1, 5],
     [0, 0, 0, 0, -1]
 ])
-kJ = np.arange(1, maxk + 1).reshape((1,-1))
+kJ = np.arange(1, maxk + 1).reshape((1, -1))
 kI = kJ.T
 difU = difU[0:maxk + 1, 0:maxk + 1]
 
@@ -25,7 +27,7 @@ def ode15s(dae: nDAE,
            y0: np.ndarray,
            opt: Opt = None):
     """
-    The python implementation of MATLAB Ode15s without dense output and event detection.
+    The python implementation of MATLAB Ode15s without event detection.
     """
     if opt is None:
         opt = Opt()
@@ -66,11 +68,11 @@ def ode15s(dae: nDAE,
 
     if haveEvent:
         value, isterminal, direction = events(t, y0)
-    stop = 0
-    nevent = -1
-    te = np.zeros((10001,))
-    ye = np.zeros((10001, vsize))
-    ie = np.zeros((10001,))
+        stop = 0
+        nevent = -1
+        te = np.zeros((10001,))
+        ye = np.zeros((10001, vsize))
+        ie = np.zeros((10001,))
 
     Jconstant = False
     Jcurrent = True
@@ -89,7 +91,6 @@ def ode15s(dae: nDAE,
     else:
         absh = np.minimum(opt.hmax, np.maximum(hmin, opt.hinit))
 
-
     dt = absh
 
     M = dae.M
@@ -104,11 +105,11 @@ def ode15s(dae: nDAE,
     dif = np.zeros((vsize, maxk + 2))
     dif[:, 0] = dt * yp0
 
-    hinvGak = dt * invGa[k-1]
+    hinvGak = dt * invGa[k - 1]
     nconhk = 0
 
     if opt.numJac:
-        Fty, dFdyt, nfevals = numjac(lambda t_,y_: dae.F(t_,y_, p),
+        Fty, dFdyt, nfevals = numjac(lambda t_, y_: dae.F(t_, y_, p),
                                      t,
                                      y0,
                                      dae.F(t, y0, p),
@@ -156,7 +157,7 @@ def ode15s(dae: nDAE,
             difRU = np.cumprod(ratio, axis=0) @ difU
             dif[:, 0:K] = dif[:, 0:K] @ difRU[0:K, 0:K]
 
-            hinvGak = dt * invGa[k-1]
+            hinvGak = dt * invGa[k - 1]
             nconhk = 0
             Miter = dae.M - hinvGak * dfdy
 
@@ -175,7 +176,7 @@ def ode15s(dae: nDAE,
 
             while not gotynew:
                 # Compute the constant terms in the equation for y1.
-                psi = (dif[:, 0:K] @ (G[0:K].reshape((-1, 1)) * invGa[k-1])).reshape(-1)
+                psi = (dif[:, 0:K] @ (G[0:K].reshape((-1, 1)) * invGa[k - 1])).reshape(-1)
 
                 # Predict a solution at t + dt.
                 tnew = t + dt
@@ -194,7 +195,7 @@ def ode15s(dae: nDAE,
                     normynew = np.linalg.norm(y1)
 
                     # Calculate invwt and minnrm for norm control.
-                    invwt = 1 / max(max(np.linalg.norm(y), normynew), threshold)
+                    invwt = 1 / max(max(np.linalg.norm(y0), normynew), threshold)
                     minnrm = 100 * np.finfo(float).eps * (normynew * invwt)
                 else:
                     # Calculate invwt and minnrm without norm control.
@@ -265,7 +266,7 @@ def ode15s(dae: nDAE,
                     # speed up the iteration by forming new linearization or reducing dt
                     if not Jcurrent:
                         if opt.numJac:
-                            Fty, dFdyt, nfevals = numjac(lambda t_,y_: dae.F(t_,y_, p),
+                            Fty, dFdyt, nfevals = numjac(lambda t_, y_: dae.F(t_, y_, p),
                                                          t,
                                                          y0,
                                                          dae.F(t, y0, p),
@@ -293,7 +294,7 @@ def ode15s(dae: nDAE,
                         difRU = np.cumprod(ratio, axis=0) @ difU
                         dif[:, 0:K] = dif[:, 0:K] @ difRU[0:K, 0:K]
 
-                        hinvGak = dt * invGa[k-1]
+                        hinvGak = dt * invGa[k - 1]
                         nconhk = 0
                     Miter = dae.M - hinvGak * dfdy
 
@@ -306,9 +307,9 @@ def ode15s(dae: nDAE,
 
             # Calculate the error based on normcontrol flag
             if opt.normcontrol:
-                err = np.linalg.norm(difkp1) * invwt * erconst[k-1]
+                err = np.linalg.norm(difkp1) * invwt * erconst[k - 1]
             else:
-                err = np.linalg.norm(difkp1 * invwt, ord=np.inf) * erconst[k-1]
+                err = np.linalg.norm(difkp1 * invwt, ord=np.inf) * erconst[k - 1]
 
             # Check for non-negative constraints and update error if necessary
             # if nonNegative and (err <= rtol) and np.any(ynew[idxNonNegative] < 0):
@@ -336,9 +337,9 @@ def ode15s(dae: nDAE,
 
                     if k > 1:
                         if opt.normcontrol:
-                            errkm1 = np.linalg.norm(dif[:, k - 1] + difkp1) * invwt * erconst[k-2]
+                            errkm1 = np.linalg.norm(dif[:, k - 1] + difkp1) * invwt * erconst[k - 2]
                         else:
-                            errkm1 = np.linalg.norm((dif[:, k - 1] + difkp1) * invwt, ord=np.inf) * erconst[k-2]
+                            errkm1 = np.linalg.norm((dif[:, k - 1] + difkp1) * invwt, ord=np.inf) * erconst[k - 2]
 
                         hkm1 = absh * max(0.1, 0.769 * (opt.rtol / errkm1) ** (1 / k))  # 1/1.3
 
@@ -360,7 +361,7 @@ def ode15s(dae: nDAE,
                 difRU = np.cumprod(ratio, axis=0) @ difU
                 dif[:, 0:K] = dif[:, 0:K] @ difRU[0:K, 0:K]
 
-                hinvGak = dt * invGa[k-1]
+                hinvGak = dt * invGa[k - 1]
                 nconhk = 0
                 Miter = dae.M - hinvGak * dfdy
 
@@ -385,13 +386,38 @@ def ode15s(dae: nDAE,
         if haveEvent:
             pass
 
+        told = t
         # output sol
-        nt += 1
-        T[nt] = tnew
-        Y[nt] = y1
+        if dense_output:
+            while tnew >= tnext > told:
+                ynext = ntrp15s(tnext, tnew, y1, dt, dif, k)
+                nt = nt + 1
+                T[nt] = tnext
+                Y[nt] = ynext
 
-        if opt.pbar:
-            pbar.update(T[nt] - T[nt - 1])
+                if opt.pbar:
+                    pbar.update(T[nt] - T[nt - 1])
+
+                if haveEvent and stop:
+                    if tnext >= tevent:
+                        break
+
+                inext = inext + 1
+                if inext <= n_tspan - 1:
+                    tnext = tspan[inext]
+                    if haveEvent and stop:
+                        if tnext >= tevent:
+                            tnext = tevent
+                else:
+                    tnext = tend + dt
+
+        else:
+            nt += 1
+            T[nt] = tnew
+            Y[nt] = y1
+
+            if opt.pbar:
+                pbar.update(T[nt] - T[nt - 1])
 
         if done:
             break
@@ -412,9 +438,9 @@ def ode15s(dae: nDAE,
             # reduce order?
             if k > 1:
                 if opt.normcontrol:
-                    errkm1 = np.linalg.norm(dif[:, k - 1]) * invwt * erconst[k-2]
+                    errkm1 = np.linalg.norm(dif[:, k - 1]) * invwt * erconst[k - 2]
                 else:
-                    errkm1 = np.linalg.norm(dif[:, k - 1] * invwt, ord=np.inf) * erconst[k-2]
+                    errkm1 = np.linalg.norm(dif[:, k - 1] * invwt, ord=np.inf) * erconst[k - 2]
 
                 temp = 1.3 * (errkm1 / opt.rtol) ** (1 / k)
                 if temp > 0.1:
