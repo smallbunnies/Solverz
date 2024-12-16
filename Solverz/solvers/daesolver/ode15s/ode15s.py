@@ -1,5 +1,6 @@
 import warnings
 
+import numpy as np
 from Solverz.solvers.daesolver.utilities import *
 from .ntrp15s import ntrp15s
 
@@ -45,12 +46,6 @@ def ode15s(dae: nDAE,
     t = t0
     hmin = 16 * np.spacing(t0)
     uround = np.spacing(1.0)
-    T = np.zeros((10001,))
-    T[nt] = t0
-    Y = np.zeros((10001, vsize))
-    y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
-    yp0 = getyp0(dae, y0, t0)
-    Y[0, :] = y0
 
     if opt.pbar:
         pbar = tqdm(total=tend - t0)
@@ -62,6 +57,15 @@ def ode15s(dae: nDAE,
         dense_output = True
         inext = 1
         tnext = tspan[inext]
+    else:
+        n_tspan = 10001
+
+    T = np.zeros((n_tspan,))
+    T[nt] = t0
+    Y = np.zeros((n_tspan, vsize))
+    y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
+    yp0 = getyp0(dae, y0, t0)
+    Y[0, :] = y0
 
     events = opt.event
     haveEvent = True if events is not None else False
@@ -392,6 +396,10 @@ def ode15s(dae: nDAE,
             while tnew >= tnext > told:
                 ynext = ntrp15s(tnext, tnew, y1, dt, dif, k)
                 nt = nt + 1
+                if nt == n_tspan:
+                    n_tspan = n_tspan + 1000
+                    T = np.concatenate([T, np.zeros(1000)])
+                    Y = np.concatenate([Y, np.zeros((1000, vsize))])
                 T[nt] = tnext
                 Y[nt] = ynext
 
@@ -413,6 +421,10 @@ def ode15s(dae: nDAE,
 
         else:
             nt += 1
+            if nt == n_tspan:
+                n_tspan = n_tspan + 1000
+                T = np.concatenate([T, np.zeros(1000)])
+                Y = np.concatenate([Y, np.zeros((1000, vsize))])
             T[nt] = tnew
             Y[nt] = y1
 
