@@ -101,6 +101,7 @@ class IdxSymBasic(Symbol):
     """
     Basic class for Solverz indexed Symbols
     """
+    is_real = True
 
     def __new__(cls, symbol, index, dim):
         if not isinstance(index, (int, np.integer, list, idx, IdxSymBasic, Expr, slice, tuple)):
