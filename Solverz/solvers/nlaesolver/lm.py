@@ -49,7 +49,9 @@ def lm(eqn: nAE,
 
     # optimize.root func cannot handle callable jac that returns scipy.sparse.csc_array
     sol = optimize.root(lambda x: eqn.F(x, p), y, jac=lambda x: eqn.J(x, p).toarray(), method='lm', tol=tol)
-    stats.succeed = sol.success
+    dF = eqn.F(sol.y, eqn.p)
+    if np.max(np.abs(dF)) < tol:
+        stats.succeed = True
     stats.nfeval = sol.nfev
 
     return aesol(sol.x, stats)
