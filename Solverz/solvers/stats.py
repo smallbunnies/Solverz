@@ -9,7 +9,7 @@ class Stats:
         self.nreject = 0
         self.nsolve = 0
         self.ret = None
-        self.succeed = True
+        self.succeed = False
 
     def __repr__(self):
         return (f"Scheme: {self.scheme}, "

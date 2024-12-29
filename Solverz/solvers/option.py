@@ -22,7 +22,8 @@ class Opt:
                  partial_decompose=False,
                  ode15smaxit=4,
                  normcontrol=False,
-                 numJac=False):
+                 numJac=False,
+                 max_it=100):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety
@@ -43,3 +44,4 @@ class Opt:
         self.ode15smaxit = ode15smaxit
         self.normcontrol = normcontrol
         self.numJac = numJac
+        self.max_it = max_it
