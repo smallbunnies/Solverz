@@ -4,8 +4,8 @@
 
 Solverz aims to help you model and solve your equations more efficiently.
 
-Say, we want to know how long it takes for an apple to fall from a tree to the ground. We have the 
-differential equations 
+Say, we want to know how long it will take for an apple, launched from the ground into the air, to fall back to the 
+ground. We have the differential equations 
 
 ```{math}
 \left\{

@@ -167,6 +167,7 @@ class Diag(MatrixFunction):
 @VarParser
 class UniVarFunc(Function):
     arglength = 1
+    is_real = True
 
     @classmethod
     def eval(cls, *args):
@@ -343,6 +344,7 @@ class Not(UniVarFunc):
 @VarParser
 class MulVarFunc(Function):
     arglength = 3
+    is_real = True
 
     @classmethod
     def eval(cls, *args):

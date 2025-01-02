@@ -6,12 +6,13 @@ import sys
 import numpy as np
 from sympy import symbols, pycode, Integer
 
-from Solverz import as_Vars, Eqn, Ode, AE, sin, made_numerical, Model, Var, Param, TimeSeriesParam, AliasVar, Abs, exp, \
+from Solverz import Eqn, Ode, AE, sin, made_numerical, Model, Var, Param, TimeSeriesParam, AliasVar, Abs, exp, \
     cos
 from Solverz.code_printer.make_module import module_printer
 from Solverz.code_printer.python.inline.inline_printer import print_J_block
 from Solverz.code_printer.python.utilities import _print_var_parser
 from Solverz.sym_algebra.symbols import idx, iVar, Para
+from Solverz.variable.variables import as_Vars
 
 expected_dependency = r"""import os
 current_module_dir = os.path.dirname(os.path.abspath(__file__))

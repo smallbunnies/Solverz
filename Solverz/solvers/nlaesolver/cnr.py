@@ -69,7 +69,12 @@ def continuous_nr(eqn: nAE,
     ite = 0
     df = eqn.F(y, p)
     stats.nfeval += 1
-    while max(abs(df)) > tol:
+    while np.max(np.abs(df)) > tol:
+
+        if ite > opt.max_it:
+            print(f"Cannot converge within 100 iterations. Deviation: {np.max(np.abs(df))}!")
+            break
+
         ite = ite + 1
         err = 2
         nofailed = True
@@ -90,8 +95,8 @@ def continuous_nr(eqn: nAE,
             # error control
             # error estimation
             err = dt * np.linalg.norm(
-                kE.reshape(-1, ) / np.maximum(np.maximum(abs(y), abs(ynew)).reshape(-1, ), threshold),
-                np.Inf)
+                kE.reshape(-1, ) / np.maximum(np.maximum(np.abs(y), np.abs(ynew)).reshape(-1, ), threshold),
+                np.inf)
             if err > rtol:  # failed step
                 if dt <= hmin:
                     raise ValueError(f'IntegrationTolNotMet step size: {dt} hmin: {hmin}')
@@ -116,13 +121,8 @@ def continuous_nr(eqn: nAE,
 
         dt = np.min([dt, hmax])
 
-        if ite > 100:
-            print(f"Cannot converge within 100 iterations. Deviation: {max(abs(df))}!")
-            stats.succeed = False
-            break
-
-    if np.any(np.isnan(y)):
-        stats.succeed = False
+    if np.max(np.abs(df)) < tol:
+        stats.succeed = True
     stats.nstep = ite
 
     return aesol(y, stats)

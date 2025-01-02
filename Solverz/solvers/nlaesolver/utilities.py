@@ -1,5 +1,4 @@
 import numpy as np
-from numpy import abs, max
 from scipy import optimize
 
 from Solverz.num_api.num_eqn import nAE
