@@ -28,7 +28,48 @@ def ode15s(dae: nDAE,
            y0: np.ndarray,
            opt: Opt = None):
     """
-    The python implementation of MATLAB Ode15s without event detection.
+    The python implementation of MATLAB Ode15s without event detection [1]_.
+
+    Parameters
+    ==========
+
+    dae : nDAE
+        Numerical DAE object.
+
+    tspan : List | np.ndarray
+        Either
+        - a list specifying [t0, tend], or
+        - a `np.ndarray` specifying the time nodes that you are concerned about
+
+    y0 : np.ndarray
+        The initial values of variables
+
+    opt : Opt
+        The solver options, including:
+
+        - rtol: 1e-3(default)|float
+            The relative error tolerance
+        - atol: 1e-6(default)|float
+            The absolute error tolerance
+        - hinit: None(default)|float
+            Initial step size
+        - hmax: None(default)|float
+            Maximum step size.
+        - pbar: False(default)|bool
+            To display progress bar
+
+    Returns
+    =======
+
+    sol : daesol
+        The daesol object.
+
+
+    References
+    ==========
+
+    .. [1] L. F. Shampine and M. W. Reichelt, “The MATLAB ODE Suite,” SIAM J. Sci. Comput., vol. 18, no. 1, pp. 1–22, Jan. 1997, doi: 10.1137/S1064827594276424.
+
     """
     if opt is None:
         opt = Opt()
