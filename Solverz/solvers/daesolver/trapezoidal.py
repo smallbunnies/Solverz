@@ -50,7 +50,7 @@ def implicit_trapezoid(dae: nDAE,
     nt = 0
     tt = T_initial
     t0 = tt
-    Nt = int((T_end-T_initial)/dt) + 1
+    Nt = int((T_end-T_initial)/dt) + 100
 
     if opt.pbar:
         pbar = tqdm(total=T_end - T_initial)
