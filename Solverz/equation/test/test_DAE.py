@@ -1,6 +1,7 @@
 from sympy import Integer
-from Solverz import Ode, iVar, DAE, as_Vars, made_numerical
-
+from Solverz import Ode, DAE, made_numerical
+from Solverz.sym_algebra.symbols import iVar
+from Solverz.variable.variables import as_Vars
 
 def test_zero_index():
     # to test if index zero, being the sympy.Integer.instance, raises error when creating the singular mass mat

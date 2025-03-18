@@ -8,7 +8,7 @@ on:
       - '*'
 
 jobs:
-  tests_in_cookbook:
+  tests_in_museum:
 
     runs-on: windows-latest
 
@@ -27,6 +27,7 @@ jobs:
       run: |
         pip install --upgrade pip setuptools wheel
         pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
+        pip install git+https://github.com/rzyu45/SolUtil@master
         pip install pytest-xdist
 
     - name: Run Tests

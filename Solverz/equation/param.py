@@ -140,9 +140,9 @@ class TimeSeriesParam(Param):
             # input of interp1d is zero-dimensional, we need to reshape
             # [0] is to eliminate the numpy DeprecationWarning in m3b9 test: Conversion of an array with ndim > 0 to a scalar is
             # deprecated, and will error in the future, which should be resolved.
-            vt = self.vt(t).reshape((-1,))[0]
+            vt = self.vt(t).reshape((-1,))
         else:
-            vt = self.v_series[-1]
+            vt = self.v_series[-1:]
 
         if self.index is not None:
             temp = self.v.copy()

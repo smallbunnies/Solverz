@@ -50,11 +50,14 @@ def implicit_trapezoid(dae: nDAE,
     nt = 0
     tt = T_initial
     t0 = tt
-    Nt = int((T_end-T_initial)/dt) + 1
+    Nt = int((T_end-T_initial)/dt) + 100
 
-    y = np.zeros((Nt, y0.shape[0]))
+    if opt.pbar:
+        pbar = tqdm(total=T_end - T_initial)
+
+    Y = np.zeros((Nt, y0.shape[0]))
     y0 = DaeIc(dae, y0, t0, opt.rtol)  # check and modify initial values
-    y[0, :] = y0
+    Y[0, :] = y0
     T = np.zeros((Nt,))
     T[0] = t0
 
@@ -73,13 +76,17 @@ def implicit_trapezoid(dae: nDAE,
 
         tt = tt + dt
         nt = nt + 1
-        y[nt] = y1
+        Y[nt] = y1
         T[nt] = tt
+        if opt.pbar:
+            pbar.update(T[nt] - T[nt - 1])
         y0 = y1
         t0 = tt
 
-    y = y[0:nt + 1]
+    Y = Y[0:nt + 1]
     T = T[0:nt + 1]
+    if opt.pbar:
+        pbar.close()
     stats.nstep = nt
 
-    return daesol(T, y, stats=stats)
+    return daesol(T, Y, stats=stats)

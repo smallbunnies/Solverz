@@ -92,3 +92,13 @@ class Model:
             warnings.warn(f'Equation size {eqs.eqn_size} and variable size {eqs.vsize} not equal!')
 
         return eqs, y0
+
+    def add(self, m):
+        if isinstance(m, Model):
+            self.__dict__.update(m.__dict__)
+        elif isinstance(m, (Var, ParamBase, Eqn, Ode)):
+            self.__dict__[m.name] = m
+        elif isinstance(m, dict):
+            self.__dict__.update(m)
+        else:
+            raise ValueError(f"Unknown element type {type(m)}")

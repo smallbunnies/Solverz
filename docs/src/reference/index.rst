@@ -54,3 +54,5 @@ DAE solver
 .. autofunction:: Solverz.solvers.daesolver.trapezoidal.implicit_trapezoid
 
 .. autofunction:: Solverz.solvers.daesolver.rodas.Rodas
+
+.. autofunction:: Solverz.solvers.daesolver.ode15s.ode15s

@@ -4,6 +4,7 @@ from typing import Union, List
 
 import numpy as np
 from numpy import abs, linalg
+from scipy.sparse import diags_array
 from tqdm import tqdm
 
 from Solverz.equation.equations import DAE
@@ -15,4 +16,5 @@ from Solverz.solvers.parser import dae_io_parser
 from Solverz.solvers.stats import Stats
 from Solverz.variable.variables import TimeVars
 from Solverz.solvers.solution import daesol
-from Solverz.solvers.daesolver.daeic import DaeIc
+from Solverz.solvers.daesolver.daeic import DaeIc, getyp0
+from Solverz.num_api.numjac import numjac

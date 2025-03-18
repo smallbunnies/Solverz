@@ -5,6 +5,21 @@ from Solverz.solvers.laesolver import solve
 
 from scipy.sparse.linalg import svds
 
+def getyp0(dae: nDAE, y0: np.ndarray, t0):
+
+    M = dae.M
+    p = dae.p
+    F0 = dae.F(t0, y0, p)
+    DiffEqn, DiffVar = M.nonzero()
+
+    yp0 = np.zeros_like(y0)
+
+    nonzero_rows = set(DiffEqn)
+    nonzero_cols = set(DiffVar)
+    Mp = M[list(nonzero_rows), :][:, list(nonzero_cols)]
+    yp0[DiffVar] = solve(Mp, F0[DiffEqn])
+    return yp0
+
 
 def DaeIc(dae: nDAE, y0: np.ndarray, t0, rtol):
     """
