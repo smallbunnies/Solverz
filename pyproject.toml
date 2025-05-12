@@ -9,7 +9,7 @@ version_file = "Solverz/_version.py"
 name = "Solverz"
 dynamic = ["version"]
 dependencies = [
-    "sympy>=1.13.0",
+    "sympy>=1.13.0,<=1.13.3",
     "numba >= 0.58.1",
     "numpy>=2.0.0",
     "scipy>=1.14.0",

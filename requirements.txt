@@ -1,5 +1,5 @@
 numpy>=2.0.0
-sympy>=1.13.0
+sympy>=1.13.0,<=1.13.3
 pandas>=1.4.2
 openpyxl>=3.0.10
 matplotlib == 3.9.0
