@@ -114,5 +114,6 @@ pip install Solverz
 
 - [Solverz Documentation](https://doc.solverz.org)
 - [Solverz Cookbook](https://cook.solverz.org)
+- [Solverz Museum](https://solmuseum.solverz.org)
 
  
