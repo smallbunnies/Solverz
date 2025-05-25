@@ -294,9 +294,11 @@ def Rodas(dae: nDAE,
                 if opt.pbar:
                     pbar.update(T[nt] - T[nt - 1])
 
-            if nt == 10000:
-                warnings.warn("Time steps more than 10000! Rodas breaks. Try input a smaller tspan!")
-                done = True
+            if nt == T.shape[0] - 1:
+                # warnings.warn("Time steps more than 10000! Rodas breaks. Try input a smaller tspan!")
+                # done = True
+                T = np.concatenate([T, np.zeros(1000)])
+                Y = np.concatenate([Y, np.zeros((1000, vsize))])
 
             if np.abs(tend - t) < uround or stop:
                 done = True
@@ -316,10 +318,13 @@ def Rodas(dae: nDAE,
         pbar.close()
 
     if haveEvent:
-        te = te[0:nevent + 1]
-        ye = ye[0:nevent + 1]
-        ie = ie[0:nevent + 1]
-        return daesol(T, Y, te, ye, ie, stats)
+        if nevent >= 0:
+            te = te[0:nevent + 1]
+            ye = ye[0:nevent + 1]
+            ie = ie[0:nevent + 1]
+            return daesol(T, Y, te, ye, ie, stats)
+        else:
+            return daesol(T, Y, stats=stats)
     else:
         return daesol(T, Y, stats=stats)
 
