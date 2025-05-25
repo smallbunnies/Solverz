@@ -44,6 +44,10 @@ class VarsBasic:
         return self.array
 
     @property
+    def shape(self):
+        return self.array.shape
+
+    @property
     def total_size(self):
         return self.a.total_size
 

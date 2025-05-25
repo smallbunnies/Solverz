@@ -21,6 +21,7 @@ class Opt:
                  event_duration=1e-8,
                  partial_decompose=False,
                  ode15smaxit=4,
+                 ndfmaxit=4,
                  normcontrol=False,
                  numJac=False,
                  max_it=100):
@@ -42,6 +43,7 @@ class Opt:
         self.event_duration = event_duration
         self.partial_decompose = partial_decompose
         self.ode15smaxit = ode15smaxit
+        self.ndfmaxit = ndfmaxit
         self.normcontrol = normcontrol
         self.numJac = numJac
         self.max_it = max_it

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from copy import deepcopy
 
 from Solverz.utilities.type_checker import is_number
 from Solverz.solvers.stats import Stats
@@ -72,9 +73,14 @@ class daesol:
             self.Y.append(sol.Y)
         else:
             self.Y = sol.Y
-        self.te = np.concatenate([self.te, sol.te]) if self.te is not None else sol.te
-        if self.ye is not None:
+
+        if self.te is not None and sol.te is not None:
+            self.te = np.concatenate([self.te, sol.te])
             self.ye.append(sol.ye)
+            self.ie = np.concatenate([self.ie, sol.ie])
+        elif self.te is None and sol.te is not None:
+            self.te = sol.te.copy()
+            self.ye = deepcopy(sol.ye)
+            self.ie = sol.ie.copy()
         else:
-            self.ye = sol.ye
-        self.ie = np.concatenate([self.ie, sol.ie]) if self.ie is not None else sol.ie
+            pass
