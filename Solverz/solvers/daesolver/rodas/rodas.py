@@ -227,8 +227,15 @@ def Rodas(dae: nDAE,
                             while iterate > 0:
                                 iterate = iterate + 1
                                 tau = (tevent - told) / dt
-                                ynext = y0 + tau * dt * K @ (
-                                        rparam.b + (tau - 1) * (rparam.c + tau * (rparam.d + tau * rparam.e)))
+                                ynext = ntrp(y0,
+                                             ynew,
+                                             told,
+                                             dt,
+                                             opt.scheme,
+                                             rparam,
+                                             K,
+                                             tau,
+                                             dae)
                                 value, isterminal, direction = events(tevent, ynext)
                                 if v1 * value[i] < 0:
                                     tL = tevent
@@ -266,7 +273,15 @@ def Rodas(dae: nDAE,
             if dense_output:  # dense_output
                 while t >= tnext > told:
                     tau = (tnext - told) / dt
-                    ynext = y0 + tau * dt * K @ (rparam.b + (tau - 1) * (rparam.c + tau * (rparam.d + tau * rparam.e)))
+                    ynext = ntrp(y0,
+                                 ynew,
+                                 told,
+                                 dt,
+                                 opt.scheme,
+                                 rparam,
+                                 K,
+                                 tau,
+                                 dae)
                     nt = nt + 1
                     T[nt] = tnext
                     Y[nt] = ynext
@@ -335,3 +350,44 @@ def dfdt(dae: nDAE, t, y):
     f0 = dae.F(t, y, dae.p)
     f1 = dae.F(t + ddt, y, dae.p)
     return (f1 - f0) / ddt
+
+
+def ntrp(y0,
+         ynew,
+         told,
+         dt,
+         scheme,
+         rparam,
+         K,
+         tau,
+         dae):
+    if scheme != 'rodas3':
+        ynext = ntrp1(y0,
+                      tau,
+                      dt,
+                      K,
+                      rparam.b,
+                      rparam.c,
+                      rparam.d,
+                      rparam.e)
+    else:
+        ynext = ntrp2(y0,
+                      ynew,
+                      dae.F(told, y0, dae.p),
+                      dae.F(told+dt, ynew, dae.p),
+                      tau,
+                      dt)
+    return ynext
+
+
+@njit(cache=True)
+def ntrp1(y0, tau, dt, K, b, c, d, e):
+    ynew = y0 + tau * dt * K @ (b + (tau - 1) * (c + tau * (d + tau * e)))
+    return ynew
+
+
+@njit(cache=True)
+def ntrp2(y0, y1, F0, F1, tau, dt):
+    ynew = ((1 - tau) * y0 + tau * y1 +
+            tau * (tau - 1) * ((1 - 2 * tau) * (y1 - y0) + (tau - 1) * dt * F0 + tau * dt * F1))
+    return ynew

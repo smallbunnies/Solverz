@@ -72,9 +72,14 @@ def test_orbit():
         return value, isterminal, direction
 
     sol = Rodas(norbit, [0, 7], y0, Opt(event=events, rtol=1e-5, atol=1e-4))
+    sol1 = Rodas(norbit, [0, 7], y0, Opt(event=events, rtol=1e-5, atol=1e-4, scheme='rodas3'))
 
     np.testing.assert_allclose(sol.te,
                                np.array([3.09609516, 6.19215951]),
+                               rtol=1e-5,
+                               atol=0)
+    np.testing.assert_allclose(sol1.te,
+                               np.array([3.095607, 6.192964]),
                                rtol=1e-5,
                                atol=0)
     np.testing.assert_allclose(sol.ye,
