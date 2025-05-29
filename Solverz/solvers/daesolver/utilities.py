@@ -6,6 +6,7 @@ import numpy as np
 from numpy import abs, linalg
 from scipy.sparse import diags_array
 from tqdm import tqdm
+from numba import njit
 
 from Solverz.equation.equations import DAE
 from Solverz.num_api.num_eqn import nDAE, nAE

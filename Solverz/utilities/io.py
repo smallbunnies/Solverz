@@ -75,7 +75,7 @@ def save_result(sol: aesol | daesol, name: str, dir: str = None, f='xlsx'):
                     for var in sol.ye.var_list:
                         sol_d['ye'][var] = sol.ye[var]
 
-            savemat(dir + f'{name}.mat', {f'sol_{name}': sol_d})
+            savemat(dir + f'{name}.mat', {f'sol': sol_d})
 
     elif isinstance(sol, aesol):
         y = sol.y
