@@ -116,4 +116,15 @@ pip install Solverz
 - [Solverz Cookbook](https://cook.solverz.org)
 - [Solverz Museum](https://solmuseum.solverz.org)
 
+ # Cite Solverz
+ 
+ In Chinese
+ 
+ [1] 俞睿智,顾伟,陆帅,张苏涵,徐一骏.面向综合能源系统的开源高性能仿真建模工具开发[J/OL].中国电机工程学报,1-12[2025-05-29]. https://doi.org/10.13334/j.0258-8013.pcsee.242788.
+
+ In English
+
+ [1] R. Yu, W. Gu, S. Lu, S. Zhang, and Y. Xu, "Development of an Open-Source High-Performance Simulation Modeling Tool for Integrated  Energy Systems," Proceedings of the CSEE, May 2025, Advance online publication, doi: 10.13334/j.0258-8013.pcsee.242788.
+
+
  
