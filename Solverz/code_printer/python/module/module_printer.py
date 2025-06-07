@@ -119,7 +119,7 @@ def print_inner_J(var_addr: Address,
             # add real assumption
             SymbolsInDeri = [symbols(arg.name, real=True) for arg in SymbolsInDeri_]
             addr_by_ele = slice(addr_by_ele_0, addr_by_ele_0 + jb.SpEleSize)
-            if not jb.IsDeriNumber:
+            if not (jb.IsDeriNumber or jb.DeriType == 'matrix'):
                 # _data_[0:1] = inner_J0(t1, x)
                 body.append(Assignment(iVar('_data_', internal_use=True)[addr_by_ele],
                                        FunctionCall(f'inner_J{int(count)}', SymbolsInDeri)))
