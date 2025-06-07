@@ -101,7 +101,10 @@ class Equations:
             DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
 
             # The value of deri can be either matrix, vector, or scalar(number). We cannot reshape it.
-            Value0 = np.array(fy[3])
+            if isinstance(fy[3], csc_array):
+                Value0 = fy[3]
+            else:
+                Value0 = np.array(fy[3])
 
             jb = JacBlock(EqnName,
                           EqnAddr,

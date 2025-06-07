@@ -110,7 +110,7 @@ class Var(sSymBasic):
 
 class AliasVar(sSymBasic):
     def __init__(self, name: str, step=1, value=None, init=None):
-        name = name + '_tag_' + str(step - 1)
+        name = name + '_tag_' + str(abs(step - 1))
         super().__init__(name=name, Type='iAliasVar', value=value, dim=1, init=init)
         self.step = step
 

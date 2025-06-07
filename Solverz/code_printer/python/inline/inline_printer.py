@@ -79,12 +79,12 @@ def print_J_block(jb: JacBlock, sparse: bool) -> List:
     if sparse:
         match jb.DeriType:
             case 'matrix':
-                # return [Assignment(iVar('value_coo'), coo_array(rhs)),
-                #         extend(iVar('row', internal_use=True), eqn_address),
-                #         extend(iVar('col', internal_use=True), var_address),
-                #         extend(iVar('data', internal_use=True), data)]
-                raise NotImplementedError(
-                    "Matrix parameters in sparse Jac not implemented yet!")
+                return [extend(iVar('row', internal_use=True), SolList(*jb.SpEqnAddr.tolist())),
+                        extend(iVar('col', internal_use=True),
+                               SolList(*jb.SpVarAddr.tolist())),
+                        extend(iVar('data', internal_use=True), SolList(*jb.Value0.tocoo().data))]
+                # raise NotImplementedError(
+                #     "Matrix parameters in sparse Jac not implemented yet!")
             case 'vector' | 'scalar':
                 return [extend(iVar('row', internal_use=True), SolList(*jb.SpEqnAddr.tolist())),
                         extend(iVar('col', internal_use=True),
