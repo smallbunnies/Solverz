@@ -10,7 +10,7 @@ from sympy.codegen.ast import Assignment, AddAugmentedAssignment
 from sympy import pycode, symbols, Function, Symbol, Expr, Number as SymNumber
 from sympy.codegen.ast import real, FunctionPrototype, FunctionDefinition, Return, FunctionCall as SymFuncCall
 from sympy.utilities.lambdify import _import, _module_present, _get_namespace
-from scipy.sparse import sparray
+from scipy.sparse import sparray, csc_array
 from numbers import Number
 
 from Solverz.equation.eqn import Eqn
@@ -45,7 +45,10 @@ def parse_p(PARAM: Dict[str, ParamBase]):
         if isinstance(param, TimeSeriesParam):
             p.update({param_name: param})
         else:
-            p.update({param_name: param.v})
+            if isinstance(param.v, csc_array):
+                p.update({param_name: param.v.toarray()})
+            else:
+                p.update({param_name: param.v})
     return p
 
 
