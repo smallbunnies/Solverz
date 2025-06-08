@@ -59,7 +59,7 @@ def test_jac():
     np.testing.assert_allclose(data, np.concatenate([np.zeros(12), np.array([5, 5, 5])]))
 
 
-#%% scalar var and scalar derivative
+# %% scalar var and scalar derivative
 def test_jb_scalar_var_scalar_deri():
     # non-index var
     jb = JacBlock('a',
@@ -294,8 +294,8 @@ def test_jb_vector_var_scalar_deri():
                       iVar('y'),
                       np.array([1]))
 
-def test_jb_vector_var_zero_deri():
 
+def test_jb_vector_var_zero_deri():
     with pytest.raises(ValueError,
                        match=re.escape("We wont allow 0.0 derivative!")):
         jb = JacBlock('a',
@@ -305,6 +305,7 @@ def test_jb_vector_var_zero_deri():
                       slice(1, 4),
                       0.,
                       np.array([0]))
+
 
 # %% vector var and vector derivative
 def test_jb_vector_var_vector_deri():

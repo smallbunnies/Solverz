@@ -45,7 +45,7 @@ def fdae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
     """
 
     @functools.wraps(func)
-    def wrapper(eqn: nFDAE, tspan: List | np.ndarray, y0: np.ndarray | Vars, opt: Opt = None):
+    def wrapper(eqn: nFDAE, tspan: List | np.ndarray, y0: np.ndarray | Vars, opt: Opt = None, **kwargs):
         # Convert Vars input to np.ndarray if necessary
         original_y0_is_vars = isinstance(y0, Vars)
         if original_y0_is_vars:
@@ -53,8 +53,12 @@ def fdae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
         else:
             y = y0
 
+        k_ = dict()
+        for name, arg in kwargs.items():
+            k_[name] = arg.array
+
         # Dispatch AE solvers and capture results
-        sol = func(eqn, tspan, y, opt)
+        sol = func(eqn, tspan, y, opt, **k_)
 
         # Wrap the output in Vars if the original y0 was a Vars instance
         if original_y0_is_vars:

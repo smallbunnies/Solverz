@@ -14,8 +14,9 @@ from Solverz.solvers.solution import daesol
 @fdae_io_parser
 def fdae_solver(fdae: nFDAE,
                 tspan: List | np.ndarray,
-                u0: np.ndarray,
-                opt: Opt = None):
+                y0: np.ndarray,
+                opt: Opt = None,
+                **kwargs):
     r"""
     The general solver of FDAE.
 
@@ -28,7 +29,7 @@ def fdae_solver(fdae: nFDAE,
     tspan : List | np.ndarray
         An array specifying t0 and tend
 
-    u0 : np.ndarray
+    y0 : np.ndarray
         The initial values of variables
 
     opt : Opt
@@ -57,17 +58,21 @@ def fdae_solver(fdae: nFDAE,
         nstep = np.ceil(tend / dt).astype(int) + 1000
     else:
         nstep = int(10000)
-    nt = 0
+    nt0 = fdae.nstep - 1
+    nt = nt0
     tt = T_initial
     t0 = tt
     uround = np.spacing(1.0)
 
-    u = np.zeros((nstep, u0.shape[0]))
-    u[0, :] = u0
+    Y = np.zeros((nstep + nt0, y0.shape[0]))
+    Y[nt, :] = y0
+    for j in range(nt0):
+        Y[nt-j, :] = kwargs[f'y{j}']
+
     T = np.zeros((nstep,))
-    T[0] = t0
+    T[nt] = t0
     if opt.pbar:
-        bar = tqdm.tqdm(total=tend-t0)
+        bar = tqdm.tqdm(total=tend - t0)
 
     done = False
     p = fdae.p
@@ -81,15 +86,12 @@ def fdae_solver(fdae: nFDAE,
         if done:
             break
 
-        if fdae.nstep == 1:
-            ae = nAE(lambda y_, p_: fdae.F(t0 + dt, y_, p_, u0),
-                     lambda y_, p_: fdae.J(t0 + dt, y_, p_, u0),
-                     p)
-        else:
-            raise NotImplementedError("Multistep FDAE not implemented!")
+        ae = nAE(lambda y_, p_: fdae.F(t0 + dt, y_, p_, *[Y[nt - i, :] for i in range(fdae.nstep)]),
+                 lambda y_, p_: fdae.J(t0 + dt, y_, p_, *[Y[nt - i, :] for i in range(fdae.nstep)]),
+                 p)
 
-        sol = nr_method(ae, u0, Opt(ite_tol=opt.ite_tol, stats=True))
-        u1 = sol.y
+        sol = nr_method(ae, y0, Opt(ite_tol=opt.ite_tol, stats=True))
+        ynew = sol.y
         stats.ndecomp = stats.ndecomp + sol.stats.ndecomp
         stats.nfeval = stats.nfeval + stats.nfeval
         if stats.nstep >= 100:
@@ -98,77 +100,19 @@ def fdae_solver(fdae: nFDAE,
 
         tt = tt + dt
         nt = nt + 1
-        u[nt] = u1
+        Y[nt] = ynew
         T[nt] = tt
         if opt.pbar:
             bar.update(dt)
         t0 = tt
-        u0 = u1
+        y0 = ynew
 
         if np.abs(tend - tt) < uround:
             done = True
 
-    u = u[0:nt + 1]
-    T = T[0:nt + 1]
+    Y = Y[nt0:nt + 1]
+    T = T[nt0:nt + 1]
     stats.nstep = nt
     if opt.pbar:
         bar.close()
-    return daesol(T, u, stats=stats)
-
-
-def fdae_ss_solver(fdae: nFDAE,
-                   u0: np.ndarray,
-                   dt,
-                   T0: Number = 0,
-                   opt: Opt = None):
-    stats = Stats(scheme='FDE solver')
-    if opt is None:
-        opt = Opt()
-
-    nstep = 10000
-    nt = 0
-    tt = T0
-    t0 = tt
-
-    u = np.zeros((nstep, u0.shape[0]))
-    u[0, :] = u0
-
-    done = False
-    p = fdae.p
-    dev0 = 1
-    while not done:
-
-        if done:
-            break
-
-        if fdae.nstep == 1:
-            ae = nAE(lambda y_, p_: fdae.F(t0 + dt, y_, p_, u0),
-                     lambda y_, p_: fdae.J(t0 + dt, y_, p_, u0),
-                     p)
-        else:
-            raise NotImplementedError("Multistep FDAE not implemented!")
-
-        u1, ite = nr_method(ae, u0, tol=opt.ite_tol, stats=True)
-        stats.ndecomp = stats.ndecomp + ite
-        stats.nfeval = stats.nfeval + ite + 1
-
-        tt = tt + dt
-        nt = nt + 1
-        u[nt] = u1
-
-        du = u1 - u0
-        args = u1 != 0
-        dev1 = np.max(np.abs(du[args] / u1[args]))
-        if dev1 < 1e-7:
-            done = True
-
-        u0 = u1
-        t0 = tt
-        # if dev1 <= dev0:
-        #     dt = dt * 1.1
-        dev0 = dev1
-
-    u = u[0:nt + 1]
-    stats.nstep = nt
-
-    return u, stats
+    return daesol(T, Y, stats=stats)
