@@ -66,11 +66,11 @@ def fdae_solver(fdae: nFDAE,
 
     Y = np.zeros((nstep + nt0, y0.shape[0]))
     Y[nt, :] = y0
-    for j in range(nt0):
+    T = np.zeros((nstep + nt0,))
+    T[nt] = t0
+    for j in range(1, nt0 + 1):
         Y[nt-j, :] = kwargs[f'y{j}']
 
-    T = np.zeros((nstep,))
-    T[nt] = t0
     if opt.pbar:
         bar = tqdm.tqdm(total=tend - t0)
 
