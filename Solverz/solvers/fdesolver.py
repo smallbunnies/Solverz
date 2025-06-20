@@ -93,7 +93,7 @@ def fdae_solver(fdae: nFDAE,
         sol = nr_method(ae, y0, Opt(ite_tol=opt.ite_tol, stats=True))
         ynew = sol.y
         stats.ndecomp = stats.ndecomp + sol.stats.ndecomp
-        stats.nfeval = stats.nfeval + stats.nfeval
+        stats.nfeval = stats.nfeval + sol.stats.nfeval
         if stats.nstep >= 100:
             print(f"FDAE solver broke at time={tt} due to non-convergence")
             break
