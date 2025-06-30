@@ -44,6 +44,10 @@ class VarsBasic:
         return self.array
 
     @property
+    def shape(self):
+        return self.array.shape
+
+    @property
     def total_size(self):
         return self.a.total_size
 
@@ -278,5 +282,11 @@ class TimeVars(VarsBasic):
     def append(self, other: TimeVars):
         if self.a == other.a:
             self.array = np.concatenate([self.array, other.array], axis=0)
+        else:
+            raise ValueError("Cannot concatenate two TimeVars with different variable addresses!")
+
+    def insert(self, other: TimeVars):
+        if self.a == other.a:
+            self.array = np.concatenate([other.array, self.array], axis=0)
         else:
             raise ValueError("Cannot concatenate two TimeVars with different variable addresses!")

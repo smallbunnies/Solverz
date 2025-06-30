@@ -3,11 +3,12 @@ import numpy as np
 from typing import Dict, Union, List
 import warnings
 
+from scipy.sparse import csc_array
+
 from sympy import Expr, Function, Integer
-from Solverz.sym_algebra.symbols import iVar, IdxVar
+from Solverz.sym_algebra.symbols import iVar, IdxVar, Para
 from Solverz.utilities.type_checker import is_vector, is_scalar, is_integer, is_number, PyNumber, is_zero
 from Solverz.sym_algebra.functions import Diag, Ones
-
 
 SolVar = Union[iVar, IdxVar]
 
@@ -55,9 +56,10 @@ class Jac:
         for jbs_row in self.blocks.values():
             for jb in jbs_row.values():
                 if jb.DeriType == 'matrix':
-                    raise NotImplementedError("Matrix derivative type not supported!")
+                    # raise NotImplementedError("Matrix derivative type not supported!")
+                    num += jb.SpEleSize
                 else:
-                    num = num + jb.SpEleSize
+                    num += jb.SpEleSize
         return num
 
     def parse_row_col_data(self):
@@ -77,6 +79,8 @@ class Jac:
                 col[addr_by_ele] = jb.SpVarAddr.copy()
                 if jb.IsDeriNumber:
                     data[addr_by_ele] = jb.DeriExpr
+                elif jb.DeriType == 'matrix':
+                    data[addr_by_ele] = jb.Value0.tocoo().data
                 addr_by_ele_0 += jb.SpEleSize
         return row, col, data
 
@@ -132,10 +136,18 @@ class JacBlock:
         if not isinstance(self.Value0, np.ndarray):
             if isinstance(self.Value0, PyNumber):
                 self.Value0 = np.array(self.Value0)
-            else:
+            elif not isinstance(self.Value0, csc_array):
                 raise TypeError(f"Derivative value type {type(self.Value0)} not supported!")
 
         if self.Value0.ndim == 2:
+            # support only var-type parameter (e.g. `A`)
+            # does not support expr-type parameter (e.g. Diag(x)@A)
+            if not isinstance(self.DeriExpr, Para) and not isinstance(-self.DeriExpr, Para):  # A or -A
+                raise TypeError(f"Support matrix param only in `A@x` or `-A@x` type matrix-vector products, "
+                                f"not {type(self.DeriExpr)} {self.DeriExpr}!")
+            if not isinstance(self.Value0, csc_array):
+                raise TypeError(
+                    f"Please convert two-dimensional Parameter to sparse (scipy.sparse.csc) type or declare sparse Param")
             DeriType = 'matrix'
         elif is_vector(self.Value0):
             DeriType = 'vector'
@@ -182,6 +194,7 @@ class JacBlock:
                             raise ValueError(f"Incompatible matrix derivative size {self.Value0.shape} " +
                                              f"and vector variable size {DiffVarValue.shape}.")
                     self.DeriExprBc = self.DeriExpr
+                    warnings.warn("Matrix derivative is not mutable in Solverz.")
                 case _:
                     raise TypeError(f"Derivative with value {self.Value0} of vector variables not supported!")
 
@@ -200,7 +213,22 @@ class JacBlock:
             case 'vector':
                 match self.DeriType:
                     case 'matrix':
-                        warnings.warn("Sparse parser of matrix type jac block not implemented!")
+                        # warnings.warn("Sparse parser of matrix type jac block not implemented!")
+                        row = self.Value0.tocoo().row
+                        col = self.Value0.tocoo().col
+                        self.SpEqnAddr = slice2array(self.EqnAddr)[row]
+                        if isinstance(self.DiffVar, iVar):
+                            self.SpVarAddr = slice2array(self.VarAddr)[col]
+                        else:
+                            if isinstance(self.DiffVar.index, slice):
+                                VarArange = slice2array(self.VarAddr)[self.DiffVar.index][col]
+                                self.SpVarAddr = VarArange
+                            elif is_integer(self.DiffVar.index):
+                                raise TypeError(f"Index of vector variable cannot be integer!")
+                            else:
+                                raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
+                        self.SpDeriExpr = self.DeriExprBc
+                        self.SpEleSize = len(row)
                     case 'vector' | 'scalar':
                         self.SpEqnAddr = slice2array(self.EqnAddr)
                         if isinstance(self.DiffVar, iVar):
@@ -214,6 +242,7 @@ class JacBlock:
                             else:
                                 raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
                         self.SpDeriExpr = self.DeriExprBc
+                        self.SpEleSize = self.SpEqnAddr.size
             case 'scalar':
                 match self.DeriType:
                     case 'vector' | 'scalar':
@@ -235,10 +264,10 @@ class JacBlock:
                             else:
                                 raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
                         self.SpDeriExpr = self.DeriExprBc
+                        self.SpEleSize = self.SpEqnAddr.size
         if self.SpEqnAddr.size != self.SpVarAddr.size:
             raise ValueError(f"Incompatible equation size {self.SpEqnAddr.size} of Equation {self.EqnName} " +
                              f"and variable size {self.SpVarAddr.size} of Variable {self.DiffVar}!")
-        self.SpEleSize = self.SpEqnAddr.size
 
     def ParseDen(self):
         self.DenEqnAddr = self.EqnAddr
@@ -296,7 +325,3 @@ class JacBlock:
 
 def slice2array(s: slice) -> np.ndarray:
     return np.arange(s.start, s.stop)
-
-
-
-

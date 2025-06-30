@@ -6,6 +6,7 @@ import re
 import pytest
 
 from sympy import Integer
+from scipy.sparse import csc_array
 
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import DAE, AE
@@ -59,7 +60,7 @@ def test_jac():
     np.testing.assert_allclose(data, np.concatenate([np.zeros(12), np.array([5, 5, 5])]))
 
 
-#%% scalar var and scalar derivative
+# %% scalar var and scalar derivative
 def test_jb_scalar_var_scalar_deri():
     # non-index var
     jb = JacBlock('a',
@@ -294,8 +295,8 @@ def test_jb_vector_var_scalar_deri():
                       iVar('y'),
                       np.array([1]))
 
-def test_jb_vector_var_zero_deri():
 
+def test_jb_vector_var_zero_deri():
     with pytest.raises(ValueError,
                        match=re.escape("We wont allow 0.0 derivative!")):
         jb = JacBlock('a',
@@ -305,6 +306,7 @@ def test_jb_vector_var_zero_deri():
                       slice(1, 4),
                       0.,
                       np.array([0]))
+
 
 # %% vector var and vector derivative
 def test_jb_vector_var_vector_deri():
@@ -348,32 +350,64 @@ def test_jb_vector_var_vector_deri():
                       np.array([1, 1, 1, 1]))
 
 
-# %% scalar var and matrix derivative
+# %% matrix derivative
 def test_jb_vector_var_matrix_deri():
+
+    # matrix derivative must be param type
     with pytest.raises(TypeError,
-                       match=re.escape("Matrix derivative of scalar variables not supported!")):
+                       match=re.escape("Support matrix param only in `A@x` or `-A@x` type matrix-vector products, not <class 'Solverz.sym_algebra.symbols.iVar'> A!")):
         jb = JacBlock('a',
                       slice(0, 3),
                       iVar('x')[1],
                       np.array([2]),
                       slice(1, 4),
-                      iVar('y'),
+                      iVar('A'),
+                      np.zeros((3, 3)))
+
+    # matrix param must be sparse
+    with pytest.raises(TypeError,
+                       match=re.escape("Please convert two-dimensional Parameter to sparse (scipy.sparse.csc) type or declare sparse Param")):
+        jb = JacBlock('a',
+                      slice(0, 3),
+                      iVar('x')[1],
+                      np.array([2]),
+                      slice(1, 4),
+                      Para('A'),
                       np.zeros((3, 3)))
 
     # vector var and matrix derivative
-    # compatible vector and matrix size
+    # compatible vector and matrix siz
     with pytest.warns(UserWarning) as record:
         jb = JacBlock('a',
                       slice(0, 3),
                       iVar('x'),
-                      np.array([2, 3, 4]),
-                      slice(1, 4),
-                      iVar('y'),
-                      np.zeros((3, 3)))
+                      np.array([2, 3, 4, 5]),
+                      slice(1, 5),
+                      Para('A'),
+                      csc_array(np.eye(4, k=1)[:-1, :]))
 
-        assert str(record[0].message) == "Sparse parser of matrix type jac block not implemented!"
+        assert str(record[0].message) == "Matrix derivative is not mutable in Solverz."
+        assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
+        assert_allclose(jb.SpVarAddr, np.array([2, 3, 4]))
+        assert jb.SpEleSize == 3
         assert jb.DenEqnAddr == slice(0, 3)
-        assert jb.DenVarAddr == slice(1, 4)
+        assert jb.DenVarAddr == slice(1, 5)
+
+    with pytest.warns(UserWarning) as record:
+        jb = JacBlock('a',
+                      slice(0, 3),
+                      iVar('x')[2:4],
+                      np.array([2, 3]),
+                      slice(1, 5),
+                      Para('A'),
+                      csc_array(np.eye(4)[:-1, 0:2]))
+
+        assert str(record[0].message) == "Matrix derivative is not mutable in Solverz."
+        assert_allclose(jb.SpEqnAddr, np.array([0, 1]))
+        assert_allclose(jb.SpVarAddr, np.array([3, 4]))
+        assert jb.SpEleSize == 2
+        assert jb.DenEqnAddr == slice(0, 3)
+        assert jb.DenVarAddr == slice(3, 5)
 
     # incompatible vector and matrix size
     with pytest.raises(ValueError,
@@ -383,5 +417,5 @@ def test_jb_vector_var_matrix_deri():
                       iVar('x'),
                       np.array([2, 3, 4]),
                       slice(1, 4),
-                      iVar('y'),
-                      np.zeros((3, 4)))
+                      Para('y'),
+                      csc_array(np.eye(4, k=1)[:-1, :]))

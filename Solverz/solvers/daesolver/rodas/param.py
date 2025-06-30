@@ -6,6 +6,32 @@ class Rodas_param:
     def __init__(self,
                  scheme: str = 'rodas4'):
         match scheme:
+            case 'rodas3':
+                self.s = 4
+                self.pord = 3
+                self.alpha = np.zeros((self.s, self.s))
+                self.beta = np.zeros((self.s, self.s))
+                self.g = np.zeros((self.s, 1))
+                self.gamma = 0.5
+                self.alpha[1, 0] = 0
+                self.alpha[2, 0:2] = [1, 0]
+                self.alpha[3, 0:3] = [3/4, -1/4, 1/2]
+                self.beta[1, 0] = 1
+                self.beta[2, 0:2] = [3/4, -1/4]
+                self.beta[3, 0:3] = [5/6, -1/6, -1/6]
+                self.b = np.zeros((self.s,))
+                self.b[0:3] = self.beta[-1, 0:3]
+                self.b[3] = self.gamma
+                self.bd = np.array([3/4, -1/4, 1/2, 0])
+                self.c = np.zeros_like(self.b)
+                self.d = np.zeros_like(self.b)
+                self.e = np.zeros_like(self.b)
+                self.gammatilde = self.beta - self.alpha
+                self.a = np.sum(self.alpha, axis=1)
+                self.g = np.sum(self.gammatilde, axis=1) + self.gamma
+                self.gammatilde = self.gammatilde / self.gamma
+                self.alpha = self.alpha.T
+                self.gammatilde = self.gammatilde.T
             case 'rodas4':
                 self.s = 6
                 self.pord = 4
