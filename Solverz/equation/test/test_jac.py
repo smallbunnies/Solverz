@@ -376,7 +376,7 @@ def test_jb_vector_var_matrix_deri():
                       np.zeros((3, 3)))
 
     # vector var and matrix derivative
-    # compatible vector and matrix siz
+    # compatible vector and matrix size
     with pytest.warns(UserWarning) as record:
         jb = JacBlock('a',
                       slice(0, 3),
