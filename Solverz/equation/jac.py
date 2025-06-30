@@ -6,10 +6,9 @@ import warnings
 from scipy.sparse import csc_array
 
 from sympy import Expr, Function, Integer
-from Solverz.sym_algebra.symbols import iVar, IdxVar
+from Solverz.sym_algebra.symbols import iVar, IdxVar, Para
 from Solverz.utilities.type_checker import is_vector, is_scalar, is_integer, is_number, PyNumber, is_zero
 from Solverz.sym_algebra.functions import Diag, Ones
-
 
 SolVar = Union[iVar, IdxVar]
 
@@ -141,6 +140,14 @@ class JacBlock:
                 raise TypeError(f"Derivative value type {type(self.Value0)} not supported!")
 
         if self.Value0.ndim == 2:
+            # support only var-type parameter (e.g. `A`)
+            # does not support expr-type parameter (e.g. Diag(x)@A)
+            if not isinstance(self.DeriExpr, Para) and not isinstance(-self.DeriExpr, Para):  # A or -A
+                raise TypeError(f"Support matrix param only in `A@x` or `-A@x` type matrix-vector products, "
+                                f"not {type(self.DeriExpr)} {self.DeriExpr}!")
+            if not isinstance(self.Value0, csc_array):
+                raise TypeError(
+                    f"Please convert two-dimensional Parameter to sparse (scipy.sparse.csc) type or declare sparse Param")
             DeriType = 'matrix'
         elif is_vector(self.Value0):
             DeriType = 'vector'
@@ -187,6 +194,7 @@ class JacBlock:
                             raise ValueError(f"Incompatible matrix derivative size {self.Value0.shape} " +
                                              f"and vector variable size {DiffVarValue.shape}.")
                     self.DeriExprBc = self.DeriExpr
+                    warnings.warn("Matrix derivative is not mutable in Solverz.")
                 case _:
                     raise TypeError(f"Derivative with value {self.Value0} of vector variables not supported!")
 
@@ -216,7 +224,7 @@ class JacBlock:
                                 VarArange = slice2array(self.VarAddr)[self.DiffVar.index][col]
                                 self.SpVarAddr = VarArange
                             elif is_integer(self.DiffVar.index):
-                                raise TypeError(f"Index of vector variable cant be integer!")
+                                raise TypeError(f"Index of vector variable cannot be integer!")
                             else:
                                 raise TypeError(f"Index type {type(self.DiffVar.index)} not supported!")
                         self.SpDeriExpr = self.DeriExprBc
@@ -317,7 +325,3 @@ class JacBlock:
 
 def slice2array(s: slice) -> np.ndarray:
     return np.arange(s.start, s.stop)
-
-
-
-
