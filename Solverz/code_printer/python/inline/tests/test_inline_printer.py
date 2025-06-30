@@ -3,6 +3,7 @@ from numbers import Number
 
 import numpy as np
 from numpy.testing import assert_allclose
+from scipy.sparse import csc_array
 import re
 import pytest
 from sympy.codegen.ast import Assignment, AddAugmentedAssignment
@@ -20,7 +21,6 @@ from Solverz.code_printer.python.inline.inline_printer import print_J_block, ext
     print_F, print_Hvp, made_numerical, Solverzlambdify
 from Solverz.utilities.address import Address
 from Solverz.num_api.module_parser import modules
-
 
 # %%
 row = iVar('row', internal_use=True)
@@ -65,6 +65,23 @@ def test_jb_printer_vector_var_vector_deri():
         iVar('J_', internal_use=True)[1:10, 0:9], Diag(iVar('y')))
 
 
+def test_jb_printer_vector_var_matrix_deri():
+    jb = JacBlock('a',
+                  slice(0, 3),
+                  iVar('x')[2:4],
+                  np.array([2, 3]),
+                  slice(1, 5),
+                  Para('A'),
+                  csc_array(np.eye(4)[:-1, 0:2]))
+    symJb = print_J_block(jb, True)
+    assert symJb[0] == extend(row, SolList(*[0, 1]))
+    assert symJb[1] == extend(col, SolList(*[3, 4]))
+    assert symJb[2] == extend(data, SolList(*[1.0, 1.0]))
+    symJb = print_J_block(jb, False)
+    assert symJb[0] == AddAugmentedAssignment(
+        iVar('J_', internal_use=True)[0:3, 3:5], Para('A'))
+
+
 def test_jbs_printer():
     jac = Jac()
     x = iVar('x')
@@ -100,7 +117,7 @@ def test_jbs_printer():
     assert symJbs[1] == AddAugmentedAssignment(J_[3:12, 7:16], Diag(y ** 2))
 
 
-expected_J_den = """def J_(t, y_, p_):
+expected_J_den1 = """def J_(t, y_, p_):
     h = y_[0:1]
     v = y_[1:2]
     g = p_["g"]
@@ -109,7 +126,7 @@ expected_J_den = """def J_(t, y_, p_):
     return J_
 """.strip()
 
-expected_J_sp = """def J_(t, y_, p_):
+expected_J_sp1 = """def J_(t, y_, p_):
     h = y_[0:1]
     v = y_[1:2]
     g = p_["g"]
@@ -122,7 +139,7 @@ expected_J_sp = """def J_(t, y_, p_):
     return sps.coo_array((data, (row, col)), (2, 2)).tocsc()
 """.strip()
 
-expected_F = """def F_(t, y_, p_):
+expected_F1 = """def F_(t, y_, p_):
     h = y_[0:1]
     v = y_[1:2]
     g = p_["g"]
@@ -147,20 +164,20 @@ def test_print_F_J():
                    bball.a,
                    bball.var_address,
                    bball.PARAM,
-                   bball.nstep) == expected_J_den
+                   bball.nstep) == expected_J_den1
     assert print_J(bball.__class__.__name__,
                    bball.jac,
                    bball.a,
                    bball.var_address,
                    bball.PARAM,
                    bball.nstep,
-                   True) == expected_J_sp
+                   True) == expected_J_sp1
     assert print_F(bball.__class__.__name__,
                    bball.EQNs,
                    bball.a,
                    bball.var_address,
                    bball.PARAM,
-                   bball.nstep) == expected_F
+                   bball.nstep) == expected_F1
     nbball = made_numerical(bball, y0, sparse=True)
     np.testing.assert_allclose(nbball.F(0, y0, nbball.p),
                                np.array([20, -9.8]))
@@ -169,6 +186,96 @@ def test_print_F_J():
     nbball = made_numerical(bball, y0, sparse=False)
     np.testing.assert_allclose(nbball.J(0, y0, nbball.p),
                                np.array([[0., 1.], [0., 0.]]))
+
+
+expected_J_den2 = """def J_(y_, p_):
+    x = y_[0:2]
+    y = y_[2:3]
+    A = p_["A"]
+    b = p_["b"]
+    c = p_["c"]
+    J_ = np.zeros((3, 3))
+    J_[0:2,0:2] += -A
+    J_[2:3,2] += -np.ones(1)
+    return J_
+""".strip()
+
+expected_J_sp2 = """def J_(y_, p_):
+    x = y_[0:2]
+    y = y_[2:3]
+    A = p_["A"]
+    b = p_["b"]
+    c = p_["c"]
+    row = []
+    col = []
+    data = []
+    row.extend([0, 1, 0, 1])
+    col.extend([0, 0, 1, 1])
+    data.extend([-1.0, 1.0, -3.0, -2.0])
+    row.extend([2])
+    col.extend([2])
+    data.extend(-np.ones(1))
+    return sps.coo_array((data, (row, col)), (3, 3)).tocsc()
+""".strip()
+
+expected_F2 = """def F_(y_, p_):
+    x = y_[0:2]
+    y = y_[2:3]
+    A = p_["A"]
+    b = p_["b"]
+    c = p_["c"]
+    _F_ = np.zeros((3, ))
+    _F_[0:2] = b - (A@x)
+    _F_[2:3] = c - y
+    return _F_
+""".strip()
+
+
+def test_print_F_J1():
+    m = Model()
+    m.x = Var('x', [0, 0])
+    m.y = Var('y', [0])
+    m.b = Param('b', [0.5, 1])
+    m.c = Param('c', [20])
+    m.A = Param('A', [[1, 3], [-1, 2]], dim=2, sparse=True)
+    m.eqnf = Eqn('eqnf', m.b - Mat_Mul(m.A, m.x))
+    m.eqng = Eqn('eqng', m.c - m.y)
+
+    # %%
+    smdl, y0 = m.create_instance()
+    smdl.FormJac(y0)
+    assert print_J(smdl.__class__.__name__,
+                   smdl.jac,
+                   smdl.a,
+                   smdl.var_address,
+                   smdl.PARAM,
+                   smdl.nstep) == expected_J_den2
+    assert print_J(smdl.__class__.__name__,
+                   smdl.jac,
+                   smdl.a,
+                   smdl.var_address,
+                   smdl.PARAM,
+                   smdl.nstep,
+                   True) == expected_J_sp2
+    assert print_F(smdl.__class__.__name__,
+                   smdl.EQNs,
+                   smdl.a,
+                   smdl.var_address,
+                   smdl.PARAM,
+                   smdl.nstep) == expected_F2
+    mdl = made_numerical(smdl, y0, sparse=True)
+    assert isinstance(mdl.p['A'], np.ndarray)
+    np.testing.assert_allclose(mdl.F(y0, mdl.p),
+                               np.array([0.5, 1., 20.]))
+    np.testing.assert_allclose(mdl.J(y0, mdl.p).toarray(),
+                               np.array([[-1., -3., 0.],
+                                         [1., -2., 0.],
+                                         [0., 0., -1.]]))
+    mdl = made_numerical(smdl, y0, sparse=False)
+    np.testing.assert_allclose(mdl.J(y0, mdl.p),
+                               np.array([[-1., -3., 0.],
+                                         [1., -2., 0.],
+                                         [0., 0., -1.]]))
 
 
 expected_J_den_fdae = """def J_(t, y_, p_, y_0):
@@ -339,4 +446,4 @@ def test_hvp_printer():
     HVP = Solverzlambdify(code, 'Hvp_', modules)
     np.testing.assert_allclose(HVP(np.array([1, 2]), dict(), np.array([1, 1])).toarray(),
                                np.array([[2.71828183, -0.90929743],
-                                         [0.,  2.]]))
+                                         [0., 2.]]))
