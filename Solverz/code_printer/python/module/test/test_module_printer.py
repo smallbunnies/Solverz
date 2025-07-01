@@ -4,13 +4,14 @@ import re
 
 from sympy import symbols, pycode, Integer
 from sympy.codegen.ast import FunctionCall as SpFuncCall, Assignment
+from scipy.sparse import csc_array
 
 from Solverz.sym_algebra.symbols import iVar, Para
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.param import Param, TimeSeriesParam
 from Solverz.equation.jac import Jac, JacBlock
 from Solverz.equation.hvp import Hvp
-from Solverz.sym_algebra.functions import exp, cos
+from Solverz.sym_algebra.functions import exp, cos, Mat_Mul
 from Solverz.utilities.address import Address
 from sympy.codegen.ast import FunctionDefinition, Return
 from Solverz.code_printer.python.module.module_printer import (print_J, print_inner_J, print_F,
@@ -167,8 +168,9 @@ expected = """def J_(t, y_, p_):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
+    A = p_["A"]
     ax = ax_trigger_func(x)
-    data = inner_J(_data_, omega, delta, x, y, ax, lam, G6)
+    data = inner_J(_data_, omega, delta, x, y, ax, lam, G6, A)
     return sps.coo_array((data, (row, col)), (25, 25)).tocsc()
 """.strip()
 expected1 = """def J_(t, y_, p_, y_0):
@@ -183,8 +185,9 @@ expected1 = """def J_(t, y_, p_, y_0):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
+    A = p_["A"]
     ax = ax_trigger_func(x)
-    data = inner_J(_data_, omega, delta, x, y, omega_tag_0, delta_tag_0, x_tag_0, y_tag_0, ax, lam, G6)
+    data = inner_J(_data_, omega, delta, x, y, omega_tag_0, delta_tag_0, x_tag_0, y_tag_0, ax, lam, G6, A)
     return sps.coo_array((data, (row, col)), (25, 25)).tocsc()
 """.strip()
 
@@ -209,7 +212,7 @@ def test_print_J():
                          [0, 1, 2, 3],
                          [0, 100, 200, 300])
     Pdict["G6"] = G6
-
+    Pdict['A'] = Param('A', csc_array(np.eye(5)), sparse=True, dim=2)
     with pytest.raises(ValueError, match=re.escape("Jac matrix, with size (20*25), not square")):
         print_J(eqs_type,
                 20,
@@ -229,8 +232,8 @@ def test_print_J():
 
 
 expected2 = """def inner_J(_data_, omega, x, y, z, ax, lam, G6):
-    _data_[0:3] = inner_J0(y)
-    _data_[3:12] = inner_J1(y)
+    _data_[2:5] = inner_J0(y)
+    _data_[5:14] = inner_J1(y)
     return _data_
 """.strip()
 expected3 = """def inner_J0(y):
@@ -240,8 +243,8 @@ expected4 = """def inner_J1(y):
     return y**2
 """.strip()
 expected5 = """def inner_J(_data_, omega, x, y, z, omega_tag_0, x_tag_0, y_tag_0, z_tag_0, ax, lam, G6):
-    _data_[0:3] = inner_J0(y)
-    _data_[3:12] = inner_J1(y)
+    _data_[2:5] = inner_J0(y)
+    _data_[5:14] = inner_J1(y)
     return _data_
 """.strip()
 
@@ -252,28 +255,38 @@ def test_print_inner_J():
     y = iVar('y')
     z = iVar('z')
     omega = iVar('omega')
+    A = Para('A')
     jac.add_block('a',
-                  x[0],
+                  x,
                   JacBlock('a',
-                           slice(0, 3),
+                           slice(0, 2),
+                           x,
+                           np.array([1, 2]),
+                           slice(1, 3),
+                           A,
+                           csc_array(np.eye(2))))
+    jac.add_block('b',
+                  x[0],
+                  JacBlock('b',
+                           slice(2, 5),
                            x[0],
                            np.array([1]),
                            slice(1, 2),
                            iVar('y'),
                            np.array([1])))
-    jac.add_block('b',
+    jac.add_block('c',
                   omega[1:4],
-                  JacBlock('b',
-                           slice(3, 12),
+                  JacBlock('c',
+                           slice(5, 14),
                            omega[4:13],
                            np.ones(9),
                            slice(3, 100),
                            iVar('y') ** 2,
                            np.ones(9)))
-    jac.add_block('b',
+    jac.add_block('c',
                   y,
-                  JacBlock('b',
-                           slice(3, 12),
+                  JacBlock('c',
+                           slice(5, 14),
                            z,
                            np.ones(9),
                            slice(100, 109),
@@ -282,7 +295,7 @@ def test_print_inner_J():
 
     VarAddr = Address()
     VarAddr.add('omega', 97)
-    VarAddr.add('x', 1)
+    VarAddr.add('x', 2)
     VarAddr.add('y', 1)
     VarAddr.add('z', 9)
     Pdict = dict()
@@ -323,8 +336,9 @@ expected6 = """def F_(t, y_, p_):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
+    A = p_["A"]
     ax = ax_trigger_func(x)
-    return inner_F(_F_, omega, delta, x, y, ax, lam, G6)
+    return inner_F(_F_, omega, delta, x, y, ax, lam, G6, A)
 """.strip()
 
 
@@ -348,6 +362,7 @@ def test_print_F():
                          [0, 1, 2, 3],
                          [0, 100, 200, 300])
     Pdict["G6"] = G6
+    Pdict['A'] = Param('A', csc_array(np.eye(5)), sparse=True, dim=2)
     assert print_F(eqs_type,
                    VarAddr,
                    Pdict) == expected6
@@ -413,6 +428,9 @@ expected9 = """def inner_F0(delta, omega):
 expected10 = """def inner_F1(lam, x, y):
     return lam*y + x
 """.strip()
+expected11 = """def inner_F2(A, x):
+    return (A@x)
+""".strip()
 
 
 def test_print_sub_inner_F():
@@ -422,8 +440,11 @@ def test_print_sub_inner_F():
     x = iVar('x')
     y = iVar('y')
     lam = Para('lam')
+    A = Para('A')
     EQNs['a'] = Eqn('a', omega * delta)
     EQNs['b'] = Ode('b', x + y * lam, diff_var=x)
+    EQNs['c'] = Eqn('c', Mat_Mul(A, x))
 
     assert print_sub_inner_F(EQNs)[0] == expected9
     assert print_sub_inner_F(EQNs)[1] == expected10
+    assert print_sub_inner_F(EQNs)[2] == expected11

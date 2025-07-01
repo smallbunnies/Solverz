@@ -7,7 +7,7 @@ import numpy as np
 from sympy import symbols, pycode, Integer
 
 from Solverz import Eqn, Ode, AE, sin, made_numerical, Model, Var, Param, TimeSeriesParam, AliasVar, Abs, exp, \
-    cos
+    cos, Mat_Mul
 from Solverz.code_printer.make_module import module_printer
 from Solverz.code_printer.python.inline.inline_printer import print_J_block
 from Solverz.code_printer.python.utilities import _print_var_parser
@@ -131,6 +131,86 @@ def test_AE_module_printer():
     assert inspect.getsource(inner_F1) == 'def inner_F1(x):\n    return x[0]**2 + np.sin(x[1])\n'
     assert inspect.getsource(
         inner_J) == 'def inner_J(_data_, x):\n    _data_[2:3] = inner_J0(x)\n    _data_[3:4] = inner_J1(x)\n    return _data_\n'
+
+    shutil.rmtree(test_folder_path)
+
+
+expected_F_mat = """def F_(y_, p_):
+    x = y_[0:2]
+    y = y_[2:3]
+    A = p_["A"]
+    b = p_["b"]
+    c = p_["c"]
+    return inner_F(_F_, x, y, A, b, c)
+"""
+
+expected_inner_F_mat = """@njit(cache=True)
+def inner_F(_F_, x, y, A, b, c):
+    _F_[0:2] = inner_F0(A, b, x)
+    _F_[2:3] = inner_F1(c, y)
+    return _F_
+"""
+
+expected_inner_F0_mat = """@njit(cache=True)
+def inner_F0(A, b, x):
+    return b - (A@x)
+"""
+
+expected_inner_F1_mat = """@njit(cache=True)
+def inner_F1(c, y):
+    return c - y
+"""
+
+expected_J_mat = """def J_(y_, p_):
+    x = y_[0:2]
+    y = y_[2:3]
+    A = p_["A"]
+    b = p_["b"]
+    c = p_["c"]
+    data = inner_J(_data_, x, y, A, b, c)
+    return sps.coo_array((data, (row, col)), (3, 3)).tocsc()
+"""
+
+expected_inner_J_mat = """@njit(cache=True)
+def inner_J(_data_, x, y, A, b, c):
+    return _data_
+"""
+
+
+def test_AE_module_generator_with_matrix():
+    m = Model()
+    m.x = Var('x', [0, 0])
+    m.y = Var('y', [0])
+    m.b = Param('b', [0.5, 1])
+    m.c = Param('c', [20])
+    m.A = Param('A', [[1, 3], [-1, 2]], dim=2, sparse=True)
+    m.eqnf = Eqn('eqnf', m.b - Mat_Mul(m.A, m.x))
+    m.eqng = Eqn('eqng', m.c - m.y)
+
+    smdl, y0 = m.create_instance()
+
+    current_file_path = os.path.abspath(__file__)
+    current_folder = os.path.dirname(current_file_path)
+
+    test_folder_path = current_folder + '\\Solverz_testaabbccddeeffgghh'
+
+    pyprinter = module_printer(smdl,
+                               y0,
+                               'test_ae2',
+                               directory=test_folder_path,
+                               jit=True)
+    pyprinter.render()
+
+    sys.path.extend([test_folder_path])
+
+    from test_ae2.num_func import F_, J_, inner_F, inner_J, inner_F0, inner_F1
+
+    assert inspect.getsource(F_) == expected_F_mat
+    assert inspect.getsource(J_) == expected_J_mat
+    assert inspect.getsource(inner_F) == expected_inner_F_mat
+    assert inspect.getsource(inner_F0) == expected_inner_F0_mat
+    assert inspect.getsource(inner_F1) == expected_inner_F1_mat
+    assert inspect.getsource(inner_J) == expected_inner_J_mat
 
     shutil.rmtree(test_folder_path)
 

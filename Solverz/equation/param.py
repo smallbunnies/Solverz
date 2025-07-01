@@ -3,6 +3,7 @@ from numbers import Number
 
 import numpy as np
 from scipy.interpolate import interp1d
+from scipy.sparse import csc_array
 
 from Solverz.num_api.Array import Array
 from Solverz.variable.ssymbol import sSymBasic
@@ -11,7 +12,7 @@ from Solverz.variable.ssymbol import sSymBasic
 class ParamBase:
     def __init__(self,
                  name: str,
-                 value: Union[np.ndarray, list, Number] = None,
+                 value: Union[np.ndarray, list, Number, csc_array] = None,
                  triggerable: bool = False,
                  trigger_var: Union[str, List[str]] = None,
                  trigger_fun: Callable = None,
@@ -53,7 +54,7 @@ class Param(ParamBase, sSymBasic):
 
     def __init__(self,
                  name: str,
-                 value: Union[np.ndarray, list, Number] = None,
+                 value: Union[np.ndarray, list, Number, csc_array] = None,
                  triggerable: bool = False,
                  trigger_var: Union[str, List[str]] = None,
                  trigger_fun: Callable = None,
@@ -72,6 +73,8 @@ class Param(ParamBase, sSymBasic):
                            dtype,
                            sparse,
                            is_alias)
+        if isinstance(value, csc_array):
+            value = value.toarray()
         sSymBasic.__init__(self, name=name, Type='Para', value=value, dim=dim)
 
 
