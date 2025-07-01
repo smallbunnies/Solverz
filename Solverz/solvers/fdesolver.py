@@ -40,6 +40,21 @@ def fdae_solver(fdae: nFDAE,
         - ite_tol: 1e-8(default)|float
             The error tolerance of inner Newton iterations.
 
+    kwargs : dict
+        The value of y at previous time nodes. For example, if an FDAE uses $y_0$, $y_{-1}$ and $y_{-2}$, then we can
+        call FDAE solver with
+
+        .. code-block:: python
+
+            sol = fdae_solver(mdl,
+                              [0, 120],
+                              y0,
+                              Opt(step_size=60),
+                              y1=y1,
+                              y2=y2)
+
+        where `y1` denotes $y_{-1}$ and `y2` denotes $y_{-2}$.
+
     Returns
     =======
 
