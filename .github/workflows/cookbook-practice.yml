@@ -36,7 +36,7 @@ jobs:
       run: |
         uv venv 
         uv pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
-        uv pip install pytest, pytest-xdist, pytest-datadir
+        uv pip install pytest pytest-xdist pytest-datadir
 
     - name: Run Tests
       run: |
