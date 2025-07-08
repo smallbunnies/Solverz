@@ -14,21 +14,26 @@ jobs:
 
     steps:
     - name: Checkout Test Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: 'rzyu45/Solverz-Cookbook'
         ref: 'main'
-    - uses: actions/setup-python@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
       with:
-        python-version: '3.10'
-        cache: 'pip' # caching pip dependencies
+        enable-cache: true
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
 
     - name: Install Main Repository as Dependency using Git URL
       run: |
-        pip install --upgrade pip setuptools wheel
-        pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
-        pip install pytest-xdist
+        uv sync --locked --all-extras --dev
+        uv pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
+        uv pip install pytest-xdist
 
     - name: Run Tests
       run: |
-        pytest -n auto
+        uv run pytest -n auto
