@@ -24,8 +24,10 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-    - run: |
-        uv pip install -e .
+
+    - name: Install the project
+      run: |
+        uv sync --locked --all-extras --dev
         uv pip install git+https://github.com/smallbunnies/myfunc.git@main
     - run: | # run both independent pytest and doctest
-        pytest
+        uv run pytest
