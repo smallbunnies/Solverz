@@ -30,7 +30,7 @@ jobs:
 
     - name: Install Main Repository as Dependency using Git URL
       run: |
-        uv sync --locked --all-extras --dev
+        uv venv 
         uv pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
         uv pip install pytest-xdist
 
