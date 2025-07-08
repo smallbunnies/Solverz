@@ -13,13 +13,19 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    - name: "Set up Python"
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        cache: 'pip' # caching pip dependencies
     - run: |
-        pip install -e .
-        pip install git+https://github.com/smallbunnies/myfunc.git@main
+        uv pip install -e .
+        uv pip install git+https://github.com/smallbunnies/myfunc.git@main
     - run: | # run both independent pytest and doctest
         pytest
