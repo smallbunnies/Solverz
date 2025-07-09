@@ -74,7 +74,7 @@ class Param(ParamBase, sSymBasic):
                            sparse,
                            is_alias)
 
-        sSymBasic.__init__(self, name=name, Type='Para', value=value, dim=dim)
+        sSymBasic.__init__(self, name=name, Type='Para', value=value, dim=dim, sparse=sparse)
 
 
 class IdxParam(ParamBase, sSymBasic):

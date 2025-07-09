@@ -21,7 +21,7 @@ def print_F(eqs_type: str,
     body = []
     body.extend(print_var(var_addr,
                           nstep)[0])
-    param_decla = print_param(PARAM)[0]
+    param_decla = print_param(PARAM, output_sparse=False)[0]
     body.extend(param_decla)
     body.extend(print_trigger(PARAM))
     body.extend(print_eqn_assignment(EQNs,
@@ -48,7 +48,7 @@ def print_J(eqs_type: str,
     body = list()
     body.extend(print_var(var_addr,
                           nstep)[0])
-    param_decla = print_param(PARAM)[0]
+    param_decla = print_param(PARAM, output_sparse=not sparse)[0]
     body.extend(param_decla)
     body.extend(print_trigger(PARAM))
     if not sparse:

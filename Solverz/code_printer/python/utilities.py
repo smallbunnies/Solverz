@@ -80,7 +80,11 @@ def print_var(var_addr: Address, nstep):
     return var_declaration, var_list
 
 
-def print_param(PARAM: Dict[str, ParamBase]):
+def print_param(PARAM: Dict[str, ParamBase],
+                output_sparse=False):
+    """
+    output_sparse : whether to print the sparse parameter
+    """
     param_declaration = []
     p = SolDict('p_')
     param_list = []
@@ -92,7 +96,7 @@ def print_param(PARAM: Dict[str, ParamBase]):
                 param_declaration.append(param_assign)
                 param_list.append(param_assign.lhs)
             else:
-                if not param.sparse:
+                if not param.sparse or output_sparse:
                     param_assign = Assignment(Para(param_name),
                                               p[param_name])
                     param_declaration.append(param_assign)

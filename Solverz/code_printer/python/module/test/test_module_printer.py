@@ -168,9 +168,8 @@ expected = """def J_(t, y_, p_):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
-    A = p_["A"]
     ax = ax_trigger_func(x)
-    data = inner_J(_data_, omega, delta, x, y, ax, lam, G6, A)
+    data = inner_J(_data_, omega, delta, x, y, ax, lam, G6)
     return sps.coo_array((data, (row, col)), (25, 25)).tocsc()
 """.strip()
 expected1 = """def J_(t, y_, p_, y_0):
@@ -185,9 +184,8 @@ expected1 = """def J_(t, y_, p_, y_0):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
-    A = p_["A"]
     ax = ax_trigger_func(x)
-    data = inner_J(_data_, omega, delta, x, y, omega_tag_0, delta_tag_0, x_tag_0, y_tag_0, ax, lam, G6, A)
+    data = inner_J(_data_, omega, delta, x, y, omega_tag_0, delta_tag_0, x_tag_0, y_tag_0, ax, lam, G6)
     return sps.coo_array((data, (row, col)), (25, 25)).tocsc()
 """.strip()
 
@@ -336,9 +334,8 @@ expected6 = """def F_(t, y_, p_):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
-    A = p_["A"]
     ax = ax_trigger_func(x)
-    return inner_F(_F_, omega, delta, x, y, ax, lam, G6, A)
+    return inner_F(_F_, omega, delta, x, y, ax, lam, G6)
 """.strip()
 
 

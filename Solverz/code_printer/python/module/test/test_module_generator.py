@@ -7,7 +7,7 @@ import numpy as np
 from sympy import symbols, pycode, Integer
 
 from Solverz import Eqn, Ode, AE, sin, made_numerical, Model, Var, Param, TimeSeriesParam, AliasVar, Abs, exp, \
-    cos, Mat_Mul
+    cos, Mat_Mul, MatVecMul
 from Solverz.code_printer.make_module import module_printer
 from Solverz.code_printer.python.inline.inline_printer import print_J_block
 from Solverz.code_printer.python.utilities import _print_var_parser
@@ -138,22 +138,25 @@ def test_AE_module_printer():
 expected_F_mat = """def F_(y_, p_):
     x = y_[0:2]
     y = y_[2:3]
-    A = p_["A"]
+    A_data = p_["A_data"]
+    A_indices = p_["A_indices"]
+    A_indptr = p_["A_indptr"]
+    A_shape0 = p_["A_shape0"]
     b = p_["b"]
     c = p_["c"]
-    return inner_F(_F_, x, y, A, b, c)
+    return inner_F(_F_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c)
 """
 
 expected_inner_F_mat = """@njit(cache=True)
-def inner_F(_F_, x, y, A, b, c):
-    _F_[0:2] = inner_F0(A, b, x)
+def inner_F(_F_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c):
+    _F_[0:2] = inner_F0(A_data, A_indices, A_indptr, A_shape0, b, x)
     _F_[2:3] = inner_F1(c, y)
     return _F_
 """
 
 expected_inner_F0_mat = """@njit(cache=True)
-def inner_F0(A, b, x):
-    return b - (A@x)
+def inner_F0(A_data, A_indices, A_indptr, A_shape0, b, x):
+    return b - SolCF.csc_matvec(A_data, A_indices, A_indptr, A_shape0, x)
 """
 
 expected_inner_F1_mat = """@njit(cache=True)
@@ -164,15 +167,18 @@ def inner_F1(c, y):
 expected_J_mat = """def J_(y_, p_):
     x = y_[0:2]
     y = y_[2:3]
-    A = p_["A"]
+    A_data = p_["A_data"]
+    A_indices = p_["A_indices"]
+    A_indptr = p_["A_indptr"]
+    A_shape0 = p_["A_shape0"]
     b = p_["b"]
     c = p_["c"]
-    data = inner_J(_data_, x, y, A, b, c)
+    data = inner_J(_data_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c)
     return sps.coo_array((data, (row, col)), (3, 3)).tocsc()
 """
 
 expected_inner_J_mat = """@njit(cache=True)
-def inner_J(_data_, x, y, A, b, c):
+def inner_J(_data_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c):
     return _data_
 """
 
@@ -184,7 +190,7 @@ def test_AE_module_generator_with_matrix():
     m.b = Param('b', [0.5, 1])
     m.c = Param('c', [20])
     m.A = Param('A', [[1, 3], [-1, 2]], dim=2, sparse=True)
-    m.eqnf = Eqn('eqnf', m.b - Mat_Mul(m.A, m.x))
+    m.eqnf = Eqn('eqnf', m.b - MatVecMul(m.A, m.x))
     m.eqng = Eqn('eqng', m.c - m.y)
 
     smdl, y0 = m.create_instance()
