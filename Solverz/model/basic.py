@@ -32,7 +32,7 @@ class Model:
                     args += [self.init_var(arg)]
         self.var_dict[name].value = Array(init_func.NUM_EQN(*args), dim=1)
 
-    def create_instance(self):
+    def create_instance(self, eqn_sequence=None, var_sequence=None):
         attr_dict = vars(self)
 
         eqn_type = 'AE'
@@ -45,10 +45,10 @@ class Model:
             elif isinstance(value, ParamBase):
                 self.param_dict[key] = value
                 if value.dim == 2 or value.sparse:
-                    self.param_dict[key + '_data'] = Param(key+'_data', value.v.data)
-                    self.param_dict[key + '_indices'] = Param(key+'_indices', value.v.indices, dtype=int)
-                    self.param_dict[key + '_indptr']=Param(key+'_indptr', value.v.indptr, dtype=int)
-                    self.param_dict[key + '_shape0']=Param(key+'_shape0', value.v.shape[0], dtype=int)
+                    self.param_dict[key + '_data'] = Param(key + '_data', value.v.data)
+                    self.param_dict[key + '_indices'] = Param(key + '_indices', value.v.indices, dtype=int)
+                    self.param_dict[key + '_indptr'] = Param(key + '_indptr', value.v.indptr, dtype=int)
+                    self.param_dict[key + '_shape0'] = Param(key + '_shape0', value.v.shape[0], dtype=int)
             elif isinstance(value, AliasVar):
                 nstep = 1 if nstep is None else nstep
                 self.alias_dict[key] = value

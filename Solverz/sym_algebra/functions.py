@@ -541,8 +541,8 @@ class Or(MulVarFunc):
     def _numpycode(self, printer, **kwargs):
         return r'SolCF.Or(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
 
-class MatVecMul(MulVarFunc):
 
+class MatVecMul(MulVarFunc):
     arglength = 2
 
     @classmethod
@@ -552,15 +552,14 @@ class MatVecMul(MulVarFunc):
         else:
             if args[0].dim != 2:
                 raise TypeError(f"First arg of MatVecMul should be two-dim sparse matrix.")
-        return matvec(Para(args[0].name+'_data'),
-                      Para(args[0].name+'_indices'),
-                      Para(args[0].name+'_indptr'),
-                      Para(args[0].name+'_shape0'),
+        return matvec(Para(args[0].name + '_data'),
+                      Para(args[0].name + '_indices'),
+                      Para(args[0].name + '_indptr'),
+                      Para(args[0].name + '_shape0'),
                       args[1])
 
 
 class matvec(MulVarFunc):
-
     arglength = 5
 
     def fdiff(self, argindex=1):
@@ -589,9 +588,9 @@ class matvec(MulVarFunc):
             return _latex_str
 
     def _sympystr(self, printer, **kwargs):
-        op1 = printer._print(self.args[0])
+        op1 = printer._print(Para(self.args[0].name.removesuffix('_data'), dim=2))
         op2 = printer._print(self.args[4])
-        return r'{op1}@{op2}'.format(op1=op1, op2=op2)
+        return r'({op1}@{op2})'.format(op1=op1, op2=op2)
 
     def _numpycode(self, printer, **kwargs):
 
@@ -603,6 +602,7 @@ class matvec(MulVarFunc):
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
+
 
 # %% custom func of equation printer
 class Slice(Function):
