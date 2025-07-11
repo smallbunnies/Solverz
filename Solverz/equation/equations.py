@@ -82,13 +82,46 @@ class Equations:
     def assign_eqn_var_address(self, *args):
         pass
 
-    def Fy(self, y) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
+    def Fy(self,
+           y,
+           eqn_list: List[str] = None,
+           var_list: List[str] = None) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         pass
 
-    def FormJac(self, y):
+    def FormJac(self,
+                y,
+                eqn_list: List[str] = None,
+                var_list: List[str] = None
+                ):
         self.assign_eqn_var_address(y)
 
-        Fy_list = self.Fy(y)
+        def is_sublist(sub, main):
+            n = len(sub)
+            for i in range(len(main) - n + 1):
+                if main[i:i + n] == sub:
+                    return True
+            return False
+
+        if eqn_list is not None:
+            non_existent_eqn = [eqn for eqn in eqn_list if eqn not in self.a.object_list]
+            if len(non_existent_eqn) > 0:
+                raise ValueError(f"Non-existent equation: {non_existent_eqn}")
+            if not is_sublist(eqn_list, self.a.object_list):
+                raise ValueError(f"Given equation list is discontinuous, which cannot form sub-Jacobian.")
+        else:
+            eqn_list = deepcopy(self.a.object_list)
+
+        if var_list is not None:
+            non_existent_var = [var for var in var_list if var not in self.var_address.object_list]
+            if len(non_existent_var) > 0:
+                raise ValueError(f"Non-existent variable: {non_existent_var}")
+            if not is_sublist(var_list, self.var_address.object_list):
+                raise ValueError(f"Given variable list is discontinuous, which cannot form sub-Jacobian.")
+        else:
+            var_list = deepcopy(self.var_address.object_list)
+
+        Fy_list = self.Fy(y, eqn_list, var_list)
+
         for fy in Fy_list:
             EqnName = fy[0]
             EqnAddr = self.a[EqnName]
@@ -280,24 +313,27 @@ class AE(Equations):
             args = self.obtain_eqn_args(self.EQNs[eqn], y)
             return self.eval(eqn, *args)
 
-    def gy(self, y: Vars, eqn: List[str] = None, var: List[str] = None) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
+    def gy(self,
+           y: Vars,
+           eqn_list: List[str] = None,
+           var_list: List[str] = None) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         """
         generate Jacobian matrices of Eqn object with respect to var object
         :param y:
-        :param eqn:
-        :param var:
+        :param eqn_list:
+        :param var_list:
         :return: List[Tuple[Equation_name, var_name, np.ndarray]]
         """
-        if not eqn:
-            eqn = list(self.EQNs.keys())
-        if not var:
-            var = list(y.var_list)
+        if not eqn_list:
+            eqn_list = list(self.EQNs.keys())
+        if not var_list:
+            var_list = list(y.var_list)
 
         gy: List[Tuple[str, str, EqnDiff, np.ndarray]] = []
 
-        for eqn_name in eqn:
+        for eqn_name in eqn_list:
             eqn_diffs: Dict[str, EqnDiff] = self.EQNs[eqn_name].derivatives
-            for var_name in var:
+            for var_name in var_list:
                 for key, value in eqn_diffs.items():
                     if var_name == value.diff_var_name:  # f is viewed as f[k]
                         args = self.obtain_eqn_args(eqn_diffs[key], y)
@@ -305,8 +341,11 @@ class AE(Equations):
                         gy = [*gy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gy
 
-    def Fy(self, y):
-        return self.gy(y)
+    def Fy(self,
+           y,
+           eqn_list: List[str] = None,
+           var_list: List[str] = None):
+        return self.gy(y, eqn_list, var_list)
 
     def evalf(self, expr: Expr, y: Vars) -> np.ndarray:
         eqn = Eqn('Solverz evalf temporal equation', expr)
@@ -474,18 +513,29 @@ class DAE(Equations):
 
         return np.hstack(temp)
 
-    def fy(self, t, y: Vars) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
+    def fy(self,
+           t,
+           y: Vars,
+           eqn_list: List[str] = None,
+           var_list: List[str] = None
+           ) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         """
         generate partial derivatives of f w.r.t. y
         """
 
+        if not eqn_list:
+            eqn_list = list(self.f_list)
+        else:
+            eqn_list = list(set(eqn_list) & set(self.f_list))
+
+        if not var_list:
+            var_list = list(y.var_list)
+
         fy: List[Tuple[str, str, EqnDiff, np.ndarray]] = []
 
-        var: List[str] = y.var_list
-
-        for eqn_name in self.f_list:
+        for eqn_name in eqn_list:
             eqn_diffs: Dict[str, EqnDiff] = self.EQNs[eqn_name].derivatives
-            for var_name in var:
+            for var_name in var_list:
                 for key, value in eqn_diffs.items():
                     if var_name == value.diff_var_name:
                         args = self.obtain_eqn_args(eqn_diffs[key], y, t)
@@ -493,7 +543,12 @@ class DAE(Equations):
                         fy = [*fy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return fy
 
-    def gy(self, t, y: Vars) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
+    def gy(self,
+           t,
+           y: Vars,
+           eqn_list: List[str] = None,
+           var_list: List[str] = None
+           ) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         """
         generate partial derivatives of g w.r.t. y
         """
@@ -501,13 +556,19 @@ class DAE(Equations):
         if len(self.g_list) == 0:
             raise ValueError(f'No AE found in {self.name}!')
 
+        if not eqn_list:
+            eqn_list = list(self.g_list)
+        else:
+            eqn_list = list(set(eqn_list) & set(self.g_list))
+
+        if not var_list:
+            var_list = list(y.var_list)
+
         gy: List[Tuple[str, str, EqnDiff, np.ndarray]] = []
 
-        var: List[str] = y.var_list
-
-        for eqn_name in self.g_list:
+        for eqn_name in eqn_list:
             eqn_diffs: Dict[str, EqnDiff] = self.EQNs[eqn_name].derivatives
-            for var_name in var:
+            for var_name in var_list:
                 for key, value in eqn_diffs.items():
                     if var_name == value.diff_var_name:
                         args = self.obtain_eqn_args(eqn_diffs[key], y, t)
@@ -515,10 +576,14 @@ class DAE(Equations):
                         gy = [*gy, (eqn_name, var_name, eqn_diffs[key], temp)]
         return gy
 
-    def Fy(self, y):
-        fg_xy = self.fy(0, y)
+    def Fy(self,
+           y,
+           eqn_list: List[str] = None,
+           var_list: List[str] = None
+           ) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
+        fg_xy = self.fy(0, y, eqn_list, var_list)
         if len(self.g_list) > 0:
-            fg_xy.extend(self.gy(0, y))
+            fg_xy.extend(self.gy(0, y, eqn_list, var_list))
         return fg_xy
 
     @property
