@@ -89,38 +89,11 @@ class Equations:
         pass
 
     def FormJac(self,
-                y,
-                eqn_list: List[str] = None,
-                var_list: List[str] = None
+                y
                 ):
         self.assign_eqn_var_address(y)
 
-        def is_sublist(sub, main):
-            n = len(sub)
-            for i in range(len(main) - n + 1):
-                if main[i:i + n] == sub:
-                    return True
-            return False
-
-        if eqn_list is not None:
-            non_existent_eqn = [eqn for eqn in eqn_list if eqn not in self.a.object_list]
-            if len(non_existent_eqn) > 0:
-                raise ValueError(f"Non-existent equation: {non_existent_eqn}")
-            if not is_sublist(eqn_list, self.a.object_list):
-                raise ValueError(f"Given equation list is discontinuous, which cannot form sub-Jacobian.")
-        else:
-            eqn_list = deepcopy(self.a.object_list)
-
-        if var_list is not None:
-            non_existent_var = [var for var in var_list if var not in self.var_address.object_list]
-            if len(non_existent_var) > 0:
-                raise ValueError(f"Non-existent variable: {non_existent_var}")
-            if not is_sublist(var_list, self.var_address.object_list):
-                raise ValueError(f"Given variable list is discontinuous, which cannot form sub-Jacobian.")
-        else:
-            var_list = deepcopy(self.var_address.object_list)
-
-        Fy_list = self.Fy(y, eqn_list, var_list)
+        Fy_list = self.Fy(y, self.a.object_list, self.var_address.object_list)
 
         for fy in Fy_list:
             EqnName = fy[0]
@@ -148,6 +121,78 @@ class Equations:
                           DeriExpr,
                           Value0)
             self.jac.add_block(EqnName, DiffVar, jb)
+
+        self.jac.shape = np.array([self.eqn_size, self.vsize], dtype=int)
+
+    def FormPartialJac(self,
+                       y,
+                       eqn_list: List[str] = None,
+                       var_list: List[str] = None):
+
+        def is_sublist(sub, main):
+            n = len(sub)
+            for i in range(len(main) - n + 1):
+                if main[i:i + n] == sub:
+                    return True
+            return False
+
+        if eqn_list is not None:
+            non_existent_eqn = [eqn for eqn in eqn_list if eqn not in self.a.object_list]
+            if len(non_existent_eqn) > 0:
+                raise ValueError(f"Non-existent equation: {non_existent_eqn}")
+            if not is_sublist(eqn_list, self.a.object_list):
+                raise ValueError(f"Given equation list is discontinuous, which cannot form sub-Jacobian.")
+        else:
+            eqn_list = deepcopy(self.a.object_list)
+
+        if var_list is not None:
+            non_existent_var = [var for var in var_list if var not in self.var_address.object_list]
+            if len(non_existent_var) > 0:
+                raise ValueError(f"Non-existent variable: {non_existent_var}")
+            if not is_sublist(var_list, self.var_address.object_list):
+                raise ValueError(f"Given variable list is discontinuous, which cannot form sub-Jacobian.")
+        else:
+            var_list = deepcopy(self.var_address.object_list)
+
+        jac = Jac()
+
+        Fy_list = self.Fy(y, self.a.object_list, self.var_address.object_list)
+
+        for fy in Fy_list:
+            EqnName = fy[0]
+            EqnAddr = self.a[EqnName]
+            VarName = fy[1]
+            VarAddr = self.var_address[VarName]
+            DiffVar = fy[2].diff_var
+            DeriExpr = fy[2].RHS
+
+            DiffVarEqn = Eqn('DiffVarEqn' + DiffVar.name, DiffVar)
+            args = self.obtain_eqn_args(DiffVarEqn, y, 0)
+            DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
+
+            # The value of deri can be either matrix, vector, or scalar(number). We cannot reshape it.
+            if isinstance(fy[3], csc_array):
+                Value0 = fy[3]
+            else:
+                Value0 = np.array(fy[3])
+
+            jb = JacBlock(EqnName,
+                          EqnAddr,
+                          DiffVar,
+                          DiffVarValue,
+                          VarAddr,
+                          DeriExpr,
+                          Value0)
+            jac.add_block(EqnName, DiffVar, jb)
+
+        eqn_start = self.a[eqn_list[0]].start
+        eqn_end = self.a[eqn_list[-1]].stop
+        var_start = self.var_address[var_list[0]].start
+        var_end = self.var_address[var_list[-1]].stop
+
+        jac.shape = np.array([eqn_end - eqn_start, var_end - var_start], dtype=int)
+
+        return jac
 
     @property
     def eqn_size(self):

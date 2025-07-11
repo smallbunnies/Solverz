@@ -215,17 +215,20 @@ def test_print_J():
         print_J(eqs_type,
                 20,
                 VarAddr,
-                Pdict)
+                Pdict,
+                [25, 25])
 
     assert print_J(eqs_type,
                    25,
                    VarAddr,
-                   Pdict) == expected
+                   Pdict,
+                   [25, 25]) == expected
 
     assert print_J("FDAE",
                    25,
                    VarAddr,
                    Pdict,
+                   [25, 25],
                    1) == expected1
 
 
