@@ -19,6 +19,7 @@ class Jac:
         self.blocks: Dict[str, Dict[SolVar, JacBlock]] = dict()
         self.is_sorted = False
         self.__blocks_sorted: Dict[str, Dict[SolVar, JacBlock]] = dict()
+        self.shape = np.array([0, 0], dtype=int)
 
     def add_block(self,
                   eqn_name: str,

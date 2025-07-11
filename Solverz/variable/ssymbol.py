@@ -27,11 +27,11 @@ class sSymBasic:
     Basic class for Solverz sSym
     """
 
-    def __init__(self, name: str, Type: str, value=None, dim: int = 1, init=None):
+    def __init__(self, name: str, Type: str, value=None, dim: int = 1, init=None, sparse=False):
         self.name = f'{name}'
         self.dim = dim
         if value is not None:
-            self.value = Array(value, dim)
+            self.value = Array(value, dim=dim, sparse=sparse)
         else:
             self.value = None
         self.Type = Type

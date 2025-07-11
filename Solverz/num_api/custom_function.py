@@ -170,3 +170,14 @@ def linspace(start, end) -> np.ndarray:
 
     """
     return np.arange(start, end, dtype=int)[:, np.newaxis]
+
+
+@njit(cache=True)
+def csc_matvec(data, indices, indptr, shape, x):
+    res = np.zeros(shape[0], dtype=float)
+    for j in range(len(indptr) - 1):
+        start, end = indptr[j], indptr[j + 1]
+        for idx in range(start, end):
+            i = indices[idx]
+            res[i] += data[idx] * x[j]
+    return res

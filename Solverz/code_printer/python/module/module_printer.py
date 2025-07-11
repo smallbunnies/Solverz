@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 from Solverz.code_printer.python.utilities import *
 
 
@@ -76,6 +77,7 @@ def print_J(eqs_type: str,
             eqn_size: int,
             var_addr: Address,
             PARAM: Dict[str, ParamBase],
+            shape: List[int],
             nstep: int = 0):
     if eqn_size != var_addr.total_size:
         raise ValueError(f"Jac matrix, with size ({eqn_size}*{var_addr.total_size}), not square")
@@ -91,7 +93,7 @@ def print_J(eqs_type: str,
     body.extend(print_trigger(PARAM))
     body.extend([Assignment(iVar('data', internal_use=True),
                             FunctionCall('inner_J', [symbols('_data_', real=True)] + var_list + param_list))])
-    body.extend([Return(coo_2_csc(eqn_size, var_addr.total_size))])
+    body.extend([Return(coo_2_csc(shape[0], shape[1]))])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
 

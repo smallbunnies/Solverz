@@ -11,24 +11,33 @@ jobs:
   tests_in_cookbook:
 
     runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
 
     steps:
     - name: Checkout Test Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: 'rzyu45/Solverz-Cookbook'
         ref: 'main'
-    - uses: actions/setup-python@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
       with:
-        python-version: '3.10'
-        cache: 'pip' # caching pip dependencies
+        enable-cache: true
+        python-version: ${{ matrix.python-version }}
+
 
     - name: Install Main Repository as Dependency using Git URL
       run: |
-        pip install --upgrade pip setuptools wheel
-        pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
-        pip install pytest-xdist
+        uv venv 
+        uv pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
+        uv pip install pytest pytest-xdist pytest-datadir
 
     - name: Run Tests
       run: |
-        pytest -n auto
+        uv run pytest -n auto

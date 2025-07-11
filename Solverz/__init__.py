@@ -2,12 +2,13 @@ from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import AE, FDAE, DAE
 from Solverz.equation.param import Param, IdxParam, TimeSeriesParam
 from Solverz.sym_algebra.functions import (Sign, Abs, transpose, exp, Diag, Mat_Mul, sin, cos, Min, AntiWindUp,
-                                           Saturation, heaviside, ln, MulVarFunc, UniVarFunc)
+                                           Saturation, heaviside, ln, MulVarFunc, UniVarFunc, MatVecMul)
 from Solverz.variable.variables import Vars, TimeVars
 from Solverz.solvers import *
 from Solverz.code_printer import made_numerical, module_printer
 from Solverz.utilities.io import save, load, save_result
 from Solverz.utilities.profile import count_time
+from Solverz.utilities.miscellaneous import derive_incidence_matrix
 from Solverz.variable.ssymbol import Var, AliasVar
 from Solverz.model.basic import Model
 

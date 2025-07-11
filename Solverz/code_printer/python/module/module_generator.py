@@ -45,6 +45,7 @@ def render_modules(eqs: SymEquations,
                              eqs.eqn_size,
                              eqs.var_address,
                              eqs.PARAM,
+                             eqs.jac.shape,
                              eqs.nstep)
     J = print_inner_J(eqs.var_address,
                       eqs.PARAM,

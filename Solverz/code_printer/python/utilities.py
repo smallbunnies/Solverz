@@ -45,10 +45,7 @@ def parse_p(PARAM: Dict[str, ParamBase]):
         if isinstance(param, TimeSeriesParam):
             p.update({param_name: param})
         else:
-            if isinstance(param.v, csc_array):
-                p.update({param_name: param.v.toarray()})
-            else:
-                p.update({param_name: param.v})
+            p.update({param_name: param.v})
     return p
 
 
@@ -83,7 +80,11 @@ def print_var(var_addr: Address, nstep):
     return var_declaration, var_list
 
 
-def print_param(PARAM: Dict[str, ParamBase]):
+def print_param(PARAM: Dict[str, ParamBase],
+                output_sparse=False):
+    """
+    output_sparse : whether to print the sparse parameter
+    """
     param_declaration = []
     p = SolDict('p_')
     param_list = []
@@ -92,11 +93,14 @@ def print_param(PARAM: Dict[str, ParamBase]):
             if isinstance(param, TimeSeriesParam):
                 param_assign = Assignment(Para(param_name),
                                           FunctionCall(f'p_["{param_name}"].get_v_t', [Symbol('t')]))
+                param_declaration.append(param_assign)
+                param_list.append(param_assign.lhs)
             else:
-                param_assign = Assignment(Para(param_name),
-                                          p[param_name])
-            param_declaration.append(param_assign)
-            param_list.append(param_assign.lhs)
+                if not param.sparse or output_sparse:
+                    param_assign = Assignment(Para(param_name),
+                                              p[param_name])
+                    param_declaration.append(param_assign)
+                    param_list.append(param_assign.lhs)
 
     return param_declaration, param_list
 
