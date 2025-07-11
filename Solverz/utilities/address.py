@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from typing import Dict
+from typing import Dict, List
 from copy import deepcopy
 from .type_checker import is_integer
 
@@ -66,7 +66,7 @@ class Address:
         if addr < 0:
             raise ValueError(f"No negative address allowed!")
 
-        current_sum = -1 # The address should start from 0
+        current_sum = -1  # The address should start from 0
         for i, value in enumerate(self.length_array):
             current_sum += value
             if current_sum >= addr:
@@ -102,3 +102,41 @@ class Address:
         if not np.all(np.isclose(self.length_array, other.length_array)):
             return False
         return True
+
+    def reorder(self, new_order: List[str]):
+        """
+        Reorder the elements in the Address according to the given new_order list.
+
+        Parameters:
+        -----------
+        new_order : list of str
+            A list of names specifying the new order of elements.
+            Must contain exactly the same elements as self.object_list, with no duplicates.
+
+        Raises:
+        -------
+        ValueError
+            If new_order is invalid (e.g., wrong number of elements, duplicates, or unknown names).
+        """
+        if len(new_order) != len(self.object_list):
+            raise ValueError("The number of elements in new_order must match the current object list.")
+
+        current_set = set(self.object_list)
+        new_set = set(new_order)
+        if current_set != new_set:
+            missing = current_set - new_set
+            extra = new_set - current_set
+            raise ValueError(f"New order contains unknown elements {extra} or is missing elements {missing}")
+
+        if len(set(new_order)) != len(new_order):
+            raise ValueError("New order contains duplicate elements.")
+
+        new_length = []
+        for name in new_order:
+            idx = self.object_list.index(name)
+            new_length.append(self.length_array[idx])
+
+        self.object_list = list(new_order)
+        self.length_array = np.array(new_length, dtype=int)
+
+        self.update_v_cache()

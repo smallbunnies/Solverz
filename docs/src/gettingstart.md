@@ -106,9 +106,14 @@ m.f = Eqn('f', MatVecMul(m.A, m.x)-m.b)
 Using the matrix multiplication operator, we can avoid traversing the rows and columns of parameter `A`, which helps
 streamline the modeling procedure.
 
-```{note}
-Currently, Solverz supports only `A@x` type expressions. The development of the more complicated mixed-matrix-vector expressions
-are on the way. It should be noted that the parameter `A` is not mutable after declaration, because it is parsed as a constant Jacbian
+```{note} 
+***This is very experimental. Stay vigilant!***
+
+Currently, Solverz supports only `A@x` type expressions. `A@x` type expression can only be `+` or `-` from other expressions. 
+Currently, we cannot perform other operations on this type of expression.
+
+The development of the more complicated mixed-matrix-vector expressions are on the way. 
+It should be noted that the parameter `A` is not mutable after declaration, because it is parsed as a constant Jacbian
 block to ensure efficiency. Considering that `numba` does not support sparse matrix, `A` is converted dense in the parameter
 dictionary `p` for accelerated equation computations.
 ```

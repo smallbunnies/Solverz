@@ -8,7 +8,7 @@ from Solverz.solvers import *
 from Solverz.code_printer import made_numerical, module_printer
 from Solverz.utilities.io import save, load, save_result
 from Solverz.utilities.profile import count_time
-from Solverz.utilities.derive_incidence_matrix import derive_incidence_matrix
+from Solverz.utilities.miscellaneous import derive_incidence_matrix
 from Solverz.variable.ssymbol import Var, AliasVar
 from Solverz.model.basic import Model
 

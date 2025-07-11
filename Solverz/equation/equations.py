@@ -20,6 +20,7 @@ from Solverz.utilities.address import Address, combine_Address
 from Solverz.utilities.type_checker import is_integer
 from Solverz.num_api.Array import Array
 from Solverz.equation.jac import Jac, JacBlock
+from Solverz.utilities.miscellaneous import rearrange_list
 
 
 class Equations:
@@ -365,39 +366,36 @@ class DAE(Equations):
         ASSIGN ADDRESSES TO EQUATIONS f and g
         """
 
-        temp = 0
-        for eqn_name in self.f_list:
-            feval = self.f(None, y, eqn=eqn_name)
-            lhs_eval = self.eval_lhs(None, y, eqn=eqn_name)
-            if isinstance(feval, Number):
-                rhs_size = 1
+        self.state_num = 0
+        self.algebra_num = 0
+        for eqn_name in self.f_list + self.g_list:
+            if eqn_name in self.f_list:
+                feval = self.f(None, y, eqn=eqn_name)
+                lhs_eval = self.eval_lhs(None, y, eqn=eqn_name)
+                if isinstance(feval, Number):
+                    rhs_size = 1
+                else:
+                    rhs_size = feval.shape[0]
+                if isinstance(lhs_eval, Number):
+                    lhs_size = 1
+                else:
+                    lhs_size = lhs_eval.shape[0]
+                eqn_size = np.max([rhs_size, lhs_size])
+                self.state_num += eqn_size
+            elif eqn_name in self.g_list:
+                geval = self.g(None, y, eqn=eqn_name)
+                if np.max(np.abs(geval)) > 1e-5:
+                    warnings.warn(
+                        f'Inconsistent initial values for algebraic equation: {eqn_name}, with deviation {np.max(np.abs(geval))}!')
+                if isinstance(geval, Number):
+                    eqn_size = 1
+                else:
+                    eqn_size = geval.shape[0]
+                self.algebra_num += eqn_size
             else:
-                rhs_size = feval.shape[0]
-            if isinstance(lhs_eval, Number):
-                lhs_size = 1
-            else:
-                lhs_size = lhs_eval.shape[0]
-            eqn_size = np.max([rhs_size, lhs_size])
+                raise ValueError(f'Non-existent equation: {eqn_name}')
             self.a.update(eqn_name, eqn_size)
-            temp = temp + eqn_size
             self.esize[eqn_name] = eqn_size
-
-        self.state_num = temp
-
-        for eqn_name in self.g_list:
-            geval = self.g(None, y, eqn=eqn_name)
-            if np.max(np.abs(geval)) > 1e-5:
-                warnings.warn(
-                    f'Inconsistent initial values for algebraic equation: {eqn_name}, with deviation {np.max(np.abs(geval))}!')
-            if isinstance(geval, Number):
-                eqn_size = 1
-            else:
-                eqn_size = geval.shape[0]
-            self.a.update(eqn_name, eqn_size)
-            temp = temp + eqn_size
-            self.esize[eqn_name] = eqn_size
-
-        self.algebra_num = temp - self.state_num
 
         self.var_address = y.a
         self.vsize = self.var_address.total_size

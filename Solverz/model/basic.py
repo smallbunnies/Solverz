@@ -9,6 +9,7 @@ from Solverz.utilities.address import Address
 from Solverz.variable.variables import Vars
 from Solverz.variable.ssymbol import Var, AliasVar
 from Solverz.num_api.Array import Array
+from Solverz.utilities.miscellaneous import rearrange_list
 
 
 class Model:
@@ -75,8 +76,15 @@ class Model:
                 eqs.param_initializer(name, param)
 
         a = Address()
-        # initialize variables
-        for name, var in self.var_dict.items():
+        # initialize variables and assign the addresses
+        var_list = list(self.var_dict.keys())
+        if var_sequence is None:
+            var_sequence = var_list
+        else:
+            var_sequence = rearrange_list(var_list, var_sequence)
+
+        for name in var_sequence:
+            var = self.var_dict[name]
             if var.value is None and var.init is None:
                 raise ValueError(f'Variable {name} not initialized and init func not provided!')
             elif var.value is None and var.init is not None:
@@ -91,6 +99,9 @@ class Model:
             for i in range(nstep):
                 eqs.update_param(y0.derive_alias(f'_tag_{i}'))
         # eqs.FormJac(y0)
+        if eqn_sequence is not None:
+            eqn_sequence = rearrange_list(list(eqs.EQNs.keys()), eqn_sequence)
+            eqs.a.reorder(eqn_sequence)
         eqs.assign_eqn_var_address(y0)
 
         if eqs.eqn_size != eqs.vsize:
