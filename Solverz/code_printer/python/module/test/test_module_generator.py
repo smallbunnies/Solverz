@@ -17,7 +17,7 @@ from Solverz.variable.variables import as_Vars
 expected_dependency = r"""import os
 current_module_dir = os.path.dirname(os.path.abspath(__file__))
 from Solverz import load
-auxiliary = load(f"{current_module_dir}\\param_and_setting.pkl")
+auxiliary = load(os.path.join(current_module_dir, "param_and_setting.pkl"))
 from numpy import *
 from Solverz.num_api.module_parser import *
 setting = auxiliary["eqn_param"]
@@ -72,23 +72,24 @@ def test_AE_module_printer():
     current_file_path = os.path.abspath(__file__)
     current_folder = os.path.dirname(current_file_path)
 
-    test_folder_path = current_folder + '\\Solverz_testaabbccddeeffgghh'
+    test_folder_path = os.path.join(current_folder, 'Solverz_testaabbccddeeffgghh')
+    test_module_path = os.path.join(test_folder_path, 'a_test_direc')
 
     pyprinter = module_printer(F,
                                y,
                                'test_eqn1',
-                               directory=test_folder_path + '\\a_test_direc',
+                               directory= test_module_path,
                                jit=True)
     pyprinter.render()
 
     pyprinter1 = module_printer(F,
                                 y,
                                 'test_eqn2',
-                                directory=test_folder_path + '\\a_test_direc',
+                                directory= test_module_path,
                                 jit=False)
     pyprinter1.render()
 
-    sys.path.extend([test_folder_path + '\\a_test_direc'])
+    sys.path.extend([test_module_path])
 
     from test_eqn1 import mdl, y
     from test_eqn1.num_func import inner_F, inner_F0, inner_F1, inner_J
@@ -107,12 +108,12 @@ def test_AE_module_printer():
         inner_J) == '@njit(cache=True)\ndef inner_J(_data_, x):\n    _data_[2:3] = inner_J0(x)\n    _data_[3:4] = inner_J1(x)\n    return _data_\n'
 
     # read dependency.py
-    with open(test_folder_path + '\\a_test_direc\\test_eqn1\\dependency.py', 'r', encoding='utf-8') as file:
+    with open(os.path.join(test_folder_path, 'a_test_direc', 'test_eqn1', 'dependency.py'), 'r', encoding='utf-8') as file:
         file_content = file.read()
 
     assert file_content == expected_dependency
 
-    with open(test_folder_path + '\\a_test_direc\\test_eqn1\\__init__.py', 'r', encoding='utf-8') as file:
+    with open(os.path.join(test_folder_path, 'a_test_direc', 'test_eqn1', '__init__.py'), 'r', encoding='utf-8') as file:
         file_content = file.read()
 
     assert file_content == expected_init
