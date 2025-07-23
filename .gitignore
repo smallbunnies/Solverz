@@ -6,6 +6,7 @@
 /tests/__pycache__
 *.docx
 *.mlx
+*.DS_Store
 /study/
 instances/vdp1.mat
 tests/test.ipynb

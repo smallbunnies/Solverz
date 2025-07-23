@@ -20,6 +20,7 @@ class Jac:
         self.is_sorted = False
         self.__blocks_sorted: Dict[str, Dict[SolVar, JacBlock]] = dict()
         self.shape = np.array([0, 0], dtype=int)
+        self.coordinate0 = np.array([0, 0], dtype=int)  # coordinate of the left upper element
 
     def add_block(self,
                   eqn_name: str,

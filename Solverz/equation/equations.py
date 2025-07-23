@@ -123,6 +123,7 @@ class Equations:
             self.jac.add_block(EqnName, DiffVar, jb)
 
         self.jac.shape = np.array([self.eqn_size, self.vsize], dtype=int)
+        self.jac.coordinate0 = np.ndarray([0, 0], dtype=int)
 
     def FormPartialJac(self,
                        y,
@@ -156,7 +157,7 @@ class Equations:
 
         jac = Jac()
 
-        Fy_list = self.Fy(y, self.a.object_list, self.var_address.object_list)
+        Fy_list = self.Fy(y, eqn_list, var_list)
 
         for fy in Fy_list:
             EqnName = fy[0]
@@ -191,6 +192,7 @@ class Equations:
         var_end = self.var_address[var_list[-1]].stop
 
         jac.shape = np.array([eqn_end - eqn_start, var_end - var_start], dtype=int)
+        jac.coordinate0 = np.array([eqn_start, var_start], dtype=int)
 
         return jac
 
