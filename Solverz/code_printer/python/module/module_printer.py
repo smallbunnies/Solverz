@@ -121,7 +121,21 @@ def print_inner_J(var_addr: Address,
             # add real assumption
             SymbolsInDeri = [symbols(arg.name, real=True) for arg in SymbolsInDeri_]
             addr_by_ele = slice(addr_by_ele_0, addr_by_ele_0 + jb.SpEleSize)
-            if not (jb.IsDeriNumber or jb.DeriType == 'matrix'):
+
+            jac_constant = jb.IsDeriNumber
+
+            if jb.DeriType == 'matrix':
+                jac_constant = True
+                # if the matrix derivative is triggerable, then update it in the Jacobian function call
+                if isinstance(jb.DeriExpr, Para):
+                    if PARAM[jb.DeriExpr.name].triggerable:
+                        jac_constant = False
+                elif isinstance(-jb.DeriExpr, Para):
+                    name = (-jb.DeriExpr).name
+                    if PARAM[name].triggerable:
+                        jac_constant = False
+
+            if not jac_constant:
                 # _data_[0:1] = inner_J0(t1, x)
                 body.append(Assignment(iVar('_data_', internal_use=True)[addr_by_ele],
                                        FunctionCall(f'inner_J{int(count)}', SymbolsInDeri)))

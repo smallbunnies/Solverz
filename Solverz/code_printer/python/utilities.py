@@ -96,7 +96,7 @@ def print_param(PARAM: Dict[str, ParamBase],
                 param_declaration.append(param_assign)
                 param_list.append(param_assign.lhs)
             else:
-                if not param.sparse or output_sparse:
+                if not param.sparse or output_sparse or param.triggerable:
                     param_assign = Assignment(Para(param_name),
                                               p[param_name])
                     param_declaration.append(param_assign)

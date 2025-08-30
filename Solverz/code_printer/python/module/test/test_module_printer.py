@@ -312,6 +312,7 @@ def test_print_inner_J():
                          [0, 1, 2, 3],
                          [0, 100, 200, 300])
     Pdict["G6"] = G6
+    Pdict['A'] = Param('A', dim=2, sparse=True)
 
     code_dict = print_inner_J(VarAddr,
                               Pdict,
@@ -341,6 +342,7 @@ expected6 = """def F_(t, y_, p_):
     return inner_F(_F_, omega, delta, x, y, ax, lam, G6)
 """.strip()
 
+test_print_inner_J()
 
 def test_print_F():
     eqs_type = 'DAE'
