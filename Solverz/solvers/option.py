@@ -24,7 +24,8 @@ class Opt:
                  ndfmaxit=4,
                  normcontrol=False,
                  numJac=False,
-                 max_it=100):
+                 max_it=100,
+                 profile=False):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety
@@ -47,3 +48,4 @@ class Opt:
         self.normcontrol = normcontrol
         self.numJac = numJac
         self.max_it = max_it
+        self.profile = profile

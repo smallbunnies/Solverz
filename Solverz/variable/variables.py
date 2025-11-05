@@ -7,7 +7,7 @@ import warnings
 import numpy as np
 
 from Solverz.sym_algebra.symbols import iVar
-from Solverz.utilities.address import Address, combine_Address
+from Solverz.utilities.address import Address, combine_Address, is_integer
 from Solverz.num_api.Array import Array
 
 
@@ -234,7 +234,7 @@ class TimeVars(VarsBasic):
         :param item:
         :return: Time series frame, a Vars object
         """
-        if isinstance(item, int):
+        if is_integer(item):
             if item > self.len:
                 raise ValueError(f'Exceed maximum indices of Time-series Variables')
             else:

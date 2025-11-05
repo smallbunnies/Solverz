@@ -10,6 +10,7 @@ class Stats:
         self.nsolve = 0
         self.ret = None
         self.succeed = False
+        self.order_variation = None
 
     def __repr__(self):
         return (f"Scheme: {self.scheme}, "
