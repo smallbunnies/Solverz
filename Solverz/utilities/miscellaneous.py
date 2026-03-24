@@ -9,9 +9,9 @@ def derive_incidence_matrix(indices, m, n) -> coo_array:
     data = []
     row = []
     col = []
-    for i in indices:
+    for row_idx, i in enumerate(indices):
         data.append(1)
-        row.append(indices.index(i))
+        row.append(row_idx)
         col.append(i)
 
     return coo_array((data, (row, col)), shape=(m, n), dtype=int)

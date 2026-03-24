@@ -242,8 +242,12 @@ class TimeVars(VarsBasic):
         elif isinstance(item, str):
             return self.array[:, self.a[item]]
         elif isinstance(item, slice):
-            temp = TimeVars(self[item.start], length=0)
-            temp.array = self.array[item, 0:]
+            sliced = self.array[item, 0:]
+            if sliced.shape[0] == 0:
+                temp = TimeVars(Vars(self.a, np.zeros((self.total_size,))), length=0)
+            else:
+                temp = TimeVars(Vars(self.a, sliced[0, :]), length=0)
+            temp.array = sliced
             return temp
         else:
             # not implemented
