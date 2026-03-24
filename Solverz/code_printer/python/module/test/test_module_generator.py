@@ -7,7 +7,7 @@ import numpy as np
 from sympy import symbols, pycode, Integer
 
 from Solverz import Eqn, Ode, AE, sin, made_numerical, Model, Var, Param, TimeSeriesParam, AliasVar, Abs, exp, \
-    cos, Mat_Mul
+    cos, Mat_Mul, MatVecMul
 from Solverz.code_printer.make_module import module_printer
 from Solverz.code_printer.python.inline.inline_printer import print_J_block
 from Solverz.code_printer.python.utilities import _print_var_parser
@@ -17,7 +17,7 @@ from Solverz.variable.variables import as_Vars
 expected_dependency = r"""import os
 current_module_dir = os.path.dirname(os.path.abspath(__file__))
 from Solverz import load
-auxiliary = load(f"{current_module_dir}\\param_and_setting.pkl")
+auxiliary = load(os.path.join(current_module_dir, "param_and_setting.pkl"))
 from numpy import *
 from Solverz.num_api.module_parser import *
 setting = auxiliary["eqn_param"]
@@ -72,23 +72,24 @@ def test_AE_module_printer():
     current_file_path = os.path.abspath(__file__)
     current_folder = os.path.dirname(current_file_path)
 
-    test_folder_path = current_folder + '\\Solverz_testaabbccddeeffgghh'
+    test_folder_path = os.path.join(current_folder, 'Solverz_testaabbccddeeffgghh')
+    test_module_path = os.path.join(test_folder_path, 'a_test_direc')
 
     pyprinter = module_printer(F,
                                y,
                                'test_eqn1',
-                               directory=test_folder_path + '\\a_test_direc',
+                               directory= test_module_path,
                                jit=True)
     pyprinter.render()
 
     pyprinter1 = module_printer(F,
                                 y,
                                 'test_eqn2',
-                                directory=test_folder_path + '\\a_test_direc',
+                                directory= test_module_path,
                                 jit=False)
     pyprinter1.render()
 
-    sys.path.extend([test_folder_path + '\\a_test_direc'])
+    sys.path.extend([test_module_path])
 
     from test_eqn1 import mdl, y
     from test_eqn1.num_func import inner_F, inner_F0, inner_F1, inner_J
@@ -107,12 +108,12 @@ def test_AE_module_printer():
         inner_J) == '@njit(cache=True)\ndef inner_J(_data_, x):\n    _data_[2:3] = inner_J0(x)\n    _data_[3:4] = inner_J1(x)\n    return _data_\n'
 
     # read dependency.py
-    with open(test_folder_path + '\\a_test_direc\\test_eqn1\\dependency.py', 'r', encoding='utf-8') as file:
+    with open(os.path.join(test_folder_path, 'a_test_direc', 'test_eqn1', 'dependency.py'), 'r', encoding='utf-8') as file:
         file_content = file.read()
 
     assert file_content == expected_dependency
 
-    with open(test_folder_path + '\\a_test_direc\\test_eqn1\\__init__.py', 'r', encoding='utf-8') as file:
+    with open(os.path.join(test_folder_path, 'a_test_direc', 'test_eqn1', '__init__.py'), 'r', encoding='utf-8') as file:
         file_content = file.read()
 
     assert file_content == expected_init
@@ -138,22 +139,25 @@ def test_AE_module_printer():
 expected_F_mat = """def F_(y_, p_):
     x = y_[0:2]
     y = y_[2:3]
-    A = p_["A"]
+    A_data = p_["A_data"]
+    A_indices = p_["A_indices"]
+    A_indptr = p_["A_indptr"]
+    A_shape0 = p_["A_shape0"]
     b = p_["b"]
     c = p_["c"]
-    return inner_F(_F_, x, y, A, b, c)
+    return inner_F(_F_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c)
 """
 
 expected_inner_F_mat = """@njit(cache=True)
-def inner_F(_F_, x, y, A, b, c):
-    _F_[0:2] = inner_F0(A, b, x)
+def inner_F(_F_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c):
+    _F_[0:2] = inner_F0(A_data, A_indices, A_indptr, A_shape0, b, x)
     _F_[2:3] = inner_F1(c, y)
     return _F_
 """
 
 expected_inner_F0_mat = """@njit(cache=True)
-def inner_F0(A, b, x):
-    return b - (A@x)
+def inner_F0(A_data, A_indices, A_indptr, A_shape0, b, x):
+    return b - SolCF.csc_matvec(A_data, A_indices, A_indptr, A_shape0, x)
 """
 
 expected_inner_F1_mat = """@njit(cache=True)
@@ -164,15 +168,18 @@ def inner_F1(c, y):
 expected_J_mat = """def J_(y_, p_):
     x = y_[0:2]
     y = y_[2:3]
-    A = p_["A"]
+    A_data = p_["A_data"]
+    A_indices = p_["A_indices"]
+    A_indptr = p_["A_indptr"]
+    A_shape0 = p_["A_shape0"]
     b = p_["b"]
     c = p_["c"]
-    data = inner_J(_data_, x, y, A, b, c)
+    data = inner_J(_data_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c)
     return sps.coo_array((data, (row, col)), (3, 3)).tocsc()
 """
 
 expected_inner_J_mat = """@njit(cache=True)
-def inner_J(_data_, x, y, A, b, c):
+def inner_J(_data_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c):
     return _data_
 """
 
@@ -184,7 +191,7 @@ def test_AE_module_generator_with_matrix():
     m.b = Param('b', [0.5, 1])
     m.c = Param('c', [20])
     m.A = Param('A', [[1, 3], [-1, 2]], dim=2, sparse=True)
-    m.eqnf = Eqn('eqnf', m.b - Mat_Mul(m.A, m.x))
+    m.eqnf = Eqn('eqnf', m.b - MatVecMul(m.A, m.x))
     m.eqng = Eqn('eqng', m.c - m.y)
 
     smdl, y0 = m.create_instance()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 from Solverz.code_printer.python.utilities import *
 
 
@@ -76,6 +77,7 @@ def print_J(eqs_type: str,
             eqn_size: int,
             var_addr: Address,
             PARAM: Dict[str, ParamBase],
+            shape: List[int],
             nstep: int = 0):
     if eqn_size != var_addr.total_size:
         raise ValueError(f"Jac matrix, with size ({eqn_size}*{var_addr.total_size}), not square")
@@ -91,7 +93,7 @@ def print_J(eqs_type: str,
     body.extend(print_trigger(PARAM))
     body.extend([Assignment(iVar('data', internal_use=True),
                             FunctionCall('inner_J', [symbols('_data_', real=True)] + var_list + param_list))])
-    body.extend([Return(coo_2_csc(eqn_size, var_addr.total_size))])
+    body.extend([Return(coo_2_csc(shape[0], shape[1]))])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
 
@@ -119,7 +121,21 @@ def print_inner_J(var_addr: Address,
             # add real assumption
             SymbolsInDeri = [symbols(arg.name, real=True) for arg in SymbolsInDeri_]
             addr_by_ele = slice(addr_by_ele_0, addr_by_ele_0 + jb.SpEleSize)
-            if not (jb.IsDeriNumber or jb.DeriType == 'matrix'):
+
+            jac_constant = jb.IsDeriNumber
+
+            if jb.DeriType == 'matrix':
+                jac_constant = True
+                # if the matrix derivative is triggerable, then update it in the Jacobian function call
+                if isinstance(jb.DeriExpr, Para):
+                    if PARAM[jb.DeriExpr.name].triggerable:
+                        jac_constant = False
+                elif isinstance(-jb.DeriExpr, Para):
+                    name = (-jb.DeriExpr).name
+                    if PARAM[name].triggerable:
+                        jac_constant = False
+
+            if not jac_constant:
                 # _data_[0:1] = inner_J0(t1, x)
                 body.append(Assignment(iVar('_data_', internal_use=True)[addr_by_ele],
                                        FunctionCall(f'inner_J{int(count)}', SymbolsInDeri)))

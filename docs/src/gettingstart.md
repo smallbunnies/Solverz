@@ -96,19 +96,24 @@ parameter, which can help save the modeling overhead.
 
 An illustrative example for equation `A@x-b=0`, where we denote by `@` the matrix-vector multiplication, is 
 ```python
-from Solverz import Var, Param, Mat_Mul, Model, Eqn
+from Solverz import Var, Param, MatVecMul, Model, Eqn
 m = Model()
 m.A = Param('A', [[1, 0], [0, 1]], sparse=True, dim=2)
 m.x = Var('x', [1, 2])
 m.b = Param('b', [0, 0])
-m.f = Eqn('f', Mat_Mul(m.A, m.x)-m.b)
+m.f = Eqn('f', MatVecMul(m.A, m.x)-m.b)
 ```
 Using the matrix multiplication operator, we can avoid traversing the rows and columns of parameter `A`, which helps
 streamline the modeling procedure.
 
-```{note}
-Currently, Solverz supports only `A@x` type expressions. The development of the more complicated mixed-matrix-vector expressions
-are on the way. It should be noted that the parameter `A` is not mutable after declaration, because it is parsed as a constant Jacbian
+```{note} 
+***This is very experimental. Stay vigilant!***
+
+Currently, Solverz supports only `A@x` type expressions. `A@x` type expression can only be `+` or `-` from other expressions. 
+Currently, we cannot perform other operations on this type of expression.
+
+The development of the more complicated mixed-matrix-vector expressions are on the way. 
+It should be noted that the parameter `A` is not mutable after declaration, because it is parsed as a constant Jacbian
 block to ensure efficiency. Considering that `numba` does not support sparse matrix, `A` is converted dense in the parameter
 dictionary `p` for accelerated equation computations.
 ```
@@ -151,6 +156,12 @@ instances by calling
 ```python
 eqs, y0 = m.create_instance()
 ```
+If you want to control the assembled order of equations or variables, you can also write
+```python
+eqs, y0 = m.create_instance(eqn_sequence=['g', 'f1', 'f2'],
+                            var_sequence=['v', 'h'])
+```
+This is useful when you want a particular block layout in the Jacobian.
 #### Symbolic Equations
 The `eqs` object is the symbolic equation, which can be either `AE`, `FDAE` or `DAE`. The type depends on the equations and variables you declare. The Solverz detects the equation and variable types, and then constructs `AE`, `FDAE` or `DAE` automatically.
 The object stores all the symbolic equations, the derivatives and the equation addresses.  Also, it can be used to check if the equation number equals the variable number, which is critical for a model to be solved.
@@ -229,6 +240,15 @@ def J_(y_, p_):
 ```
 
 Similarly, `Solverz.nFDAE` and `Solverz.nDAE` are respectively the numerical equation abstraction of FDAE and DAE, with the `F` and `J` attributes being the numerical interfaces. The `Solverz.nFDAE` instance has a `nstep` attribure to denote the number of historical time steps that is required. Currently, `nstep` can only be one.
+
+If you only need a contiguous block of the symbolic Jacobian, you can call
+```python
+sub_jac = eqs.FormPartialJac(y0,
+                             eqn_list=['g'],
+                             var_list=['v'])
+```
+The selected equation names and variable names must each be contiguous in the current ordering. The returned `Jac`
+stores the block size in `shape` and the global offset of the upper-left corner in `coordinate0`.
 
 Sometimes, one wants to use the second derivative information. Since Release/0.1, Solverz is able to derive the Hessian-vector product, with formula 
 
@@ -318,3 +338,7 @@ The detailed usage of these solvers can be found in [api reference](https://doc.
 
 It also a good idea to use solvers provided by scipy and other python packages since Solverz has derived the generic 
 numerical interfaces.
+
+All solver results carry a `stats` object, for example `sol.stats.nstep`, `sol.stats.nfeval`, `sol.stats.nJeval`,
+`sol.stats.ndecomp`, `sol.stats.nsolve` and `sol.stats.nreject`. For DAE solvers, setting `Opt(profile=True)` prints
+the elapsed wall-clock time of the solver call.

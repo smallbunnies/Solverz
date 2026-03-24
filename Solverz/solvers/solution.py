@@ -41,16 +41,25 @@ class daesol:
         if isinstance(item, slice):
             T = self.T[item]
             Y = self.Y[item]
-            stats = self.stats
+            stats = deepcopy(self.stats)
             if self.ie is not None:
-                event_idx = np.where(self.te >= T[0] & self.te <= T[-1])
-                te = self.te[event_idx]
-                ye = self.ye[event_idx]
-                ie = self.ie[event_idx]
+                event_idx = np.where((T[0] <= self.te) & (self.te <= T[-1]))[0]
+                if event_idx.size > 0:
+                    te = self.te[event_idx]
+                    ye = self.ye[slice(event_idx[0], event_idx[-1] + 1)]
+                    ie = self.ie[event_idx]
+                else:
+                    te = self.te[0:0]
+                    ye = self.ye[0:0]
+                    ie = self.ie[0:0]
             else:
                 te = None
                 ye = None
                 ie = None
+
+            if stats.order_variation is not None:
+                stats.order_variation = stats.order_variation[item]
+
             return daesol(T, Y, te, ye, ie, stats)
 
         elif is_number(item):
@@ -66,7 +75,11 @@ class daesol:
         self.stats.nstep = self.stats.nstep + sol.stats.nstep
         self.stats.nfeval = self.stats.nfeval + sol.stats.nfeval
         self.stats.ndecomp = self.stats.ndecomp + sol.stats.ndecomp
+        self.stats.nJeval = self.stats.nJeval + sol.stats.nJeval
+        self.stats.nsolve = self.stats.nsolve + sol.stats.nsolve
         self.stats.nreject = self.stats.nreject + sol.stats.nreject
+        if self.stats.order_variation is not None:
+            self.stats.order_variation = np.concatenate((self.stats.order_variation, sol.stats.order_variation))
 
         self.T = np.concatenate([self.T, sol.T]) if self.T is not None else sol.T
         if self.Y is not None:

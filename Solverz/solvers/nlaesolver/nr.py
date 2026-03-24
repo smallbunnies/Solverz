@@ -54,7 +54,9 @@ def nr_method(eqn: nAE,
         stats.nstep += 1
 
         y = y - solve(eqn.J(y, p), df)
+        stats.nJeval += 1
         stats.ndecomp += 1
+        stats.nsolve += 1
         df = eqn.F(y, p)
         stats.nfeval += 1
 

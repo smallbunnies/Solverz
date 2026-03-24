@@ -8,7 +8,7 @@ import re
 import pytest
 from sympy.codegen.ast import Assignment, AddAugmentedAssignment
 
-from Solverz import Model, Var, AliasVar, sin
+from Solverz import Model, Var, AliasVar
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import DAE, AE
 from Solverz.equation.param import Param
@@ -191,9 +191,13 @@ def test_print_F_J():
 expected_J_den2 = """def J_(y_, p_):
     x = y_[0:2]
     y = y_[2:3]
-    A = p_["A"]
+    A_data = p_["A_data"]
+    A_indices = p_["A_indices"]
+    A_indptr = p_["A_indptr"]
+    A_shape0 = p_["A_shape0"]
     b = p_["b"]
     c = p_["c"]
+    A = p_["A"]
     J_ = np.zeros((3, 3))
     J_[0:2,0:2] += -A
     J_[2:3,2] += -np.ones(1)
@@ -203,7 +207,10 @@ expected_J_den2 = """def J_(y_, p_):
 expected_J_sp2 = """def J_(y_, p_):
     x = y_[0:2]
     y = y_[2:3]
-    A = p_["A"]
+    A_data = p_["A_data"]
+    A_indices = p_["A_indices"]
+    A_indptr = p_["A_indptr"]
+    A_shape0 = p_["A_shape0"]
     b = p_["b"]
     c = p_["c"]
     row = []
@@ -221,11 +228,14 @@ expected_J_sp2 = """def J_(y_, p_):
 expected_F2 = """def F_(y_, p_):
     x = y_[0:2]
     y = y_[2:3]
-    A = p_["A"]
+    A_data = p_["A_data"]
+    A_indices = p_["A_indices"]
+    A_indptr = p_["A_indptr"]
+    A_shape0 = p_["A_shape0"]
     b = p_["b"]
     c = p_["c"]
     _F_ = np.zeros((3, ))
-    _F_[0:2] = b - (A@x)
+    _F_[0:2] = b - SolCF.csc_matvec(A_data, A_indices, A_indptr, A_shape0, x)
     _F_[2:3] = c - y
     return _F_
 """.strip()
@@ -238,7 +248,7 @@ def test_print_F_J1():
     m.b = Param('b', [0.5, 1])
     m.c = Param('c', [20])
     m.A = Param('A', [[1, 3], [-1, 2]], dim=2, sparse=True)
-    m.eqnf = Eqn('eqnf', m.b - Mat_Mul(m.A, m.x))
+    m.eqnf = Eqn('eqnf', m.b - MatVecMul(m.A, m.x))
     m.eqng = Eqn('eqng', m.c - m.y)
 
     # %%
@@ -264,7 +274,7 @@ def test_print_F_J1():
                    smdl.PARAM,
                    smdl.nstep) == expected_F2
     mdl = made_numerical(smdl, y0, sparse=True)
-    assert isinstance(mdl.p['A'], np.ndarray)
+    assert isinstance(mdl.p['A'], csc_array)
     np.testing.assert_allclose(mdl.F(y0, mdl.p),
                                np.array([0.5, 1., 20.]))
     np.testing.assert_allclose(mdl.J(y0, mdl.p).toarray(),

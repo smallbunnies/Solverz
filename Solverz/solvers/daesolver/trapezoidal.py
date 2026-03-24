@@ -68,11 +68,14 @@ def implicit_trapezoid(dae: nDAE,
         ae = nAE(lambda y_, p_: dt / 2 * (dae.F(t0 + dt, y_, p_) + F0) - dae.M @ y_ + My0,
                  lambda y_, p_: -dae.M + dt / 2 * dae.J(t0 + dt, y_, p_),
                  p)
+        stats.nfeval += 1
 
         sol = nr_method(ae, y0, Opt(stats=True, ite_tol=opt.ite_tol))
         y1 = sol.y
-        stats.ndecomp = stats.ndecomp + sol.stats.nstep
-        stats.nfeval = stats.nfeval + sol.stats.nstep
+        stats.ndecomp = stats.ndecomp + sol.stats.ndecomp
+        stats.nfeval = stats.nfeval + sol.stats.nfeval
+        stats.nJeval = stats.nJeval + sol.stats.nJeval
+        stats.nsolve = stats.nsolve + sol.stats.nsolve
 
         tt = tt + dt
         nt = nt + 1

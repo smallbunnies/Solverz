@@ -21,11 +21,18 @@ Functions
 
 .. autoclass:: Solverz.sym_algebra.functions.Min
 
+.. autoclass:: Solverz.sym_algebra.functions.MatVecMul
+
 .. autoclass:: Solverz.sym_algebra.functions.Saturation
 
 .. autoclass:: Solverz.sym_algebra.functions.heaviside
 
 .. autoclass:: Solverz.sym_algebra.functions.ln
+
+Utilities
+---------
+
+.. autofunction:: Solverz.utilities.miscellaneous.derive_incidence_matrix
 
 Solvers
 -------

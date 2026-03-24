@@ -6,6 +6,7 @@ from Solverz.utilities.address import Address
 from Solverz.num_api.num_eqn import nAE, nDAE, nFDAE
 from Solverz.solvers.option import Opt
 from Solverz.solvers.solution import aesol, daesol
+from time import perf_counter
 
 
 def ae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -86,8 +87,17 @@ def dae_io_parser(func: Callable[..., Any]) -> Callable[..., Any]:
         else:
             y = y0
 
-        # Dispatch AE solvers and capture results
-        sol = func(eqn, tspan, y, opt)
+        # Dispatch DAE solvers and capture results
+        if opt is not None:
+            if opt.profile:
+                start = perf_counter()
+                sol = func(eqn, tspan, y, opt)
+                end = perf_counter()
+                print(f"Time elapsed: {end - start}s")
+            else:
+                sol = func(eqn, tspan, y, opt)
+        else:
+            sol = func(eqn, tspan, y, opt)
 
         # Wrap the output in Vars if the original y0 was a Vars instance
         if original_y0_is_vars:

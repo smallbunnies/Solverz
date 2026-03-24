@@ -326,7 +326,7 @@ def ode15s(dae: nDAE,
                         stats.nJeval += 1
                         Jcurrent = True
                     elif absh <= hmin:
-                        print(f"Error exit of RODAS at time = {t}: step size too small dt = {dt}.\n")
+                        print(f"Error exit of ode15s at time = {t}: step size too small dt = {dt}.\n")
                         stats.ret = 'failed'
                         break
                     else:

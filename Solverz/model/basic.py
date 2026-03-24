@@ -3,12 +3,13 @@ import warnings
 
 import numpy as np
 from Solverz.equation.equations import AE, FDAE, DAE
-from Solverz.equation.param import ParamBase
+from Solverz.equation.param import ParamBase, Param
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.utilities.address import Address
 from Solverz.variable.variables import Vars
 from Solverz.variable.ssymbol import Var, AliasVar
 from Solverz.num_api.Array import Array
+from Solverz.utilities.miscellaneous import rearrange_list
 
 
 class Model:
@@ -32,7 +33,7 @@ class Model:
                     args += [self.init_var(arg)]
         self.var_dict[name].value = Array(init_func.NUM_EQN(*args), dim=1)
 
-    def create_instance(self):
+    def create_instance(self, eqn_sequence=None, var_sequence=None):
         attr_dict = vars(self)
 
         eqn_type = 'AE'
@@ -44,6 +45,11 @@ class Model:
                 self.var_dict[key] = value
             elif isinstance(value, ParamBase):
                 self.param_dict[key] = value
+                if value.dim == 2 or value.sparse:
+                    self.param_dict[key + '_data'] = Param(key + '_data', value.v.data)
+                    self.param_dict[key + '_indices'] = Param(key + '_indices', value.v.indices, dtype=int)
+                    self.param_dict[key + '_indptr'] = Param(key + '_indptr', value.v.indptr, dtype=int)
+                    self.param_dict[key + '_shape0'] = Param(key + '_shape0', value.v.shape[0], dtype=int)
             elif isinstance(value, AliasVar):
                 nstep = 1 if nstep is None else nstep
                 self.alias_dict[key] = value
@@ -70,8 +76,15 @@ class Model:
                 eqs.param_initializer(name, param)
 
         a = Address()
-        # initialize variables
-        for name, var in self.var_dict.items():
+        # initialize variables and assign the addresses
+        var_list = list(self.var_dict.keys())
+        if var_sequence is None:
+            var_sequence = var_list
+        else:
+            var_sequence = rearrange_list(var_list, var_sequence)
+
+        for name in var_sequence:
+            var = self.var_dict[name]
             if var.value is None and var.init is None:
                 raise ValueError(f'Variable {name} not initialized and init func not provided!')
             elif var.value is None and var.init is not None:
@@ -86,6 +99,9 @@ class Model:
             for i in range(nstep):
                 eqs.update_param(y0.derive_alias(f'_tag_{i}'))
         # eqs.FormJac(y0)
+        if eqn_sequence is not None:
+            eqn_sequence = rearrange_list(list(eqs.EQNs.keys()), eqn_sequence)
+            eqs.a.reorder(eqn_sequence)
         eqs.assign_eqn_var_address(y0)
 
         if eqs.eqn_size != eqs.vsize:

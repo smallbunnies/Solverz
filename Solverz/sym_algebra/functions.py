@@ -3,7 +3,7 @@ from functools import reduce
 from sympy import Symbol, Function, Number, S, Integer, sin as Symsin, cos as Symcos
 from sympy.core.function import ArgumentIndexError
 
-from Solverz.variable.ssymbol import sSym2Sym
+from Solverz.variable.ssymbol import sSym2Sym, Para
 
 
 # %%
@@ -540,6 +540,68 @@ class Or(MulVarFunc):
 
     def _numpycode(self, printer, **kwargs):
         return r'SolCF.Or(' + ', '.join([printer._print(arg, **kwargs) for arg in self.args]) + r')'
+
+
+class MatVecMul(MulVarFunc):
+    arglength = 2
+
+    @classmethod
+    def eval(cls, *args):
+        if not isinstance(args[0], Para):
+            raise TypeError(f"First arg of MatVecMul should be Param not {type(args[0])}!")
+        else:
+            if args[0].dim != 2:
+                raise TypeError(f"First arg of MatVecMul should be two-dim sparse matrix.")
+        return matvec(Para(args[0].name + '_data'),
+                      Para(args[0].name + '_indices'),
+                      Para(args[0].name + '_indptr'),
+                      Para(args[0].name + '_shape0'),
+                      args[1])
+
+
+class matvec(MulVarFunc):
+    arglength = 5
+
+    def fdiff(self, argindex=1):
+        if argindex == 5:
+            return Para(self.args[0].name.removesuffix('_data'))
+        else:
+            return Integer(0)
+
+    def __repr__(self):
+        return self.__str__()
+
+    def _latex(self, printer, **kwargs):
+
+        arg_latex_str = []
+        for arg in self.args:
+            if isinstance(arg, Symbol):
+                arg_latex_str = [*arg_latex_str, printer._print(arg)]
+            else:
+                arg_latex_str = [*arg_latex_str, r'\left (' + printer._print(arg) + r'\right )']
+        _latex_str = arg_latex_str[0]
+        for arg_latex_str_ in arg_latex_str[1:]:
+            _latex_str = _latex_str + arg_latex_str_
+        if 'exp' in kwargs.keys():
+            return r'\left (' + _latex_str + r'\right )^{' + kwargs['exp'] + r'}'
+        else:
+            return _latex_str
+
+    def _sympystr(self, printer, **kwargs):
+        op1 = printer._print(Para(self.args[0].name.removesuffix('_data'), dim=2))
+        op2 = printer._print(self.args[4])
+        return r'({op1}@{op2})'.format(op1=op1, op2=op2)
+
+    def _numpycode(self, printer, **kwargs):
+
+        return (r'SolCF.csc_matvec({mat}_data, {mat}_indices, {mat}_indptr, {mat}_shape0, {vec})'
+                .format(mat=printer._print(self.args[0].name.removesuffix('_data')), vec=printer._print(self.args[4])))
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
 
 
 # %% custom func of equation printer

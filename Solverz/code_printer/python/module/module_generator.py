@@ -45,6 +45,7 @@ def render_modules(eqs: SymEquations,
                              eqs.eqn_size,
                              eqs.var_address,
                              eqs.PARAM,
+                             eqs.jac.shape,
                              eqs.nstep)
     J = print_inner_J(eqs.var_address,
                       eqs.PARAM,
@@ -131,7 +132,7 @@ def create_python_module(module_name,
                          dependency_code,
                          auxiliary,
                          directory=None):
-    location = module_name if directory is None else directory + '/' + module_name
+    location = module_name if directory is None else os.path.join(directory, module_name)
 
     # Create the parent directory if it doesn't exist
     os.makedirs(location, exist_ok=True)
@@ -151,7 +152,7 @@ def create_python_module(module_name,
     with open(module_path, "w") as file:
         file.write(module_code)
 
-    save(auxiliary, f'{location}/param_and_setting.pkl')
+    save(auxiliary, os.path.join(location, "param_and_setting.pkl"))
 
 
 try_hvp = """
@@ -271,7 +272,7 @@ def print_dependency_code(modules):
     code = "import os\n"
     code += "current_module_dir = os.path.dirname(os.path.abspath(__file__))\n"
     code += 'from Solverz import load\n'
-    code += 'auxiliary = load(f"{current_module_dir}\\\\param_and_setting.pkl")\n'
+    code += 'auxiliary = load(os.path.join(current_module_dir, "param_and_setting.pkl"))\n'
     code += 'from numpy import *\n'
     code += 'from Solverz.num_api.module_parser import *\n'
     code += 'setting = auxiliary["eqn_param"]\n'
