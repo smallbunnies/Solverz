@@ -23,13 +23,14 @@ jobs:
     - uses: actions/checkout@v6
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v8.0.0
+      uses: astral-sh/setup-uv@v8
       with:
         enable-cache: true
         python-version: ${{ matrix.python-version }}
 
     - name: Install the project
       run: |
+        uv venv
         uv pip install -e .
         uv pip install git+https://github.com/smallbunnies/myfunc.git@main
     - run: | # run both independent pytest and doctest
