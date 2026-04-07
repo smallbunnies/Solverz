@@ -269,6 +269,36 @@ class cos(UniVarFunc):
         return r'np.cos(' + printer._print(self.args[0]) + r')'
 
 
+@VarParser
+class atan2(Function):
+    arglength = 2
+    is_real = True
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != cls.arglength:
+            raise TypeError(f'{cls.__name__} takes {cls.arglength} positional arguments but {len(args)} were given!')
+
+    def fdiff(self, argindex=1):
+        y = self.args[0]
+        x = self.args[1]
+        denom = x ** 2 + y ** 2
+        if argindex == 1:
+            return x / denom
+        if argindex == 2:
+            return -y / denom
+        raise ArgumentIndexError(self, argindex)
+
+    def _numpycode(self, printer, **kwargs):
+        return (
+            r'np.arctan2('
+            + printer._print(self.args[0], **kwargs)
+            + r', '
+            + printer._print(self.args[1], **kwargs)
+            + r')'
+        )
+
+
 class Sign(UniVarFunc):
     r"""
     The element-wise indication of the sign of a number
