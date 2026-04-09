@@ -1,0 +1,188 @@
+name: CI/CD
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - '*'
+
+jobs:
+  built_in_tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57
+      with:
+        enable-cache: true
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install the project
+      run: |
+        uv venv
+        uv pip install -e .
+        uv pip install git+https://github.com/smallbunnies/myfunc.git@main
+
+    - run: |
+        uv run pytest
+
+  tests_in_museum:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-2022]
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+
+    steps:
+    - name: Checkout Test Repository
+      uses: actions/checkout@v6
+      with:
+        repository: 'smallbunnies/SolMuseum'
+        ref: 'main'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57
+      with:
+        enable-cache: true
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Main Repository as Dependency using Git URL
+      run: |
+        uv venv
+        uv pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
+        uv pip install git+https://github.com/rzyu45/SolUtil@master
+        uv pip install pytest pytest-xdist pytest-datadir
+        uv pip install . --no-deps
+
+    - name: Run Tests
+      run: |
+        .venv\Scripts\pytest -n auto
+
+  tests_in_cookbook:
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+
+    steps:
+    - name: Checkout Test Repository
+      uses: actions/checkout@v6
+      with:
+        repository: 'rzyu45/Solverz-Cookbook'
+        ref: 'main'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57
+      with:
+        enable-cache: true
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Main Repository as Dependency using Git URL
+      run: |
+        uv venv
+        uv pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
+        uv pip install pytest pytest-xdist pytest-datadir
+
+    - name: Run Tests
+      run: |
+        .venv\Scripts\pytest -n auto
+
+  build:
+    name: Build distribution
+    if: startsWith(github.ref, 'refs/tags/')
+    needs:
+      - built_in_tests
+      - tests_in_museum
+      - tests_in_cookbook
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.x"
+    - name: Install pypa/build
+      run: >-
+        python3 -m pip install build --user
+    - name: Build a binary wheel and a source tarball
+      run: python3 -m build
+    - name: Store the distribution packages
+      uses: actions/upload-artifact@v7
+      with:
+        name: python-package-distributions
+        path: dist/
+
+  publish-to-pypi:
+    name: Publish Python distribution to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/Solverz/
+    permissions:
+      id-token: write
+
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@v8
+      with:
+        name: python-package-distributions
+        path: dist/
+    - name: Publish distribution to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: >-
+      Sign the Python distribution with Sigstore
+      and upload them to GitHub Release
+    needs: publish-to-pypi
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@v8
+      with:
+        name: python-package-distributions
+        path: dist/
+    - name: Sign the dists with Sigstore
+      uses: sigstore/gh-action-sigstore-python@v3.3.0
+      with:
+        inputs: >-
+          ./dist/*.tar.gz
+          ./dist/*.whl
+    - name: Create GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: >-
+        gh release create
+        '${{ github.ref_name }}'
+        --repo '${{ github.repository }}'
+        --notes ""
+    - name: Upload artifact signatures to GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: >-
+        gh release upload
+        '${{ github.ref_name }}' dist/**
+        --repo '${{ github.repository }}'
