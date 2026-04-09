@@ -24,3 +24,4 @@ Solverz/share
 *.nbi
 /Solverz.egg-info
 Solverz/_version.py
+/.venv
