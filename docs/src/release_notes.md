@@ -38,6 +38,21 @@ the old `csc_matvec`) and supports full matrix calculus.
   selectively — equations using `Mat_Mul` run with `scipy.sparse` (fast C-level
   sparse operations), while pure element-wise equations retain `@njit` acceleration.
 
+- **`atan2` symbolic function**: Added `atan2(y, x)` for computing the two-argument
+  arctangent in symbolic equations.
+
+- **Plugin-based module discovery**: Third-party numerical modules (e.g., SolMuseum)
+  are now discovered via `entry_points(group='solverz.num_api')` instead of
+  hard-coded imports. Packages register via `pyproject.toml`
+  `[project.entry-points."solverz.num_api"]`. Closes [#118](https://github.com/smallbunnies/Solverz/issues/118).
+
+- **Improved solution stats**: Solvers now record more detailed statistics and
+  profiling information in the solution object.
+
+### Bug Fixes
+
+- Stabilized solution slicing and incidence matrix helpers.
+
 ### Deprecations
 
 - **`MatVecMul` is deprecated** — use `Mat_Mul(A, x)` instead. `MatVecMul` will

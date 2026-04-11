@@ -25,3 +25,8 @@ Solverz is a Python-based simulation modelling language that provides symbolic m
 Use `Mat_Mul(A, x)` for matrix-vector products in equations. The matrix parameter should be declared with `dim=2, sparse=True`. The matrix calculus module automatically computes symbolic Jacobians. See `docs/src/matrix_calculus.md` for details.
 
 `MatVecMul` is a legacy interface — new code should use `Mat_Mul`.
+
+## Release Process
+
+- Add release notes to `docs/src/release_notes.md` every time a new version is to be released
+- Document new features, breaking changes, deprecations, and bug fixes
