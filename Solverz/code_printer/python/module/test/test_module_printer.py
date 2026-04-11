@@ -450,6 +450,8 @@ def test_print_sub_inner_F():
     EQNs['b'] = Ode('b', x + y * lam, diff_var=x)
     EQNs['c'] = Eqn('c', Mat_Mul(A, x))
 
-    assert print_sub_inner_F(EQNs)[0] == expected9
-    assert print_sub_inner_F(EQNs)[1] == expected10
-    assert print_sub_inner_F(EQNs)[2] == expected11
+    code_blocks, no_njit = print_sub_inner_F(EQNs)
+    assert code_blocks[0] == expected9
+    assert code_blocks[1] == expected10
+    assert code_blocks[2] == expected11
+    assert no_njit == {2}  # EQNs['c'] uses Mat_Mul

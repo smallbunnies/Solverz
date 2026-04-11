@@ -78,7 +78,8 @@ def print_J(eqs_type: str,
             var_addr: Address,
             PARAM: Dict[str, ParamBase],
             shape: List[int],
-            nstep: int = 0):
+            nstep: int = 0,
+            include_sparse_in_list: bool = False):
     if eqn_size != var_addr.total_size:
         raise ValueError(f"Jac matrix, with size ({eqn_size}*{var_addr.total_size}), not square")
     fp = print_F_J_prototype(eqs_type,
@@ -88,7 +89,8 @@ def print_J(eqs_type: str,
     var_assignments, var_list = print_var(var_addr,
                                           nstep)
     body.extend(var_assignments)
-    param_assignments, param_list = print_param(PARAM)
+    param_assignments, param_list = print_param(PARAM,
+                                                include_sparse_in_list=include_sparse_in_list)
     body.extend(param_assignments)
     body.extend(print_trigger(PARAM))
     body.extend([Assignment(iVar('data', internal_use=True),
@@ -101,10 +103,12 @@ def print_J(eqs_type: str,
 def print_inner_J(var_addr: Address,
                   PARAM: Dict[str, ParamBase],
                   jac: Jac,
-                  nstep: int = 0):
+                  nstep: int = 0,
+                  include_sparse_in_list: bool = False):
     var_assignments, var_list = print_var(var_addr,
                                           nstep)
-    param_assignments, param_list = print_param(PARAM)
+    param_assignments, param_list = print_param(PARAM,
+                                                include_sparse_in_list=include_sparse_in_list)
     args = []
     for var in var_list + param_list:
         args.append(symbols(var.name, real=True))
@@ -158,7 +162,8 @@ def print_inner_J(var_addr: Address,
 def print_F(eqs_type: str,
             var_addr: Address,
             PARAM: Dict[str, ParamBase],
-            nstep: int = 0):
+            nstep: int = 0,
+            include_sparse_in_list: bool = False):
     fp = print_F_J_prototype(eqs_type,
                              'F_',
                              nstep)
@@ -166,7 +171,8 @@ def print_F(eqs_type: str,
     var_assignments, var_list = print_var(var_addr,
                                           nstep)
     body.extend(var_assignments)
-    param_assignments, param_list = print_param(PARAM)
+    param_assignments, param_list = print_param(PARAM,
+                                                include_sparse_in_list=include_sparse_in_list)
     body.extend(param_assignments)
     body.extend(print_trigger(PARAM))
     body.extend(
@@ -179,10 +185,12 @@ def print_inner_F(EQNs: Dict[str, Eqn],
                   EqnAddr: Address,
                   var_addr: Address,
                   PARAM: Dict[str, ParamBase],
-                  nstep: int = 0):
+                  nstep: int = 0,
+                  include_sparse_in_list: bool = False):
     var_assignments, var_list = print_var(var_addr,
                                           nstep)
-    param_assignments, param_list = print_param(PARAM)
+    param_assignments, param_list = print_param(PARAM,
+                                                include_sparse_in_list=include_sparse_in_list)
     args = []
     for var in var_list + param_list:
         args.append(symbols(var.name, real=True))
@@ -199,9 +207,12 @@ def print_inner_F(EQNs: Dict[str, Eqn],
 
 def print_sub_inner_F(EQNs: Dict[str, Eqn]):
     code_blocks = []
+    no_njit_indices = set()
     count = 0
     for eqn_name in EQNs.keys():
         eqn = EQNs[eqn_name]
+        if eqn.mixed_matrix_vector:
+            no_njit_indices.add(count)
         args = []
         for var in eqn.SYMBOLS.keys():
             args.append(symbols(var, real=True))
@@ -210,4 +221,4 @@ def print_sub_inner_F(EQNs: Dict[str, Eqn]):
         fd = FunctionDefinition.from_FunctionPrototype(fp, body)
         count = count + 1
         code_blocks.append(pycode(fd, fully_qualified_modules=False))
-    return code_blocks
+    return code_blocks, no_njit_indices
