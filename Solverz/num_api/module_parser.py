@@ -22,6 +22,10 @@ for ep in entry_points(group='solverz.num_api'):
     try:
         module = ep.load()
         module_dict[ep.name] = module
+        # Expose as module-level name so that generated code using
+        # ``from Solverz.num_api.module_parser import *`` can access it
+        # (e.g., ``SolMF.some_function()`` in printed F/J code).
+        globals()[ep.name] = module
     except Exception as e:
         warnings.warn(f'Failed to load num_api plugin {ep.name!r}: {e}')
 
