@@ -28,6 +28,12 @@ See also: [matrixcalculus.org](https://www.matrixcalculus.org/)
 | Transpose | `transpose(A)` | $A^T$ | $A^T$ |
 | Diagonal | `Diag(x)` | $\operatorname{diag}(x)$ | $\operatorname{diag}(\cdot)$ |
 
+```{note}
+`Mat_Mul` is the recommended interface for matrix-vector products. The legacy `MatVecMul` function
+(which decomposes sparse matrices into CSC components for Numba) is deprecated. `Mat_Mul` uses
+`scipy.sparse` directly, which is both faster and supports full matrix calculus.
+```
+
 All element-wise functions (exp, sin, cos, ln, Abs) can be composed with matrix operations:
 
 ```python
