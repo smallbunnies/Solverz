@@ -87,6 +87,17 @@ jobs:
         repository: 'rzyu45/Solverz-Cookbook'
         ref: 'main'
 
+    - name: Install IPOPT
+      shell: pwsh
+      env:
+        IPOPT_VERSION: "3.14.12"
+      run: |
+        $url = "https://github.com/coin-or/Ipopt/releases/download/releases%2F$env:IPOPT_VERSION/Ipopt-$env:IPOPT_VERSION-win64-msvs2019-md.zip"
+        Invoke-WebRequest -Uri $url -OutFile Ipopt.zip
+        Expand-Archive -Path Ipopt.zip -DestinationPath .
+        $ipoptPath = "$pwd\Ipopt-$env:IPOPT_VERSION-win64-msvs2019-md\bin"
+        echo "$ipoptPath" >> $env:GITHUB_PATH
+
     - name: Install uv
       uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57
       with:
@@ -97,7 +108,9 @@ jobs:
       run: |
         uv venv
         uv pip install git+https://github.com/${{github.repository}}.git@${{ github.sha }}
-        uv pip install pytest pytest-xdist pytest-datadir
+        uv pip install git+https://github.com/rzyu45/SolUtil@master
+        uv pip install SolMuseum
+        uv pip install pytest pytest-xdist pytest-datadir pandas openpyxl
 
     - name: Run Tests
       run: |
