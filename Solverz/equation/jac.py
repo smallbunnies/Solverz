@@ -121,6 +121,9 @@ class JacBlock:
         self.SpVarAddr: np.ndarray = np.array([])
         self.SpEleSize = 0
         self.SpDeriExpr: Expr = Integer(0)
+        # Local COO indices for mutable matrix blocks (used for fancy indexing)
+        self.CooRow: np.ndarray = np.array([], dtype=int)
+        self.CooCol: np.ndarray = np.array([], dtype=int)
         self.DenEqnAddr: slice = slice(0)
         self.DenVarAddr: slice | int = slice(0)
         self.DenDeriExpr: Expr = Integer(0)
@@ -142,14 +145,12 @@ class JacBlock:
                 raise TypeError(f"Derivative value type {type(self.Value0)} not supported!")
 
         if self.Value0.ndim == 2:
-            # support only var-type parameter (e.g. `A`)
-            # does not support expr-type parameter (e.g. Diag(x)@A)
-            if not isinstance(self.DeriExpr, Para) and not isinstance(-self.DeriExpr, Para):  # A or -A
-                raise TypeError(f"Support matrix param only in `A@x` or `-A@x` type matrix-vector products, "
-                                f"not {type(self.DeriExpr)} {self.DeriExpr}!")
+            # Matrix derivative: Value0 is 2D (either csc_array or dense ndarray).
+            # Constant case: DeriExpr is a Para (e.g., A or -A from ∂(A@x)/∂x = A)
+            # Mutable case: DeriExpr is a general expression (e.g., diag(e)@G + diag(f)@B)
             if not isinstance(self.Value0, csc_array):
-                raise TypeError(
-                    f"Please convert two-dimensional Parameter to sparse (scipy.sparse.csc) type or declare sparse Param")
+                # Convert dense 2D Value0 to csc_array for uniform sparsity handling
+                self.Value0 = csc_array(self.Value0)
             DeriType = 'matrix'
         elif is_vector(self.Value0):
             DeriType = 'vector'
@@ -159,6 +160,15 @@ class JacBlock:
             raise TypeError(f"Cant deduce derivative type of value {self.Value0}")
 
         self.DeriType = DeriType
+
+        # Determine if the matrix derivative depends on variables (mutable) or is constant.
+        # Constant: DeriExpr is Para (e.g., A from ∂(A@x)/∂x = A) — data never changes.
+        # Mutable: DeriExpr is a general expression (e.g., diag(e)@G) — must re-evaluate each step.
+        if DeriType == 'matrix':
+            self.is_mutable_matrix = not (isinstance(self.DeriExpr, Para)
+                                          or isinstance(-self.DeriExpr, Para))
+        else:
+            self.is_mutable_matrix = False
 
         # broadcast derivative
         if DiffVarType == 'scalar':
@@ -170,7 +180,6 @@ class JacBlock:
                         raise ValueError(f"Vector derivative size {self.Value0.size} != Equation size {EqnSize}")
                     self.DeriExprBc = self.DeriExpr
                 case 'matrix':
-                    # self.DeriExprBc = self.DeriExpr
                     raise TypeError("Matrix derivative of scalar variables not supported!")
                 case _:
                     raise TypeError(f"Derivative with value {self.Value0} of scalar variables not supported!")
@@ -196,7 +205,6 @@ class JacBlock:
                             raise ValueError(f"Incompatible matrix derivative size {self.Value0.shape} " +
                                              f"and vector variable size {DiffVarValue.shape}.")
                     self.DeriExprBc = self.DeriExpr
-                    warnings.warn("Matrix derivative is not mutable in Solverz.")
                 case _:
                     raise TypeError(f"Derivative with value {self.Value0} of vector variables not supported!")
 
@@ -215,9 +223,13 @@ class JacBlock:
             case 'vector':
                 match self.DeriType:
                     case 'matrix':
-                        # warnings.warn("Sparse parser of matrix type jac block not implemented!")
                         row = self.Value0.tocoo().row
                         col = self.Value0.tocoo().col
+                        # Store local COO indices for mutable matrix blocks.
+                        # These are used for fancy indexing when re-evaluating
+                        # the derivative expression at each Newton step.
+                        self.CooRow = row
+                        self.CooCol = col
                         self.SpEqnAddr = slice2array(self.EqnAddr)[row]
                         if isinstance(self.DiffVar, iVar):
                             self.SpVarAddr = slice2array(self.VarAddr)[col]

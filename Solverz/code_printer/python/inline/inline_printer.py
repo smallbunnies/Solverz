@@ -79,12 +79,24 @@ def print_J_block(jb: JacBlock, sparse: bool) -> List:
     if sparse:
         match jb.DeriType:
             case 'matrix':
-                return [extend(iVar('row', internal_use=True), SolList(*jb.SpEqnAddr.tolist())),
-                        extend(iVar('col', internal_use=True),
-                               SolList(*jb.SpVarAddr.tolist())),
-                        extend(iVar('data', internal_use=True), SolList(*jb.Value0.tocoo().data))]
-                # raise NotImplementedError(
-                #     "Matrix parameters in sparse Jac not implemented yet!")
+                stmts = [extend(iVar('row', internal_use=True), SolList(*jb.SpEqnAddr.tolist())),
+                         extend(iVar('col', internal_use=True),
+                                SolList(*jb.SpVarAddr.tolist()))]
+                if jb.is_mutable_matrix:
+                    # Mutable matrix derivative: evaluate expression at runtime,
+                    # then extract values at pre-determined COO positions using
+                    # fancy indexing. The expression (SpDeriExpr) evaluates to a
+                    # dense/sparse matrix; we index into it with the COO positions
+                    # from the initial Value0 to get the data in the correct order.
+                    stmts.append(extend(iVar('data', internal_use=True),
+                                        MutableMatJacData(jb.SpDeriExpr,
+                                                          jb.CooRow,
+                                                          jb.CooCol)))
+                else:
+                    # Constant matrix derivative (e.g., A from ∂(A@x)/∂x = A)
+                    stmts.append(extend(iVar('data', internal_use=True),
+                                        SolList(*jb.Value0.tocoo().data)))
+                return stmts
             case 'vector' | 'scalar':
                 return [extend(iVar('row', internal_use=True), SolList(*jb.SpEqnAddr.tolist())),
                         extend(iVar('col', internal_use=True),
@@ -248,6 +260,32 @@ def Solverzlambdify(funcstr, funcname, modules=None):
         "{src}\n\n"
     ).format(sig=current_time, src=src_str)
     return func
+
+
+class MutableMatJacData(Function):
+    """Evaluate a mutable matrix derivative expression and extract data values
+    at pre-determined COO positions using fancy indexing.
+
+    Generated code: ``(expr)[[row_indices], [col_indices]].ravel().tolist()``
+
+    This evaluates the full matrix expression (which may use np.diagflat and @),
+    then picks values at the positions determined by the initial sparsity pattern.
+    """
+
+    def __new__(cls, expr, coo_row, coo_col):
+        obj = super().__new__(cls, expr)
+        obj._coo_row = coo_row.tolist()
+        obj._coo_col = coo_col.tolist()
+        return obj
+
+    def _numpycode(self, printer, **kwargs):
+        inner = printer._print(self.args[0])
+        return (f'({inner})'
+                f'[{self._coo_row}, {self._coo_col}]'
+                f'.ravel().tolist()')
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
 
 
 class SolList(Function):

@@ -47,3 +47,10 @@ addopts = "-vv"
 [project.urls]
 Homepage = "https://github.com/smallbunnies/Solverz"
 Issues = "https://github.com/smallbunnies/Solverz/issues"
+
+# Third-party packages that provide additional num_api modules can register themselves
+# via the 'solverz.num_api' entry point group so that Solverz discovers them automatically
+# without a hard-coded import. Example (in the third-party package's pyproject.toml):
+#
+#   [project.entry-points."solverz.num_api"]
+#   SolMF = "SolMuseum.num_api"

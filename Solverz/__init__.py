@@ -1,8 +1,9 @@
 from Solverz.equation.eqn import Eqn, Ode
 from Solverz.equation.equations import AE, FDAE, DAE
 from Solverz.equation.param import Param, IdxParam, TimeSeriesParam
-from Solverz.sym_algebra.functions import (Sign, Abs, transpose, exp, Diag, Mat_Mul, sin, cos, Min, AntiWindUp,
-                                           Saturation, heaviside, ln, MulVarFunc, UniVarFunc, MatVecMul)
+from Solverz.sym_algebra.functions import (Sign, Abs, transpose, exp, Diag, Mat_Mul, sin, cos, atan2, Min,
+                                           AntiWindUp, Saturation, heaviside, ln, MulVarFunc, UniVarFunc,
+                                           MatVecMul)
 from Solverz.variable.variables import Vars, TimeVars
 from Solverz.solvers import *
 from Solverz.code_printer import made_numerical, module_printer

@@ -168,6 +168,7 @@ expected = """def J_(t, y_, p_):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
+    A = p_["A"]
     ax = ax_trigger_func(x)
     data = inner_J(_data_, omega, delta, x, y, ax, lam, G6)
     return sps.coo_array((data, (row, col)), (25, 25)).tocsc()
@@ -184,6 +185,7 @@ expected1 = """def J_(t, y_, p_, y_0):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
+    A = p_["A"]
     ax = ax_trigger_func(x)
     data = inner_J(_data_, omega, delta, x, y, omega_tag_0, delta_tag_0, x_tag_0, y_tag_0, ax, lam, G6)
     return sps.coo_array((data, (row, col)), (25, 25)).tocsc()
@@ -338,6 +340,7 @@ expected6 = """def F_(t, y_, p_):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
+    A = p_["A"]
     ax = ax_trigger_func(x)
     return inner_F(_F_, omega, delta, x, y, ax, lam, G6)
 """.strip()
@@ -447,6 +450,8 @@ def test_print_sub_inner_F():
     EQNs['b'] = Ode('b', x + y * lam, diff_var=x)
     EQNs['c'] = Eqn('c', Mat_Mul(A, x))
 
-    assert print_sub_inner_F(EQNs)[0] == expected9
-    assert print_sub_inner_F(EQNs)[1] == expected10
-    assert print_sub_inner_F(EQNs)[2] == expected11
+    code_blocks, no_njit = print_sub_inner_F(EQNs)
+    assert code_blocks[0] == expected9
+    assert code_blocks[1] == expected10
+    assert code_blocks[2] == expected11
+    assert no_njit == {2}  # EQNs['c'] uses Mat_Mul
