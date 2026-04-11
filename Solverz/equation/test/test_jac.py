@@ -353,61 +353,59 @@ def test_jb_vector_var_vector_deri():
 # %% matrix derivative
 def test_jb_vector_var_matrix_deri():
 
-    # matrix derivative must be param type
-    with pytest.raises(TypeError,
-                       match=re.escape("Support matrix param only in `A@x` or `-A@x` type matrix-vector products, not <class 'Solverz.sym_algebra.symbols.iVar'> A!")):
-        jb = JacBlock('a',
-                      slice(0, 3),
-                      iVar('x')[1],
-                      np.array([2]),
-                      slice(1, 4),
-                      iVar('A'),
-                      np.zeros((3, 3)))
+    # matrix derivative with non-Para expression (mutable matrix) — now allowed
+    jb = JacBlock('a',
+                  slice(0, 3),
+                  iVar('x'),
+                  np.array([2, 3, 4]),
+                  slice(1, 4),
+                  iVar('A'),
+                  csc_array(np.eye(3)))
+    assert jb.is_mutable_matrix is True
+    assert jb.DeriType == 'matrix'
 
-    # matrix param must be sparse
-    with pytest.raises(TypeError,
-                       match=re.escape("Please convert two-dimensional Parameter to sparse (scipy.sparse.csc) type or declare sparse Param")):
-        jb = JacBlock('a',
-                      slice(0, 3),
-                      iVar('x')[1],
-                      np.array([2]),
-                      slice(1, 4),
-                      Para('A'),
-                      np.zeros((3, 3)))
+    # dense 2D Value0 is auto-converted to csc_array
+    jb = JacBlock('a',
+                  slice(0, 3),
+                  iVar('x'),
+                  np.array([2, 3, 4]),
+                  slice(1, 4),
+                  Para('A'),
+                  np.eye(3))
+    assert isinstance(jb.Value0, csc_array)
+    assert jb.is_mutable_matrix is False  # Para → constant
 
     # vector var and matrix derivative
     # compatible vector and matrix size
-    with pytest.warns(UserWarning) as record:
-        jb = JacBlock('a',
-                      slice(0, 3),
-                      iVar('x'),
-                      np.array([2, 3, 4, 5]),
-                      slice(1, 5),
-                      Para('A'),
-                      csc_array(np.eye(4, k=1)[:-1, :]))
+    jb = JacBlock('a',
+                  slice(0, 3),
+                  iVar('x'),
+                  np.array([2, 3, 4, 5]),
+                  slice(1, 5),
+                  Para('A'),
+                  csc_array(np.eye(4, k=1)[:-1, :]))
 
-        assert str(record[0].message) == "Matrix derivative is not mutable in Solverz."
-        assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
-        assert_allclose(jb.SpVarAddr, np.array([2, 3, 4]))
-        assert jb.SpEleSize == 3
-        assert jb.DenEqnAddr == slice(0, 3)
-        assert jb.DenVarAddr == slice(1, 5)
+    assert jb.is_mutable_matrix is False
+    assert_allclose(jb.SpEqnAddr, np.array([0, 1, 2]))
+    assert_allclose(jb.SpVarAddr, np.array([2, 3, 4]))
+    assert jb.SpEleSize == 3
+    assert jb.DenEqnAddr == slice(0, 3)
+    assert jb.DenVarAddr == slice(1, 5)
 
-    with pytest.warns(UserWarning) as record:
-        jb = JacBlock('a',
-                      slice(0, 3),
-                      iVar('x')[2:4],
-                      np.array([2, 3]),
-                      slice(1, 5),
-                      Para('A'),
-                      csc_array(np.eye(4)[:-1, 0:2]))
+    jb = JacBlock('a',
+                  slice(0, 3),
+                  iVar('x')[2:4],
+                  np.array([2, 3]),
+                  slice(1, 5),
+                  Para('A'),
+                  csc_array(np.eye(4)[:-1, 0:2]))
 
-        assert str(record[0].message) == "Matrix derivative is not mutable in Solverz."
-        assert_allclose(jb.SpEqnAddr, np.array([0, 1]))
-        assert_allclose(jb.SpVarAddr, np.array([3, 4]))
-        assert jb.SpEleSize == 2
-        assert jb.DenEqnAddr == slice(0, 3)
-        assert jb.DenVarAddr == slice(3, 5)
+    assert jb.is_mutable_matrix is False
+    assert_allclose(jb.SpEqnAddr, np.array([0, 1]))
+    assert_allclose(jb.SpVarAddr, np.array([3, 4]))
+    assert jb.SpEleSize == 2
+    assert jb.DenEqnAddr == slice(0, 3)
+    assert jb.DenVarAddr == slice(3, 5)
 
     # incompatible vector and matrix size
     with pytest.raises(ValueError,

@@ -573,10 +573,23 @@ class Or(MulVarFunc):
 
 
 class MatVecMul(MulVarFunc):
+    """Legacy sparse matrix-vector multiply. Use ``Mat_Mul`` instead.
+
+    ``MatVecMul`` decomposes the sparse matrix into CSC components and calls
+    a Numba-compatible ``csc_matvec``.  New code should use ``Mat_Mul(A, x)``
+    which uses ``scipy.sparse`` directly and supports full matrix calculus.
+    """
     arglength = 2
 
     @classmethod
     def eval(cls, *args):
+        import warnings
+        warnings.warn(
+            "MatVecMul is deprecated, use Mat_Mul(A, x) instead. "
+            "Mat_Mul uses scipy.sparse directly and supports full matrix calculus.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         if not isinstance(args[0], Para):
             raise TypeError(f"First arg of MatVecMul should be Param not {type(args[0])}!")
         else:

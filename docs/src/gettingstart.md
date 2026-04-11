@@ -96,26 +96,24 @@ parameter, which can help save the modeling overhead.
 
 An illustrative example for equation `A@x-b=0`, where we denote by `@` the matrix-vector multiplication, is 
 ```python
-from Solverz import Var, Param, MatVecMul, Model, Eqn
+from Solverz import Var, Param, Mat_Mul, Model, Eqn
 m = Model()
 m.A = Param('A', [[1, 0], [0, 1]], sparse=True, dim=2)
 m.x = Var('x', [1, 2])
 m.b = Param('b', [0, 0])
-m.f = Eqn('f', MatVecMul(m.A, m.x)-m.b)
+m.f = Eqn('f', Mat_Mul(m.A, m.x)-m.b)
 ```
-Using the matrix multiplication operator, we can avoid traversing the rows and columns of parameter `A`, which helps
-streamline the modeling procedure.
+Using `Mat_Mul`, we can write matrix-vector equations naturally. The matrix parameter `A` should be declared with
+`sparse=True` and `dim=2`. Solverz automatically computes symbolic Jacobians for these equations using
+{ref}`matrix calculus <matrix_calculus>`.
 
 ```{note} 
-***This is very experimental. Stay vigilant!***
+Solverz supports general mixed matrix-vector expressions with automatic symbolic differentiation. Operations
+like `exp(A@x)`, `sin(A@x)`, `Diag(x)@A@y`, `transpose(A)@x`, and element-wise combinations are all supported.
+See {ref}`matrix_calculus` for details and examples.
 
-Currently, Solverz supports only `A@x` type expressions. `A@x` type expression can only be `+` or `-` from other expressions. 
-Currently, we cannot perform other operations on this type of expression.
-
-The development of the more complicated mixed-matrix-vector expressions are on the way. 
-It should be noted that the parameter `A` is not mutable after declaration, because it is parsed as a constant Jacbian
-block to ensure efficiency. Considering that `numba` does not support sparse matrix, `A` is converted dense in the parameter
-dictionary `p` for accelerated equation computations.
+The sparse matrix parameter `A` is not mutable after declaration. Its sparsity pattern is used to construct
+efficient Jacobian blocks.
 ```
 
 ### Equations

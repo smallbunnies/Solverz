@@ -145,6 +145,7 @@ expected_F_mat = """def F_(y_, p_):
     A_shape0 = p_["A_shape0"]
     b = p_["b"]
     c = p_["c"]
+    A = p_["A"]
     return inner_F(_F_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c)
 """
 
@@ -174,6 +175,7 @@ expected_J_mat = """def J_(y_, p_):
     A_shape0 = p_["A_shape0"]
     b = p_["b"]
     c = p_["c"]
+    A = p_["A"]
     data = inner_J(_data_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c)
     return sps.coo_array((data, (row, col)), (3, 3)).tocsc()
 """

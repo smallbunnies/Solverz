@@ -81,9 +81,12 @@ def print_var(var_addr: Address, nstep):
 
 
 def print_param(PARAM: Dict[str, ParamBase],
-                output_sparse=False):
+                output_sparse=False,
+                include_sparse_in_list=False):
     """
     output_sparse : whether to print the sparse parameter
+    include_sparse_in_list : if True, also add sparse dim=2 params to param_list
+        (needed when equations use Mat_Mul, so the sparse matrix is passed to inner functions)
     """
     param_declaration = []
     p = SolDict('p_')
@@ -101,6 +104,13 @@ def print_param(PARAM: Dict[str, ParamBase],
                                               p[param_name])
                     param_declaration.append(param_assign)
                     param_list.append(param_assign.lhs)
+                elif param.sparse and param.dim == 2:
+                    # Load sparse matrix param in wrapper for Mat_Mul (A @ x)
+                    param_assign = Assignment(Para(param_name),
+                                              p[param_name])
+                    param_declaration.append(param_assign)
+                    if include_sparse_in_list:
+                        param_list.append(param_assign.lhs)
 
     return param_declaration, param_list
 
