@@ -26,6 +26,8 @@ Additional Solverz paradigms covering multiple areas can be found in
    intro.md
    gettingstart.md
    advanced.md
+   matrix_calculus.md
+   extend_matrix_calculus.md
    reference/index.rst
    gethelp.md
    contributing.md
