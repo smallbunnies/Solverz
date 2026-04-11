@@ -29,7 +29,11 @@ def render_modules(eqs: SymEquations,
     eqs.FormJac(y)
     p = parse_p(eqs.PARAM)
 
-    # Detect if any equation uses Mat_Mul (needs scipy.sparse pass-through)
+    # Detect if any equation uses Mat_Mul (needs scipy.sparse pass-through).
+    # When Mat_Mul is present, the sparse matrix parameter (csc_array) must be
+    # loaded in the F_/J_ wrapper AND passed to inner functions. Since Numba's
+    # @njit cannot handle scipy.sparse objects, we selectively disable @njit
+    # for functions that receive or use sparse matrices.
     has_mat_mul = any(eqn.mixed_matrix_vector for eqn in eqs.EQNs.values())
 
     code_dict = dict()
@@ -235,6 +239,12 @@ def print_module_code(code_dict: Dict[str, str], numba=False):
         code += tfunc
         code += '\n\r\n'
 
+    # --- Selective @njit logic ---
+    # Equations using Mat_Mul receive scipy.sparse matrices that Numba cannot
+    # handle.  We track which sub_inner functions need Mat_Mul (no_njit sets)
+    # and skip @njit for those.  When ANY sub_inner_F uses Mat_Mul, the
+    # dispatcher inner_F also cannot be @njit (it passes the sparse matrix).
+    # Non-Mat_Mul sub_inner functions remain @njit for performance.
     no_njit_F = code_dict.get('no_njit_sub_inner_F', set())
     no_njit_J = code_dict.get('no_njit_sub_inner_J', set())
     has_mat_mul_F = len(no_njit_F) > 0
@@ -242,7 +252,6 @@ def print_module_code(code_dict: Dict[str, str], numba=False):
 
     code += code_dict['F']
     code += '\n\r\n'
-    # inner_F: skip @njit if any sub-function uses Mat_Mul (receives scipy.sparse)
     if numba and not has_mat_mul_F:
         code += '@njit(cache=True)\n'
     code += code_dict['inner_F']
@@ -255,7 +264,6 @@ def print_module_code(code_dict: Dict[str, str], numba=False):
 
     code += code_dict['J']
     code += '\n\r\n'
-    # inner_J: skip @njit if any sub-function uses Mat_Mul
     if numba and not has_mat_mul_J:
         code += '@njit(cache=True)\n'
     code += code_dict['inner_J']

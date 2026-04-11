@@ -206,6 +206,16 @@ def print_inner_F(EQNs: Dict[str, Eqn],
 
 
 def print_sub_inner_F(EQNs: Dict[str, Eqn]):
+    """Generate inner_F0, inner_F1, ... sub-functions, one per equation.
+
+    Returns
+    -------
+    code_blocks : list of str
+        Generated code for each sub-function.
+    no_njit_indices : set of int
+        Indices of sub-functions that use Mat_Mul and therefore must NOT
+        be decorated with @njit (they receive scipy.sparse matrices).
+    """
     code_blocks = []
     no_njit_indices = set()
     count = 0
