@@ -101,6 +101,13 @@ def print_param(PARAM: Dict[str, ParamBase],
                                               p[param_name])
                     param_declaration.append(param_assign)
                     param_list.append(param_assign.lhs)
+                elif param.sparse and param.dim == 2:
+                    # Load sparse matrix param in wrapper for Mat_Mul (A @ x),
+                    # but do NOT add to param_list — scipy.sparse cannot
+                    # enter @njit inner functions.
+                    param_assign = Assignment(Para(param_name),
+                                              p[param_name])
+                    param_declaration.append(param_assign)
 
     return param_declaration, param_list
 
