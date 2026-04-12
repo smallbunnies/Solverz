@@ -89,37 +89,74 @@ class Equations:
         pass
 
     def _check_matmul_triggerable(self):
-        """Reject equations that mix ``Mat_Mul`` with triggerable or
-        time-series parameters.
+        """Reject Mat_Mul equations whose **matrix operand** is triggerable.
 
-        The mutable-matrix Jacobian pipeline bakes sparse matrix values
-        into the generated module at code-gen time. That is safe for
-        immutable parameters but catastrophically wrong if the same
-        parameter is updated at runtime via a trigger function or a
-        time series — the Jacobian would freeze on the initial values
-        while the residuals evolved. Rather than silently corrupting
-        results we reject the combination up front with a clear error.
+        The Layer-2 mutable-matrix Jacobian pipeline freezes a sparse
+        matrix's ``.data`` array into the generated scatter-add kernel
+        (the ``_sz_mb_{N}_rs_dat_*`` / ``_sz_mb_{N}_cs_dat_*`` cache in
+        ``mutable_mat_analyzer.py``). That is safe for immutable
+        matrices but silently wrong if the same matrix is mutated at
+        runtime via a trigger function — the Jacobian would keep using
+        the frozen values while the residual kept evolving with the
+        new ones.
+
+        The restriction is **specific to matrices flowing through
+        ``Mat_Mul``**. A triggerable vector or scalar multiplied into
+        the *result* of a ``Mat_Mul`` (or inside its vector operand)
+        is unaffected: the J_ wrapper reads the current parameter
+        value on every Newton step through ``p_[name]``, so the
+        bake-in logic never touches it. Only 2-D matrix operands of
+        ``Mat_Mul`` are rejected here.
+
+        The walk mirrors :meth:`_warn_dense_matmul_params` — for every
+        ``Mat_Mul`` node in every mixed-matrix-vector equation, inspect
+        ``arg.free_symbols`` for any 2-D triggerable ``Para``. Dense
+        2-D params reach the ``MutableMatJacDataModule`` fallback path
+        which re-evaluates the full sparse expression on every call
+        and is therefore triggerable-safe — the narrow check skips
+        them (they already get a performance warning in
+        :meth:`_warn_dense_matmul_params`).
         """
         for eqn_name, eqn in self.EQNs.items():
             if not eqn.mixed_matrix_vector:
                 continue
-            for sym_name in eqn.SYMBOLS.keys():
-                if sym_name not in self.PARAM:
-                    continue
-                p = self.PARAM[sym_name]
-                is_ts = isinstance(p, TimeSeriesParam)
-                if is_ts or getattr(p, 'triggerable', False):
-                    kind = 'time-series' if is_ts else 'triggerable'
-                    raise NotImplementedError(
-                        f"Equation {eqn_name!r} uses ``Mat_Mul`` together with "
-                        f"{kind} parameter {sym_name!r}. This combination is "
-                        f"not currently supported because the Mat_Mul code "
-                        f"generator assumes matrix parameters are immutable "
-                        f"after ``create_instance()``. Please either (a) make "
-                        f"{sym_name!r} a plain Param without ``triggerable`` / "
-                        f"TimeSeriesParam wrapping, or (b) remove Mat_Mul "
-                        f"from this equation."
-                    )
+            for mm in eqn.RHS.atoms(Mat_Mul):
+                for arg in mm.args:
+                    matrix_paras = {
+                        s for s in arg.free_symbols
+                        if isinstance(s, Para) and s.dim == 2
+                    }
+                    for sym in matrix_paras:
+                        if sym.name not in self.PARAM:
+                            continue
+                        p = self.PARAM[sym.name]
+                        # Dense dim=2 → fallback path, safe (and already
+                        # warned about elsewhere). Only sparse 2-D
+                        # matrices flow through the scatter-add cache.
+                        if not getattr(p, 'sparse', False):
+                            continue
+                        is_ts = isinstance(p, TimeSeriesParam)
+                        is_trig = getattr(p, 'triggerable', False)
+                        if not (is_ts or is_trig):
+                            continue
+                        kind = 'time-series' if is_ts else 'triggerable'
+                        raise NotImplementedError(
+                            f"Equation {eqn_name!r} uses {kind} 2-D sparse "
+                            f"parameter {sym.name!r} as a ``Mat_Mul`` matrix "
+                            f"operand. ``Mat_Mul`` bakes the sparse matrix "
+                            f"``.data`` array into the generated scatter-add "
+                            f"Jacobian kernel at model-build time; a "
+                            f"{kind} update at runtime would silently be "
+                            f"ignored and the Jacobian would freeze on the "
+                            f"initial matrix values while the residual kept "
+                            f"evolving — producing wrong Newton steps. If "
+                            f"{sym.name!r} must change at runtime, split the "
+                            f"residual so that the ``Mat_Mul({sym.name}, ..)``"
+                            f" term lives in its own equation and rewrite "
+                            f"that equation in explicit elementwise form "
+                            f"(one scalar ``Eqn`` per row) instead of using "
+                            f"``Mat_Mul``."
+                        )
 
     def _warn_dense_matmul_params(self):
         """Warn when a dense ``dim=2`` parameter is used inside a
@@ -175,19 +212,37 @@ class Equations:
             args = self.obtain_eqn_args(DiffVarEqn, y, 0)
             DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
 
-            # Mutable matrix Jacobian detection (contains both Mat_Mul and
-            # Diag in a matrix-valued derivative). For such blocks we MUST
-            # use sps.diags (not np.diagflat) so that Value0's sparsity
-            # pattern captures ALL structural non-zeros (union of each
-            # term's pattern), independently of the numerical values at y0.
-            # This guarantees Value0.tocsc().data order == runtime
-            # .tocsc().data order, so the runtime can do O(nnz) direct
-            # data copy without any fancy indexing.
-            is_mutable_matrix_block = (
-                DeriExpr.has(Mat_Mul) and DeriExpr.has(Diag)
-                and not isinstance(DeriExpr, Para)
-                and not isinstance(-DeriExpr, Para)
+            # Mutable-matrix-block detection. This predicate MUST match
+            # ``JacBlock.is_mutable_matrix`` in ``jac.py:167-169`` exactly
+            # — FormJac picks Value0 here and JacBlock picks the
+            # downstream codegen path from the *same* flag, so any
+            # divergence between the two locations would produce blocks
+            # whose Value0 sparsity pattern disagreed with the kernel the
+            # code generator then emitted (e.g. a flat-start ``Diag(x)``
+            # Value0 would collapse to empty while the scatter-add loop
+            # expected a full diagonal).
+            #
+            # Criterion (same as JacBlock): the derivative is
+            # matrix-valued AND its symbolic form is not a plain
+            # ``Para`` / ``-Para``. We probe "matrix-valued" from the
+            # already-evaluated ``fy[3]`` (either a ``csc_array`` from
+            # a sparse expression or an ndarray with ``ndim == 2`` from
+            # a dense one).
+            fy_value = fy[3]
+            fy_is_matrix = (
+                isinstance(fy_value, csc_array)
+                or (isinstance(fy_value, np.ndarray) and fy_value.ndim == 2)
             )
+            deri_is_para = (isinstance(DeriExpr, Para)
+                            or isinstance(-DeriExpr, Para))
+            is_mutable_matrix_block = fy_is_matrix and not deri_is_para
+            # For such blocks we MUST use sps.diags (not np.diagflat) so
+            # that Value0's sparsity pattern captures ALL structural
+            # non-zeros (union of each term's pattern), independently of
+            # the numerical values at y0. This guarantees
+            # Value0.tocsc().data order == runtime .tocsc().data order,
+            # so the runtime can do O(nnz) direct data copy without any
+            # fancy indexing.
             if is_mutable_matrix_block:
                 sparse_expr = DeriExpr.replace(Diag, SpDiag)
                 sparse_eqn = Eqn('_MutMatJb_' + EqnName + '_' + DiffVar.name,
