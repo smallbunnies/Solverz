@@ -5,8 +5,35 @@ from functools import reduce
 import warnings
 import numpy as np
 from numpy import linalg
-from scipy.sparse import diags, csc_array, coo_array, linalg as sla
+from scipy.sparse import diags, csc_array, coo_array, linalg as sla, issparse
 from numba import njit
+
+
+def mutable_mat_fallback_extract(expr_value, rows, cols):
+    """Fallback index extraction for a mutable-matrix Jacobian block.
+
+    ``expr_value`` may be either a scipy.sparse matrix/array (common
+    case: the expression contains ``Mat_Mul`` of sparse params) or a
+    dense ``numpy.ndarray`` (common case: the expression mixes in a
+    ``dim=2 sparse=False`` parameter). We dispatch on type so that the
+    generated J_ wrapper evaluates the expression once and indexes it
+    correctly regardless of which shape came out.
+
+    Parameters
+    ----------
+    expr_value : scipy.sparse matrix/array or numpy.ndarray
+        The evaluated mutable-matrix block expression.
+    rows, cols : sequence of int
+        Row / column indices into ``expr_value``; same length.
+
+    Returns
+    -------
+    numpy.ndarray
+        1-D array of length ``len(rows)`` with ``expr_value[r_i, c_i]``.
+    """
+    if issparse(expr_value):
+        return np.asarray(expr_value.tocsr()[rows, cols]).ravel()
+    return np.asarray(expr_value)[rows, cols]
 
 
 # from cvxopt.umfpack import linsolve

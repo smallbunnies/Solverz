@@ -45,7 +45,15 @@ class Model:
                 self.var_dict[key] = value
             elif isinstance(value, ParamBase):
                 self.param_dict[key] = value
-                if value.dim == 2 or value.sparse:
+                # Only **sparse** dim=2 parameters get decomposed into
+                # their CSC components (``_data``, ``_indices``,
+                # ``_indptr``, ``_shape0``) for legacy backends that
+                # consume these flat arrays. Dense ``dim=2`` parameters
+                # have no ``.indices`` / ``.indptr`` — attempting to
+                # decompose them yields a ``memoryview`` (from
+                # ``ndarray.data``) which then crashes deep in
+                # ``Array``.
+                if value.sparse and value.dim == 2:
                     self.param_dict[key + '_data'] = Param(key + '_data', value.v.data)
                     self.param_dict[key + '_indices'] = Param(key + '_indices', value.v.indices, dtype=int)
                     self.param_dict[key + '_indptr'] = Param(key + '_indptr', value.v.indptr, dtype=int)
