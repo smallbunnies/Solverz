@@ -145,7 +145,6 @@ expected_F_mat = """def F_(y_, p_):
     A_shape0 = p_["A_shape0"]
     b = p_["b"]
     c = p_["c"]
-    A = p_["A"]
     return inner_F(_F_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c)
 """
 

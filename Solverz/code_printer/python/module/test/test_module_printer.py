@@ -340,7 +340,6 @@ expected6 = """def F_(t, y_, p_):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
-    A = p_["A"]
     ax = ax_trigger_func(x)
     return inner_F(_F_, omega, delta, x, y, ax, lam, G6)
 """.strip()
