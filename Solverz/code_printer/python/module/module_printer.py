@@ -7,7 +7,6 @@ from Solverz.code_printer.python.module.mutable_mat_analyzer import (
     analyze_mutable_mat_expr,
     generate_block_function_code,
     MutableMatBlockMapping,
-    _var_base_name as _mut_mat_var_base,
 )
 
 
@@ -140,7 +139,6 @@ def print_J(eqs_type: str,
             PARAM: Dict[str, ParamBase],
             shape: List[int],
             nstep: int = 0,
-            include_sparse_in_list: bool = False,
             mutable_matrix_blocks=None):
     if eqn_size != var_addr.total_size:
         raise ValueError(f"Jac matrix, with size ({eqn_size}*{var_addr.total_size}), not square")
@@ -228,8 +226,7 @@ def print_J(eqs_type: str,
 def print_inner_J(var_addr: Address,
                   PARAM: Dict[str, ParamBase],
                   jac: Jac,
-                  nstep: int = 0,
-                  include_sparse_in_list: bool = False):
+                  nstep: int = 0):
     var_assignments, var_list = print_var(var_addr,
                                           nstep)
     # inner_J must not receive sparse matrices (they're handled in J_ wrapper).
@@ -350,7 +347,6 @@ def print_F(eqs_type: str,
             var_addr: Address,
             PARAM: Dict[str, ParamBase],
             nstep: int = 0,
-            include_sparse_in_list: bool = False,
             precompute_info=None):
     """Print the F_ wrapper.
 
@@ -399,7 +395,6 @@ def print_inner_F(EQNs: Dict[str, Eqn],
                   var_addr: Address,
                   PARAM: Dict[str, ParamBase],
                   nstep: int = 0,
-                  include_sparse_in_list: bool = False,
                   precompute_info=None):
     var_assignments, var_list = print_var(var_addr,
                                           nstep)

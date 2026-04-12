@@ -34,10 +34,10 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from sympy import Add, Mul, S, Symbol, Expr, sympify, pycode
+from sympy import Add, Mul, S, Expr
 
 from Solverz.sym_algebra.functions import Diag, Mat_Mul
-from Solverz.sym_algebra.symbols import Para, iVar, IdxVar
+from Solverz.sym_algebra.symbols import Para
 
 
 class MutableMatBlockMapping:
@@ -399,41 +399,3 @@ def generate_block_function_code(fn_name: str,
     return signature + '\n' + '\n'.join(body_lines) + '\n'
 
 
-def _var_base_name(var_expr: Expr) -> str:
-    """Return the base variable name for use in the function signature.
-
-    For ``iVar('e')`` → ``'e'``; for ``IdxVar('e[5:29]')`` → ``'e'``.
-    The full access expression (including slice) is produced separately
-    by :func:`_var_access_expr`.
-    """
-    if isinstance(var_expr, iVar):
-        return var_expr.name
-    if isinstance(var_expr, IdxVar):
-        return var_expr.name0
-    raise NotImplementedError(
-        f"var_expr inside Diag(...) must be a plain variable or slice, "
-        f"got {type(var_expr).__name__}: {var_expr}")
-
-
-def _var_access_expr(var_expr: Expr, var_arg_names: Dict[str, str]) -> str:
-    """Return the runtime access expression inside the @njit function body.
-
-    For ``iVar('e')`` → ``'e'``; for ``IdxVar('e[5:29]')`` → ``'e[5:29]'``
-    (a numpy slice). The base name is remapped through ``var_arg_names``
-    if the caller renamed arguments in the signature.
-    """
-    if isinstance(var_expr, iVar):
-        return var_arg_names.get(var_expr.name, var_expr.name)
-    if isinstance(var_expr, IdxVar):
-        base = var_arg_names.get(var_expr.name0, var_expr.name0)
-        idx = var_expr.index
-        if isinstance(idx, slice):
-            start = idx.start if idx.start is not None else ''
-            stop = idx.stop if idx.stop is not None else ''
-            step = f':{idx.step}' if idx.step is not None else ''
-            return f'{base}[{start}:{stop}{step}]'
-        if isinstance(idx, (int, np.integer)):
-            return f'{base}[{int(idx)}]'
-    raise NotImplementedError(
-        f"var_expr inside Diag(...) must be a plain variable or slice, "
-        f"got {type(var_expr).__name__}: {var_expr}")

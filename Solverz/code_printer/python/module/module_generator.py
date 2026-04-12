@@ -17,29 +17,31 @@ from Solverz.variable.variables import Vars, combine_Vars
 from Solverz.equation.hvp import Hvp
 
 
-def _has_sparse_in_param_list(PARAM, include_sparse_in_list: bool) -> bool:
+def _has_sparse_in_param_list(PARAM) -> bool:
     """Return True iff ``print_param`` would emit any sparse parameter
     into the ``param_list`` (the list that's forwarded as arguments to
-    ``inner_F`` / ``inner_J``).
+    ``inner_F`` / ``inner_J``) *in this module's code path*.
 
-    This mirrors the branching inside ``print_param`` so the JIT
-    decision stays synchronized with what actually appears in the
-    generated function signature.
+    With the Mat_Mul precompute architecture, ``print_F`` / ``print_J``
+    call ``print_param`` with ``include_sparse_in_list=False``, so
+    plain sparse ``dim=2`` params never enter ``param_list``. They
+    still get loaded inside the ``F_`` / ``J_`` wrappers, where scipy
+    is available, and only the precomputed dense vectors cross the
+    boundary into the inner functions.
 
-    A parameter enters ``param_list`` as a sparse object when:
+    That still leaves two branches in ``print_param`` that unconditionally
+    append to ``param_list`` regardless of the flag — and if any
+    parameter hits either branch the receiving ``inner_F`` / ``inner_J``
+    cannot be decorated with ``@njit`` (Numba rejects scipy.sparse
+    arguments at compile time):
 
-    - it is a ``TimeSeriesParam`` that is also sparse — the time-series
-      branch always appends to ``param_list`` regardless of
-      ``include_sparse_in_list``;
-    - it is ``triggerable=True`` AND sparse — the same
-      ``if not sparse or triggerable`` branch in ``print_param`` adds
-      it unconditionally;
-    - it is a plain sparse ``dim=2`` parameter AND the caller passed
-      ``include_sparse_in_list=True``.
+    - ``TimeSeriesParam`` with ``sparse=True`` — the time-series branch
+      always appends;
+    - ``triggerable=True`` with ``sparse=True`` — the ``if not sparse or
+      triggerable`` branch appends unconditionally.
 
-    If any such parameter exists, the receiving ``inner_F`` / ``inner_J``
-    cannot be decorated with ``@njit`` — Numba rejects scipy.sparse
-    arguments at compile time.
+    Pure element-wise models with no sparse params at all trivially
+    return False and continue to use ``@njit`` on everything.
     """
     for name, param in PARAM.items():
         if getattr(param, 'is_alias', False):
@@ -49,8 +51,6 @@ def _has_sparse_in_param_list(PARAM, include_sparse_in_list: bool) -> bool:
         if isinstance(param, TimeSeriesParam):
             return True
         if getattr(param, 'triggerable', False):
-            return True
-        if param.dim == 2 and include_sparse_in_list:
             return True
     return False
 
@@ -68,12 +68,13 @@ def render_modules(eqs: SymEquations,
     eqs.FormJac(y)
     p = parse_p(eqs.PARAM)
 
-    # Detect if any equation uses Mat_Mul (needs scipy.sparse pass-through).
-    # When Mat_Mul is present, the sparse matrix parameter (csc_array) must be
-    # loaded in the F_/J_ wrapper AND passed to inner functions. Since Numba's
-    # @njit cannot handle scipy.sparse objects, we selectively disable @njit
-    # for functions that receive or use sparse matrices.
-    has_mat_mul = any(eqn.mixed_matrix_vector for eqn in eqs.EQNs.values())
+    # The Mat_Mul precompute architecture unconditionally forces sparse
+    # matrix parameters OUT of the ``inner_F`` / ``inner_J`` argument
+    # lists (they are loaded in the F_ / J_ wrappers and only the
+    # precomputed dense vectors cross the boundary). See the docstring
+    # of ``_has_sparse_in_param_list`` below for the edge cases that
+    # still land sparse params in the inner list via ``TimeSeriesParam``
+    # or ``triggerable=True`` — those are what drive the @njit gating.
 
     code_dict = dict()
     # Extract Mat_Mul precompute info first; used by F, inner_F, and sub_inner_F.
@@ -86,42 +87,38 @@ def render_modules(eqs: SymEquations,
                              eqs.var_address,
                              eqs.PARAM,
                              eqs.nstep,
-                             include_sparse_in_list=has_mat_mul,
                              precompute_info=precompute_info_F)
     code_dict["inner_F"] = print_inner_F(eqs.EQNs,
                                          eqs.a,
                                          eqs.var_address,
                                          eqs.PARAM,
                                          eqs.nstep,
-                                         include_sparse_in_list=has_mat_mul,
                                          precompute_info=precompute_info_F)
 
     J = print_inner_J(eqs.var_address,
                       eqs.PARAM,
                       eqs.jac,
-                      eqs.nstep,
-                      include_sparse_in_list=has_mat_mul)
+                      eqs.nstep)
     code_dict["J"] = print_J(eqs.__class__.__name__,
                              eqs.eqn_size,
                              eqs.var_address,
                              eqs.PARAM,
                              eqs.jac.shape,
                              eqs.nstep,
-                             include_sparse_in_list=has_mat_mul,
                              mutable_matrix_blocks=J.get('mutable_matrix_blocks'))
     code_dict["inner_J"] = J['code_inner_J']
     code_dict["sub_inner_J"] = J['code_sub_inner_J']
     if J.get('no_njit_sub_inner_J'):
         code_dict["no_njit_sub_inner_J"] = J['no_njit_sub_inner_J']
     # @njit decision for inner_F / inner_J is based on what actually
-    # lands in the function's argument list. Even with the Mat_Mul
-    # precompute architecture (``include_sparse_in_list=False``), sparse
-    # matrices can still enter ``param_list`` via the TimeSeriesParam or
-    # ``triggerable=True`` branches of ``print_param``. If any such
-    # sparse parameter exists we must NOT wrap the inner function with
-    # ``@njit`` because Numba cannot digest scipy.sparse arguments.
-    sparse_in_inner_list = _has_sparse_in_param_list(
-        eqs.PARAM, include_sparse_in_list=False)
+    # lands in the function's argument list. Even though the Mat_Mul
+    # precompute architecture forces plain sparse ``dim=2`` matrices
+    # OUT of ``param_list``, sparse matrices can still enter via the
+    # ``TimeSeriesParam`` or ``triggerable=True`` branches of
+    # ``print_param``. If any such sparse parameter exists we must NOT
+    # wrap the inner function with ``@njit`` because Numba cannot
+    # digest scipy.sparse arguments.
+    sparse_in_inner_list = _has_sparse_in_param_list(eqs.PARAM)
     code_dict["no_njit_inner_F"] = sparse_in_inner_list
     code_dict["no_njit_inner_J"] = sparse_in_inner_list
     if sparse_in_inner_list:
