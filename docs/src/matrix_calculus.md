@@ -775,35 +775,96 @@ both $P$ and $Q$ balances) the advantage compounds.
 build time. Each one prevents a class of silent-wrong-answer bugs that
 would otherwise slip past the generated Jacobian.
 
-### Triggerable / time-series parameters cannot appear in a Mat_Mul equation
+### Time-varying sparse `dim=2` parameters are rejected at construction
 
-A parameter declared with `triggerable=True` or as a `TimeSeriesParam`
-is **rejected at `FormJac` time** if it appears in the same equation
-as any `Mat_Mul`:
+Solverz does not support sparse `dim=2` `Param`s whose values change
+at runtime. A declaration like:
 
 ```python
-m.K = Param('K', [...], triggerable=True, trigger_var=['x'], trigger_fun=...)
-m.A = Param('A', [[...]], dim=2, sparse=True)
-m.eqn = Eqn('f', m.K * m.x + Mat_Mul(m.A, m.x) - m.b)
-smdl, y0 = m.create_instance()
-smdl.FormJac(y0)
-# ⇒ NotImplementedError: Equation 'f' uses ``Mat_Mul`` together with
-#   triggerable parameter 'K'. This combination is not currently
-#   supported because the Mat_Mul code generator assumes matrix
-#   parameters are immutable after ``create_instance()``.
+from scipy.sparse import csc_array
+m.K = Param('K',
+            csc_array([[1, 0], [0, 1]]),
+            dim=2, sparse=True,
+            triggerable=True,
+            trigger_var=['x'],
+            trigger_fun=lambda x: csc_array([[2*x[0], 0], [0, 2*x[1]]]))
+# ⇒ NotImplementedError: Parameter 'K': a sparse 2-D ``Param`` cannot
+#   be declared ``triggerable=True``. Time-varying sparse matrices are
+#   unsupported because Solverz's code generation caches the matrix's
+#   CSC fields at model-build time; a runtime trigger update would
+#   silently be ignored.
 ```
 
-**Why:** the mutable-matrix analyser freezes every non-variable scaling
-vector into a Numba kernel closure at code-gen time. If `K` were
-triggerable, its `trigger_fun` would fire at runtime and *change* the
-value, but the scatter-add loops would keep using the frozen numbers —
-producing wrong Newton steps without raising any error. Rejecting the
-combination at build time is the only safe choice.
+and the equivalent `TimeSeriesParam`:
 
-**Workaround:** split the matrix assembly into an explicit elementwise
-form. If you need per-row scaling that depends on `x`, write the
-per-row equation directly (one scalar `Eqn` per row) instead of using
-`Mat_Mul` on a triggerable parameter.
+```python
+m.G = TimeSeriesParam('G',
+                      v_series=[...],
+                      time_series=[...],
+                      value=np.eye(3),
+                      dim=2, sparse=True)
+# ⇒ NotImplementedError: Parameter 'G': a sparse 2-D
+#   ``TimeSeriesParam`` is not supported.
+```
+
+both raise **at the point of construction**, not deep inside
+`FormJac`, so the error points at the exact line where the user
+wrote the offending declaration.
+
+**Why:** every Solverz code path that consumes a sparse `dim=2`
+`Param` caches its CSC decomposition at model-build time:
+
+- The legacy `MatVecMul` code path decomposes every sparse `dim=2`
+  `Param` into flat arrays (`<name>_data`, `<name>_indices`,
+  `<name>_indptr`, `<name>_shape0`) in `Solverz/model/basic.py:56`,
+  which are stored in `p_` and passed to `inner_F` as read-only
+  numpy arrays.
+- The 0.8.1 `Mat_Mul` `SolCF.csc_matvec` fast path reuses those
+  same CSC flats inside `inner_F` to do the matvec in `@njit` land.
+- The mutable-matrix Jacobian scatter-add kernel caches the
+  matrix's `.data` array directly as a `_sz_mb_{N}_rs_dat_{k}`
+  setting entry loaded at module import time.
+
+None of these caches are invalidated when `p_["K"].trigger_fun`
+fires or `p_["G"].get_v_t(t)` returns a fresh matrix. The runtime
+update simply gets lost, the Jacobian keeps using the initial
+values, and the Newton iteration either diverges or converges to
+the wrong solution — silently.
+
+Historically the check was narrow (only equations containing
+`Mat_Mul` were rejected, and the check ran at `FormJac` time). In
+the 0.8.1 hotfix the policy broadened to cover every sparse
+`dim=2` time-varying `Param`, regardless of where or whether it is
+used. The check now lives in `ParamBase.__init__` and
+`TimeSeriesParam.__init__`, with an unconditional backstop in
+`Equations._check_no_timevar_sparse_matrices` that runs on every
+`FormJac` call in case a tainted `Param` was constructed via
+`__new__` + attribute assignment (which bypasses the `__init__`
+check).
+
+**Workarounds** — all of these are supported:
+
+- **Triggerable / time-series *vectors* next to a `Mat_Mul`.**
+  Scalar or 1-D time-varying parameters are fine; only the `dim=2`
+  + `sparse=True` combination is rejected. Write
+  `m.K * m.x + Mat_Mul(m.A, m.x) - m.b` with `K` a triggerable 1-D
+  vector and `A` a plain sparse 2-D matrix — the wrapper rebuilds
+  `K` on every Newton step via the `trigger_var` mechanism and the
+  `Mat_Mul(A, x)` fast path uses the unchanged `A`.
+- **Element-wise rewrite.** If you genuinely need the matrix
+  itself to evolve, write the residual out one scalar `Eqn` per
+  row, with the per-row coefficients as 1-D `Param`s or
+  `TimeSeriesParam`s. The element-wise form has no CSC caching —
+  every call re-evaluates the full trigonometric / algebraic
+  expression via pure numpy / numba.
+- **Dense `dim=2` parameters (`sparse=False`).** The
+  `MutableMatJacDataModule` fallback path used for dense matrices
+  re-evaluates the entire block expression via scipy/numpy on
+  every `J_()` call, so `get_v_t(t)` updates DO propagate. Dense
+  parameters do not get the `csc_matvec` fast path, but they're a
+  correct (if slower) way to carry a time-varying matrix through
+  the solver. A `UserWarning` still fires once per such parameter
+  to flag the performance cost.
 
 ### Reserved symbol prefixes
 

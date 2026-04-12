@@ -104,23 +104,48 @@ the `Mat_Mul` hot-F path (see Performance below).
 
 ### API Changes
 
-- **`Mat_Mul` + triggerable 2-D sparse matrix now errors out.** Using
-  a `triggerable=True` (or `TimeSeriesParam`) 2-D sparse parameter as
-  the **matrix operand** of a `Mat_Mul` raises `NotImplementedError`
-  at `FormJac` / `create_instance` time. The Layer-2 scatter-add
-  Jacobian kernel bakes the matrix's `.data` array into its compiled
-  code at model-build time; a trigger firing at runtime would
-  silently be ignored and the Jacobian would freeze on the initial
-  values while the residual kept evolving. Users who need a
-  triggerable matrix must split the residual and write the affected
-  equation in explicit elementwise form (one scalar `Eqn` per row).
+- **Time-varying sparse `dim=2` `Param`s are now rejected at
+  construction.** Declaring a `Param(..., dim=2, sparse=True,
+  triggerable=True, ...)` or a `TimeSeriesParam(..., dim=2,
+  sparse=True)` raises `NotImplementedError` at the point of
+  construction, regardless of whether the parameter is ever
+  referenced in an equation.
 
-  The check is deliberately narrow: a triggerable *vector* or
-  *scalar* sitting next to a `Mat_Mul`, or used *inside* the vector
-  operand of a `Mat_Mul`, is unaffected and allowed — the `F_` / `J_`
-  wrappers read the current parameter value from `p_` on every
-  Newton step, so no bake-in can happen. `TimeSeriesParam` is always
-  1-D and is therefore always allowed to coexist with `Mat_Mul`.
+  Every Solverz code path that consumes a sparse `dim=2` `Param`
+  caches its CSC decomposition (`<name>_data`, `<name>_indices`,
+  `<name>_indptr`, `<name>_shape0`) at model-build time: the
+  legacy `MatVecMul` pipeline, the new 0.8.1 `Mat_Mul`
+  `SolCF.csc_matvec` fast path, and the mutable-matrix Jacobian
+  scatter-add kernel all read the frozen flats. A runtime
+  `trigger_fun` firing or a `get_v_t(t)` update simply gets lost,
+  and the Newton iteration either diverges or silently converges
+  to the wrong solution.
+
+  Earlier 0.8.1 drafts narrowed this check to "sparse dim=2
+  time-varying Para used as the matrix operand of a `Mat_Mul`",
+  catching the combination only at `FormJac` time. That was a
+  loophole: legacy `MatVecMul` usage, or any other code path that
+  consumes the CSC flats, slipped through. The 0.8.1 policy
+  closes the loophole by rejecting the shape at the exact line
+  where it is declared — the error message now points at the
+  user's source, not a deep internal.
+
+  The check lives in `ParamBase.__init__` and
+  `TimeSeriesParam.__init__`, with a backstop in
+  `Equations._check_no_timevar_sparse_matrices` (runs on every
+  `FormJac` call) for the edge case where a tainted `Param` was
+  built via `__new__` + attribute assignment, bypassing the
+  `__init__` guard.
+
+  **Allowed alternatives**: triggerable / time-series *vectors*
+  or *scalars* sitting next to a `Mat_Mul`, element-wise
+  formulations where per-row coefficients are 1-D time-varying
+  parameters, and dense `dim=2` parameters (`sparse=False`, which
+  takes the `MutableMatJacDataModule` fallback path that
+  re-evaluates the full block expression on every `J_()` call and
+  tolerates runtime updates). See the
+  {ref}`Restrictions section <restrictions>` of the Matrix
+  Calculus guide for full workarounds.
 
 - **Reserved symbol prefixes `_sz_mm_` and `_sz_mb_`.** Any user
   symbol (`Var`, `Param`, `iVar`, `Para`, ...) whose name starts with
