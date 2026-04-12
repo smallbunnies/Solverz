@@ -4,6 +4,13 @@
 
 Solverz is a Python-based simulation modelling language that provides symbolic modelling interfaces and numerical solvers for algebraic equations (AE), ordinary differential equations (ODE), and differential-algebraic equations (DAE).
 
+## Canonical documentation URLs
+
+Use these URLs whenever linking to Solverz docs from code, tests, comments, commit messages, PR descriptions, or release notes. Do **not** link to the underlying ReadTheDocs hostnames.
+
+- **Solverz reference docs**: <https://doc.solverz.org/>
+- **Solverz Cookbook (worked examples)**: <https://cookbook.solverz.org/latest/>
+
 ## Development Conventions
 
 - Run tests with: `pytest tests/ Solverz/`

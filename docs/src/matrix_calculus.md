@@ -489,7 +489,7 @@ changes.
 API-level rules of thumb. The detailed case study with full
 benchmark numbers, decision matrix, and the case30-scale hot-F
 regression analysis lives in the
-[power-flow chapter of the Solverz Cookbook](https://solverz-cookbook.readthedocs.io/en/latest/ae/pf/pf.html#performance-comparison-mat_mul-vs-for-loop)
+[power-flow chapter of the Solverz Cookbook](https://cookbook.solverz.org/latest/ae/pf/pf.html#performance-comparison-mat_mul-vs-for-loop)
 — this section just states the API guidance.
 
 **Use `Mat_Mul`** when any of the following hold:
@@ -773,7 +773,7 @@ block based on what the classifier recognised at code-gen time.
 The full case30 power-flow benchmark — every phase from `Model`
 construction through cold compile to {term}`hot F` / hot J — lives
 in the
-[Solverz Cookbook power-flow chapter](https://solverz-cookbook.readthedocs.io/en/latest/ae/pf/pf.html#performance-comparison-mat_mul-vs-for-loop).
+[Solverz Cookbook power-flow chapter](https://cookbook.solverz.org/latest/ae/pf/pf.html#performance-comparison-mat_mul-vs-for-loop).
 This subsection only carries one extra micro-benchmark (DHS
 hydraulic on Barry Island) that exercises a Jacobian shape the
 power-flow case does not.

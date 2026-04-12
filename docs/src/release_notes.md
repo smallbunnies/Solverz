@@ -12,7 +12,7 @@ The release rewrites the {ref}`Matrix-Vector Calculus
 <matrix_calculus>` chapter to address eight reviewer comments about
 misleading language, stale code references, missing terminology, and
 content duplication with the
-[Solverz Cookbook power-flow chapter](https://solverz-cookbook.readthedocs.io/en/latest/ae/pf/pf.html).
+[Solverz Cookbook power-flow chapter](https://cookbook.solverz.org/latest/ae/pf/pf.html).
 
 ### Documentation
 
@@ -82,7 +82,7 @@ content duplication with the
 
 - **"When to use Mat_Mul" section slimmed down**, deferring the
   full case30 decision matrix and the known hot-F regression case
-  to the [Solverz Cookbook power-flow chapter](https://solverz-cookbook.readthedocs.io/en/latest/ae/pf/pf.html#performance-comparison-mat_mul-vs-for-loop).
+  to the [Solverz Cookbook power-flow chapter](https://cookbook.solverz.org/latest/ae/pf/pf.html#performance-comparison-mat_mul-vs-for-loop).
   The Solverz-dev doc is the API reference and now keeps just the
   3-bullet API guidance plus the "matrix shapes that fall out of
   the fast path" reference list. The Cookbook is the right place
