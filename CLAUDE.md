@@ -8,7 +8,7 @@ Solverz is a Python-based simulation modelling language that provides symbolic m
 
 Use these URLs whenever linking to Solverz docs from code, tests, comments, commit messages, PR descriptions, or release notes. Do **not** link to the underlying ReadTheDocs hostnames.
 
-- **Solverz reference docs**: <https://doc.solverz.org/>
+- **Solverz reference docs**: <https://docs.solverz.org/>
 - **Solverz Cookbook (worked examples)**: <https://cookbook.solverz.org/latest/>
 
 ## Development Conventions
