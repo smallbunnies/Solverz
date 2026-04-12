@@ -6,6 +6,7 @@ import re
 from typing import Dict
 
 from Solverz.equation.equations import AE as SymAE, FDAE as SymFDAE, DAE as SymDAE
+from Solverz.equation.param import TimeSeriesParam
 from Solverz.utilities.io import save
 from Solverz.code_printer.python.utilities import parse_p, parse_trigger_func
 from Solverz.code_printer.python.module.module_printer import print_F, print_inner_F, print_sub_inner_F, \
@@ -14,6 +15,44 @@ from Solverz.equation.equations import Equations as SymEquations
 from Solverz.num_api.module_parser import modules
 from Solverz.variable.variables import Vars, combine_Vars
 from Solverz.equation.hvp import Hvp
+
+
+def _has_sparse_in_param_list(PARAM, include_sparse_in_list: bool) -> bool:
+    """Return True iff ``print_param`` would emit any sparse parameter
+    into the ``param_list`` (the list that's forwarded as arguments to
+    ``inner_F`` / ``inner_J``).
+
+    This mirrors the branching inside ``print_param`` so the JIT
+    decision stays synchronized with what actually appears in the
+    generated function signature.
+
+    A parameter enters ``param_list`` as a sparse object when:
+
+    - it is a ``TimeSeriesParam`` that is also sparse — the time-series
+      branch always appends to ``param_list`` regardless of
+      ``include_sparse_in_list``;
+    - it is ``triggerable=True`` AND sparse — the same
+      ``if not sparse or triggerable`` branch in ``print_param`` adds
+      it unconditionally;
+    - it is a plain sparse ``dim=2`` parameter AND the caller passed
+      ``include_sparse_in_list=True``.
+
+    If any such parameter exists, the receiving ``inner_F`` / ``inner_J``
+    cannot be decorated with ``@njit`` — Numba rejects scipy.sparse
+    arguments at compile time.
+    """
+    for name, param in PARAM.items():
+        if getattr(param, 'is_alias', False):
+            continue
+        if not getattr(param, 'sparse', False):
+            continue
+        if isinstance(param, TimeSeriesParam):
+            return True
+        if getattr(param, 'triggerable', False):
+            return True
+        if param.dim == 2 and include_sparse_in_list:
+            return True
+    return False
 
 
 def render_modules(eqs: SymEquations,
@@ -37,35 +76,64 @@ def render_modules(eqs: SymEquations,
     has_mat_mul = any(eqn.mixed_matrix_vector for eqn in eqs.EQNs.values())
 
     code_dict = dict()
+    # Extract Mat_Mul precompute info first; used by F, inner_F, and sub_inner_F.
+    sub_inner_F_codes, precompute_info_F = print_sub_inner_F(eqs.EQNs)
+    code_dict["sub_inner_F"] = sub_inner_F_codes
+    # Precompute architecture: sub_inner_F no longer receives sparse matrices,
+    # so all sub-functions can now be @njit (empty no_njit set).
+    code_dict["no_njit_sub_inner_F"] = set()
     code_dict['F'] = print_F(eqs.__class__.__name__,
                              eqs.var_address,
                              eqs.PARAM,
                              eqs.nstep,
-                             include_sparse_in_list=has_mat_mul)
+                             include_sparse_in_list=has_mat_mul,
+                             precompute_info=precompute_info_F)
     code_dict["inner_F"] = print_inner_F(eqs.EQNs,
                                          eqs.a,
                                          eqs.var_address,
                                          eqs.PARAM,
                                          eqs.nstep,
-                                         include_sparse_in_list=has_mat_mul)
-    sub_inner_F_codes, no_njit_F = print_sub_inner_F(eqs.EQNs)
-    code_dict["sub_inner_F"] = sub_inner_F_codes
-    code_dict["no_njit_sub_inner_F"] = no_njit_F
+                                         include_sparse_in_list=has_mat_mul,
+                                         precompute_info=precompute_info_F)
 
+    J = print_inner_J(eqs.var_address,
+                      eqs.PARAM,
+                      eqs.jac,
+                      eqs.nstep,
+                      include_sparse_in_list=has_mat_mul)
     code_dict["J"] = print_J(eqs.__class__.__name__,
                              eqs.eqn_size,
                              eqs.var_address,
                              eqs.PARAM,
                              eqs.jac.shape,
                              eqs.nstep,
-                             include_sparse_in_list=has_mat_mul)
-    J = print_inner_J(eqs.var_address,
-                      eqs.PARAM,
-                      eqs.jac,
-                      eqs.nstep,
-                      include_sparse_in_list=has_mat_mul)
+                             include_sparse_in_list=has_mat_mul,
+                             mutable_matrix_blocks=J.get('mutable_matrix_blocks'))
     code_dict["inner_J"] = J['code_inner_J']
     code_dict["sub_inner_J"] = J['code_sub_inner_J']
+    if J.get('no_njit_sub_inner_J'):
+        code_dict["no_njit_sub_inner_J"] = J['no_njit_sub_inner_J']
+    # @njit decision for inner_F / inner_J is based on what actually
+    # lands in the function's argument list. Even with the Mat_Mul
+    # precompute architecture (``include_sparse_in_list=False``), sparse
+    # matrices can still enter ``param_list`` via the TimeSeriesParam or
+    # ``triggerable=True`` branches of ``print_param``. If any such
+    # sparse parameter exists we must NOT wrap the inner function with
+    # ``@njit`` because Numba cannot digest scipy.sparse arguments.
+    sparse_in_inner_list = _has_sparse_in_param_list(
+        eqs.PARAM, include_sparse_in_list=False)
+    code_dict["no_njit_inner_F"] = sparse_in_inner_list
+    code_dict["no_njit_inner_J"] = sparse_in_inner_list
+    if sparse_in_inner_list:
+        # Sub-functions inherit whatever inner_F / inner_J forward to
+        # them, so they are also unsafe to @njit in this case.
+        no_njit_F_set = code_dict.get("no_njit_sub_inner_F") or set()
+        code_dict["no_njit_sub_inner_F"] = no_njit_F_set | {
+            i for i in range(len(code_dict["sub_inner_F"]))}
+    # Mutable matrix block functions — dedicated @njit scatter-add loops.
+    code_dict["mut_mat_block_funcs"] = J.get('mut_mat_block_funcs', [])
+    mut_mat_mappings = J.get('mut_mat_mappings', {})
+    code_dict["mut_mat_mapping_keys"] = sorted(mut_mat_mappings.keys())
 
     if make_hvp:
         eqs.hvp = Hvp(eqs.jac)
@@ -111,6 +179,10 @@ def render_modules(eqs: SymEquations,
 
     row, col, data = eqs.jac.parse_row_col_data()
     eqn_parameter.update({'row': row, 'col': col, 'data': data})
+    # Store mutable matrix block mapping arrays (loaded from setting at
+    # runtime, passed to the block @njit functions).
+    if mut_mat_mappings:
+        eqn_parameter.update(mut_mat_mappings)
     if make_hvp:
         row_hvp, col_hvp, data_hvp = eqs.hvp.jac1.parse_row_col_data()
     else:
@@ -231,8 +303,13 @@ def print_module_code(code_dict: Dict[str, str], numba=False):
     code = 'from .dependency import *\n'
     code += """_data_ = setting["data"]\n"""
     code += """_data_hvp = setting["data_hvp"]\n"""
-    code += """_F_ = zeros_like(y__, dtype=float64)"""
-    code += '\n\r\n'
+    code += """_F_ = zeros_like(y__, dtype=float64)\n"""
+    # Load mutable matrix block mapping arrays from setting at module-level
+    # so the J_ wrapper can reference them directly (and numba sees typed
+    # numpy arrays).
+    for mapping_key in code_dict.get('mut_mat_mapping_keys', []):
+        code += f'{mapping_key} = setting["{mapping_key}"]\n'
+    code += '\r\n'
     for tfunc in code_dict['tfunc_dict'].values():
         if numba:
             code += '@njit(cache=True)\n'
@@ -249,10 +326,12 @@ def print_module_code(code_dict: Dict[str, str], numba=False):
     no_njit_J = code_dict.get('no_njit_sub_inner_J', set())
     has_mat_mul_F = len(no_njit_F) > 0
     has_mat_mul_J = len(no_njit_J) > 0
+    no_njit_inner_F = code_dict.get('no_njit_inner_F', False)
+    no_njit_inner_J = code_dict.get('no_njit_inner_J', False)
 
     code += code_dict['F']
     code += '\n\r\n'
-    if numba and not has_mat_mul_F:
+    if numba and not has_mat_mul_F and not no_njit_inner_F:
         code += '@njit(cache=True)\n'
     code += code_dict['inner_F']
     code += '\n\r\n'
@@ -262,9 +341,17 @@ def print_module_code(code_dict: Dict[str, str], numba=False):
         code += sub_func
         code += '\n\r\n'
 
+    # Mutable matrix block @njit functions must be defined BEFORE J_ wrapper
+    # (which calls them). They're pure scatter-add loops, always @njit-able.
+    for block_func in code_dict.get('mut_mat_block_funcs', []):
+        if numba:
+            code += '@njit(cache=True)\n'
+        code += block_func
+        code += '\n\r\n'
+
     code += code_dict['J']
     code += '\n\r\n'
-    if numba and not has_mat_mul_J:
+    if numba and not has_mat_mul_J and not no_njit_inner_J:
         code += '@njit(cache=True)\n'
     code += code_dict['inner_J']
     code += '\n\r\n'

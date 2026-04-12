@@ -12,9 +12,9 @@ from scipy.sparse import csc_array, coo_array
 # from cvxopt import spmatrix, matrix
 
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
-from Solverz.equation.param import ParamBase, Param, IdxParam
+from Solverz.equation.param import ParamBase, Param, IdxParam, TimeSeriesParam
 from Solverz.sym_algebra.symbols import iVar, idx, IdxVar, Para, iAliasVar
-from Solverz.sym_algebra.functions import Slice
+from Solverz.sym_algebra.functions import Slice, Mat_Mul, Diag, SpDiag
 from Solverz.variable.variables import Vars
 from Solverz.utilities.address import Address, combine_Address
 from Solverz.utilities.type_checker import is_integer
@@ -88,10 +88,78 @@ class Equations:
            var_list: List[str] = None) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         pass
 
+    def _check_matmul_triggerable(self):
+        """Reject equations that mix ``Mat_Mul`` with triggerable or
+        time-series parameters.
+
+        The mutable-matrix Jacobian pipeline bakes sparse matrix values
+        into the generated module at code-gen time. That is safe for
+        immutable parameters but catastrophically wrong if the same
+        parameter is updated at runtime via a trigger function or a
+        time series — the Jacobian would freeze on the initial values
+        while the residuals evolved. Rather than silently corrupting
+        results we reject the combination up front with a clear error.
+        """
+        for eqn_name, eqn in self.EQNs.items():
+            if not eqn.mixed_matrix_vector:
+                continue
+            for sym_name in eqn.SYMBOLS.keys():
+                if sym_name not in self.PARAM:
+                    continue
+                p = self.PARAM[sym_name]
+                is_ts = isinstance(p, TimeSeriesParam)
+                if is_ts or getattr(p, 'triggerable', False):
+                    kind = 'time-series' if is_ts else 'triggerable'
+                    raise NotImplementedError(
+                        f"Equation {eqn_name!r} uses ``Mat_Mul`` together with "
+                        f"{kind} parameter {sym_name!r}. This combination is "
+                        f"not currently supported because the Mat_Mul code "
+                        f"generator assumes matrix parameters are immutable "
+                        f"after ``create_instance()``. Please either (a) make "
+                        f"{sym_name!r} a plain Param without ``triggerable`` / "
+                        f"TimeSeriesParam wrapping, or (b) remove Mat_Mul "
+                        f"from this equation."
+                    )
+
+    def _warn_dense_matmul_params(self):
+        """Warn when a dense ``dim=2`` parameter is used inside a
+        ``Mat_Mul``. Such parameters fall back to the slower
+        scipy/ndarray fancy-indexing path and do not benefit from the
+        vectorised mutable-matrix Jacobian code. Each offending param is
+        warned about exactly once per system.
+        """
+        warned = set()
+        for eqn_name, eqn in self.EQNs.items():
+            if not eqn.mixed_matrix_vector:
+                continue
+            for mm in eqn.RHS.atoms(Mat_Mul):
+                for arg in mm.args:
+                    free_paras = {s for s in arg.free_symbols if isinstance(s, Para)}
+                    for sym in free_paras:
+                        if sym.name not in self.PARAM:
+                            continue
+                        p = self.PARAM[sym.name]
+                        if p.dim == 2 and not p.sparse and sym.name not in warned:
+                            warnings.warn(
+                                f"Parameter {sym.name!r} is a dense 2-D "
+                                f"``Param(..., dim=2, sparse=False)`` used "
+                                f"inside ``Mat_Mul``. Dense matrices bypass "
+                                f"the vectorised mutable-matrix Jacobian "
+                                f"fast path and fall back to a slower "
+                                f"scipy/ndarray indexing path. Declare "
+                                f"{sym.name!r} with ``sparse=True`` for "
+                                f"substantially better performance.",
+                                UserWarning, stacklevel=3
+                            )
+                            warned.add(sym.name)
+
     def FormJac(self,
                 y
                 ):
         self.assign_eqn_var_address(y)
+
+        self._check_matmul_triggerable()
+        self._warn_dense_matmul_params()
 
         Fy_list = self.Fy(y, self.a.object_list, self.var_address.object_list)
 
@@ -107,11 +175,46 @@ class Equations:
             args = self.obtain_eqn_args(DiffVarEqn, y, 0)
             DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
 
-            # The value of deri can be either matrix, vector, or scalar(number). We cannot reshape it.
-            if isinstance(fy[3], csc_array):
-                Value0 = fy[3]
+            # Mutable matrix Jacobian detection (contains both Mat_Mul and
+            # Diag in a matrix-valued derivative). For such blocks we MUST
+            # use sps.diags (not np.diagflat) so that Value0's sparsity
+            # pattern captures ALL structural non-zeros (union of each
+            # term's pattern), independently of the numerical values at y0.
+            # This guarantees Value0.tocsc().data order == runtime
+            # .tocsc().data order, so the runtime can do O(nnz) direct
+            # data copy without any fancy indexing.
+            is_mutable_matrix_block = (
+                DeriExpr.has(Mat_Mul) and DeriExpr.has(Diag)
+                and not isinstance(DeriExpr, Para)
+                and not isinstance(-DeriExpr, Para)
+            )
+            if is_mutable_matrix_block:
+                sparse_expr = DeriExpr.replace(Diag, SpDiag)
+                sparse_eqn = Eqn('_MutMatJb_' + EqnName + '_' + DiffVar.name,
+                                 sparse_expr)
+                sparse_args = self.obtain_eqn_args(sparse_eqn, y, 0)
+                # Perturb variable values with distinct non-zero samples so
+                # that ``sps.diags(v) @ M`` doesn't collapse to the empty
+                # matrix when v happens to be zero at y0 (as in flat start).
+                # Value0 is only used for sparsity-pattern tracking — the
+                # data is overwritten at the first J_() call — so the
+                # perturbation is harmless.
+                rng = np.random.default_rng(seed=20260412)
+                perturbed_args = []
+                for symbol, arg in zip(sparse_eqn.SYMBOLS.values(), sparse_args):
+                    if symbol.name in y.var_list:
+                        perturbed_args.append(rng.random(arg.shape) + 1.0)
+                    else:
+                        perturbed_args.append(arg)
+                Value0 = sparse_eqn.NUM_EQN(*perturbed_args)
+                if not isinstance(Value0, csc_array):
+                    Value0 = csc_array(Value0)
             else:
-                Value0 = np.array(fy[3])
+                # The value of deri can be either matrix, vector, or scalar.
+                if isinstance(fy[3], csc_array):
+                    Value0 = fy[3]
+                else:
+                    Value0 = np.array(fy[3])
 
             jb = JacBlock(EqnName,
                           EqnAddr,
