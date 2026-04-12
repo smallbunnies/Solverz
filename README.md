@@ -112,7 +112,7 @@ pip install Solverz
 
 # Useful Resources
 
-- [Solverz Documentation](https://doc.solverz.org)
+- [Solverz Documentation](https://docs.solverz.org)
 - [Solverz Cookbook](https://cook.solverz.org)
 - [Solverz Museum](https://solmuseum.solverz.org)
 
