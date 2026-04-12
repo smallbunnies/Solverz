@@ -2,6 +2,78 @@
 
 # Release Notes
 
+## 0.8.1
+
+Hotfix release addressing correctness findings in the 0.8.0 `Mat_Mul`
+mutable-matrix Jacobian code generation. Users of `Mat_Mul` should
+upgrade — 0.8.0 has a latent miscompilation when two independent
+`Diag(...)` terms land on the same `(i,i)` positions (see Bug Fixes).
+
+### Bug Fixes
+
+- **Multiple `Diag` terms now accumulate correctly.** Equations whose
+  Jacobians contain two or more independent `Diag` terms sharing
+  output positions — e.g. `x*(A@x) + x*(B@x)` producing
+  `diag(A@x) + diag(B@x) + diag(x)@A + diag(x)@B` — previously had
+  one of the two diagonal contributions silently overwritten in the
+  module-printer path. The scatter-add kernel now uses `+=` for every
+  term, including diag. Inline mode was already correct. Regression
+  test: `test_multi_diag_accumulation`.
+
+- **`Model` no longer crashes on dense `dim=2` parameters.**
+  `model.create_instance()` unconditionally tried to decompose every
+  `dim=2` parameter into sparse CSC flat arrays (`.data`, `.indices`,
+  `.indptr`), which for a dense `ndarray` fed a `memoryview` into
+  `Array` and raised `TypeError: Unsupported array type <class
+  'memoryview'>`. Decomposition is now restricted to
+  `sparse and dim == 2`; dense matrices pass through untouched.
+
+- **Selective `@njit` gating respects sparse parameter content.** The
+  `inner_F` / `inner_J` helpers are now generated without `@njit` when
+  the generated parameter list contains a sparse `dim=2` param, a
+  triggerable param, or a `TimeSeriesParam` — objects Numba cannot
+  lower. Pure element-wise models are unaffected.
+
+### API Changes
+
+- **`Mat_Mul` + triggerable / time-series params now errors out.**
+  Using a `triggerable=True` parameter or a `TimeSeriesParam` in the
+  same equation as `Mat_Mul` raises `NotImplementedError` at
+  `FormJac` / `create_instance` time. Previously the combination
+  silently froze the triggered values inside the generated Jacobian
+  kernel and produced wrong Newton steps once the trigger fired.
+  Users who hit this restriction should rewrite the matrix assembly
+  elementwise.
+
+- **Reserved symbol prefixes `_sz_mm_` and `_sz_mb_`.** Any user
+  symbol (`Var`, `Param`, `iVar`, `Para`, ...) whose name starts with
+  either prefix is rejected at construction time with a `ValueError`.
+  These prefixes are used by the code generator for Mat_Mul precompute
+  helpers and mutable-matrix Jacobian block helpers. The check is
+  bypassed internally via `internal_use=True`.
+
+- **Dense `dim=2` params in `Mat_Mul` emit a one-shot `UserWarning`.**
+  A parameter declared with `dim=2, sparse=False` and used inside a
+  `Mat_Mul` works correctly via the fallback path but forfeits the
+  scatter-add fast path. `FormJac` now warns once per offending
+  parameter to flag the performance cost. See the new
+  {ref}`Restrictions and reserved names <restrictions>` section of
+  the matrix calculus guide for migration guidance.
+
+### Documentation
+
+- Extended {ref}`Matrix-Vector Calculus <matrix_calculus>`:
+  - New {ref}`Restrictions and reserved names <restrictions>` section
+    documenting the three API boundaries introduced in 0.8.1.
+  - Code examples updated to show the `_sz_mm_` / `_sz_mb_` helper
+    names actually emitted by the code printer.
+  - Explicit note about the `+=` accumulation rule for diagonal
+    scatter-add terms.
+
+### Full Changelog
+
+[0.8.0...0.8.1](https://github.com/smallbunnies/Solverz/compare/0.8.0...0.8.1)
+
 ## 0.8.0
 
 ### Highlights

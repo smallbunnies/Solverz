@@ -312,44 +312,49 @@ expression (a variable, a slice, or a larger expression). It performs
 **three transformations at code gen time**:
 
 1. **Hoist.** Each `Mat_Mul(A, v)` is replaced by a fresh placeholder
-   variable `_mmN` (where `N` is a monotonically increasing integer
-   unique across the whole system).
+   variable `_sz_mm_N` (where `N` is a monotonically increasing integer
+   unique across the whole system). The `_sz_mm_` prefix is reserved
+   by Solverz — see {ref}`Restrictions and reserved names
+   <restrictions>` below.
 2. **Deduplicate.** Two `Mat_Mul` sub-trees that are structurally equal
    (same matrix, same operand expression after hoisting) are collapsed
    into a single placeholder. The power-flow example below computes
    `G_nr @ e` once even though both the P-balance and Q-balance
    residuals reference it.
 3. **Emit precompute statements in the wrapper.** Each placeholder gets
-   one line of the form `_mmN = A @ operand` inserted at the top of the
-   `F_()` function body, *outside* the Numba-compiled inner functions.
+   one line of the form `_sz_mm_N = A @ operand` inserted at the top of
+   the `F_()` function body, *outside* the Numba-compiled inner
+   functions.
 
 The runtime effect: the *only* scipy.sparse matrix-vector product that
 happens inside a Newton step is the one at the very top of `F_()`.
 Every downstream computation (`inner_F`, `inner_F0`, `inner_F1`, …)
-receives `_mmN` as a plain dense numpy array and can run under
+receives `_sz_mm_N` as a plain dense numpy array and can run under
 `@njit(cache=True)`:
 
 ```python
 def F_(y_, p_):
     e = y_[0:29]
     f = y_[29:58]
-    G_nr = p_["G_nr"]           # csc_array, scipy.sparse
+    G_nr = p_["G_nr"]              # csc_array, scipy.sparse
     B_nr = p_["B_nr"]
-    _mm0 = (G_nr @ e)           # ← precomputed, one scipy SpMV
-    _mm1 = (B_nr @ f)           # ← dedup: B_nr@f appears in 2 equations
-    _mm2 = (B_nr @ e)
-    _mm3 = (G_nr @ f)
-    return inner_F(_F_, e, f, p_ref, q_ref, _mm0, _mm1, _mm2, _mm3, ...)
+    _sz_mm_0 = (G_nr @ e)          # ← precomputed, one scipy SpMV
+    _sz_mm_1 = (B_nr @ f)          # ← dedup: B_nr@f appears in 2 equations
+    _sz_mm_2 = (B_nr @ e)
+    _sz_mm_3 = (G_nr @ f)
+    return inner_F(_F_, e, f, p_ref, q_ref,
+                   _sz_mm_0, _sz_mm_1, _sz_mm_2, _sz_mm_3, ...)
 
 @njit(cache=True)
-def inner_F(_F_, e, f, p_ref, q_ref, _mm0, _mm1, _mm2, _mm3, ...):
-    _F_[0:29] = inner_F0(e, f, p_ref, _mm0, _mm1, _mm2, _mm3)
+def inner_F(_F_, e, f, p_ref, q_ref,
+            _sz_mm_0, _sz_mm_1, _sz_mm_2, _sz_mm_3, ...):
+    _F_[0:29] = inner_F0(e, f, p_ref, _sz_mm_0, _sz_mm_1, _sz_mm_2, _sz_mm_3)
     _F_[29:53] = inner_F1(...)
     return _F_
 
 @njit(cache=True)
-def inner_F0(e, f, p_ref, q_ref, _mm0, _mm1, _mm2, _mm3):
-    return e * (p_ref - _mm1 + _mm0) + f * (q_ref + _mm2 + _mm3) - Pinj
+def inner_F0(e, f, p_ref, q_ref, _sz_mm_0, _sz_mm_1, _sz_mm_2, _sz_mm_3):
+    return e * (p_ref - _sz_mm_1 + _sz_mm_0) + f * (q_ref + _sz_mm_2 + _sz_mm_3) - Pinj
 ```
 
 Why this matters: scipy.sparse matrix-vector products are already
@@ -424,51 +429,62 @@ Solverz exploits this in a pattern-match compiler:
 
 4. **Generate a dedicated Numba kernel per block.** For each mutable
    matrix block the code printer emits a new top-level function named
-   `_mut_block_N`. Its signature takes the diag inner vectors, the
-   base variables needed by any row/col-scale term, and each term's
-   three mapping arrays. The body is a pure-Python / Numba scatter-add
-   loop:
+   `_mut_block_N` (where `N` is the block index). Its signature takes
+   the diag inner vectors, the base variables needed by any
+   row/col-scale term, and each term's three mapping arrays. All
+   per-block helper arrays use the reserved `_sz_mb_{N}_` prefix so
+   different blocks' mappings never collide. The body is a pure-
+   Python / Numba scatter-add loop:
 
 ```python
 # Module-level (loaded once from setting at import time):
-_mb0_diag_out_0 = setting["_mb0_diag_out_0"]
-_mb0_rs_out_0   = setting["_mb0_rs_out_0"]
-_mb0_rs_src_0   = setting["_mb0_rs_src_0"]
-_mb0_rs_dat_0   = setting["_mb0_rs_dat_0"]   # frozen G_nr.data
+_sz_mb_0_diag_out_0 = setting["_sz_mb_0_diag_out_0"]
+_sz_mb_0_diag_src_0 = setting["_sz_mb_0_diag_src_0"]
+_sz_mb_0_rs_out_0   = setting["_sz_mb_0_rs_out_0"]
+_sz_mb_0_rs_src_0   = setting["_sz_mb_0_rs_src_0"]
+_sz_mb_0_rs_dat_0   = setting["_sz_mb_0_rs_dat_0"]   # frozen G_nr.data
 ...
 
 @njit(cache=True)
-def _mut_block_0(_mb0_u0, e, f,
-                 _mb_diag_out_0, _mb_diag_src_0,
-                 _mb_rs_out_0,  _mb_rs_src_0,  _mb_rs_dat_0,
-                 _mb_rs_out_1,  _mb_rs_src_1,  _mb_rs_dat_1):
+def _mut_block_0(_sz_mb_0_u0, e, f,
+                 _sz_mb_0_diag_out_0, _sz_mb_0_diag_src_0,
+                 _sz_mb_0_rs_out_0,  _sz_mb_0_rs_src_0,  _sz_mb_0_rs_dat_0,
+                 _sz_mb_0_rs_out_1,  _sz_mb_0_rs_src_1,  _sz_mb_0_rs_dat_1):
     data = zeros(107)
     # Diagonal term: diag(G_nr@e - B_nr@f + p_ref)
-    for i in range(_mb_diag_out_0.shape[0]):
-        data[_mb_diag_out_0[i]] = _mb0_u0[_mb_diag_src_0[i]]
+    for i in range(_sz_mb_0_diag_out_0.shape[0]):
+        data[_sz_mb_0_diag_out_0[i]] += _sz_mb_0_u0[_sz_mb_0_diag_src_0[i]]
     # Row-scale term: diag(e) @ G_nr
-    _v = e
-    for i in range(_mb_rs_out_0.shape[0]):
-        data[_mb_rs_out_0[i]] += _v[_mb_rs_src_0[i]] * _mb_rs_dat_0[i]
+    for i in range(_sz_mb_0_rs_out_0.shape[0]):
+        data[_sz_mb_0_rs_out_0[i]] += e[_sz_mb_0_rs_src_0[i]] * _sz_mb_0_rs_dat_0[i]
     # Row-scale term: diag(f) @ B_nr
-    _v = f
-    for i in range(_mb_rs_out_1.shape[0]):
-        data[_mb_rs_out_1[i]] += _v[_mb_rs_src_1[i]] * _mb_rs_dat_1[i]
+    for i in range(_sz_mb_0_rs_out_1.shape[0]):
+        data[_sz_mb_0_rs_out_1[i]] += f[_sz_mb_0_rs_src_1[i]] * _sz_mb_0_rs_dat_1[i]
     return data
+```
+
+```{note}
+Every scatter-add loop uses `+=`, not `=`, including the diagonal
+terms. This matters when a block contains **multiple independent
+`Diag(...)` additive terms** whose output positions coincide — for
+example the Jacobian of `x*(A@x) + x*(B@x)` produces `diag(A@x)` and
+`diag(B@x)`, both landing on the same `(i,i)` positions. The `+=`
+accumulates their contributions correctly; an earlier implementation
+used `=` and silently dropped one of the two terms.
 ```
 
 5. **Wire the kernel up in the `J_` wrapper.** For each block the
    wrapper emits: (a) one line per diag term that materialises its
-   inner vector using scipy.sparse (e.g. `_mb0_u0 = p_ref - (B_nr@f) +
-   (G_nr@e)`); (b) a call to `_mut_block_N(...)` passing the inner
-   vectors, base variables, and mapping arrays; (c) an assignment of
-   the returned `data` array into the appropriate slice of the overall
-   Jacobian `_data_`.
+   inner vector using scipy.sparse (e.g. `_sz_mb_0_u0 = p_ref -
+   (B_nr@f) + (G_nr@e)`); (b) a call to `_mut_block_N(...)` passing
+   the inner vectors, base variables, and mapping arrays; (c) an
+   assignment of the returned `data` array into the appropriate slice
+   of the overall Jacobian `_data_`.
 
    Crucially, each block's **scipy work is capped at one SpMV per diag
    term** — nothing else in the block touches sparse matrices at
    runtime. The data for row/col-scale terms comes straight from the
-   pre-baked `_mb_rs_dat_k` arrays.
+   pre-baked `_sz_mb_{N}_rs_dat_{k}` arrays.
 
 The net effect on a Newton step is that the Jacobian assembly cost is
 dominated by (i) the constant `inner_J` call for element-wise blocks
@@ -601,6 +617,109 @@ models with many rows and few blocks the advantage is small; for
 models with many blocks per variable (such as power flow, with
 distinct $\partial/\partial e$ and $\partial/\partial f$ blocks for
 both $P$ and $Q$ balances) the advantage compounds.
+
+(restrictions)=
+## Restrictions and reserved names
+
+`Mat_Mul` imposes a few hard restrictions that are enforced at model
+build time. Each one prevents a class of silent-wrong-answer bugs that
+would otherwise slip past the generated Jacobian.
+
+### Triggerable / time-series parameters cannot appear in a Mat_Mul equation
+
+A parameter declared with `triggerable=True` or as a `TimeSeriesParam`
+is **rejected at `FormJac` time** if it appears in the same equation
+as any `Mat_Mul`:
+
+```python
+m.K = Param('K', [...], triggerable=True, trigger_var=['x'], trigger_fun=...)
+m.A = Param('A', [[...]], dim=2, sparse=True)
+m.eqn = Eqn('f', m.K * m.x + Mat_Mul(m.A, m.x) - m.b)
+smdl, y0 = m.create_instance()
+smdl.FormJac(y0)
+# ⇒ NotImplementedError: Equation 'f' uses ``Mat_Mul`` together with
+#   triggerable parameter 'K'. This combination is not currently
+#   supported because the Mat_Mul code generator assumes matrix
+#   parameters are immutable after ``create_instance()``.
+```
+
+**Why:** the mutable-matrix analyser freezes every non-variable scaling
+vector into a Numba kernel closure at code-gen time. If `K` were
+triggerable, its `trigger_fun` would fire at runtime and *change* the
+value, but the scatter-add loops would keep using the frozen numbers —
+producing wrong Newton steps without raising any error. Rejecting the
+combination at build time is the only safe choice.
+
+**Workaround:** split the matrix assembly into an explicit elementwise
+form. If you need per-row scaling that depends on `x`, write the
+per-row equation directly (one scalar `Eqn` per row) instead of using
+`Mat_Mul` on a triggerable parameter.
+
+### Reserved symbol prefixes
+
+User symbols (`Var`, `Param`, `iVar`, `Para`, ...) are rejected at
+construction time if their name starts with any of:
+
+| Prefix | Used for |
+|---|---|
+| `_sz_mm_` | Mat_Mul precompute placeholders in the `F_`/`J_` wrapper (e.g. `_sz_mm_0 = G @ e`). |
+| `_sz_mb_` | Mutable-matrix Jacobian block helpers (diag inner vectors, row/col-scale scaling vectors, mapping arrays). |
+
+```python
+m.x = Var('_sz_mm_0', [1.0])
+# ⇒ ValueError: Symbol name '_sz_mm_0' starts with Solverz-reserved
+#   internal prefix '_sz_mm_'. This prefix is used by the code
+#   generator for Mat_Mul / mutable-matrix Jacobian helper names and
+#   cannot be used for user variables or parameters.
+```
+
+**Why:** the code printer emits an unbounded family of helper
+identifiers of the form `<prefix><int>` and needs to know that none of
+them will collide with a user symbol. The prefix ban is the simplest
+way to guarantee that — users pick any name that does *not* start with
+`_sz_mm_` / `_sz_mb_`, and the code printer is free to use any name
+that *does*.
+
+### Dense `dim=2` parameters emit a performance warning
+
+A parameter declared with `dim=2, sparse=False` that appears inside a
+`Mat_Mul` is legal — the fallback path handles it correctly — but it
+forfeits every optimisation described above:
+
+- no sparse pattern precomputation (the "output sparsity pattern" step
+  produces a fully dense block),
+- no `_sz_mb_{N}_rs_dat_k` scatter-add (the block falls through to the
+  `MutableMatJacDataModule` fancy-indexing path),
+- each Jacobian call allocates and populates a dense intermediate.
+
+Solverz emits a one-shot `UserWarning` at `FormJac` time, **once per
+offending parameter**, to flag the performance cost:
+
+```python
+m.A = Param('A', np.array([[2.0, 1.0], [1.0, 3.0]]), dim=2, sparse=False)
+m.eqn = Eqn('f', m.x * Mat_Mul(m.A, m.x) - m.b)
+smdl, y0 = m.create_instance()
+smdl.FormJac(y0)
+# UserWarning: Parameter 'A' is a dense 2-D ``Param(..., dim=2,
+#   sparse=False)`` used inside ``Mat_Mul``. Dense matrices bypass
+#   the vectorised mutable-matrix Jacobian fast path and fall back
+#   to a slower scipy/ndarray indexing path. Declare 'A' with
+#   ``sparse=True`` for substantially better performance.
+```
+
+**How to fix:** wrap the value in a scipy.sparse container and declare
+`sparse=True`:
+
+```python
+from scipy.sparse import csc_array
+m.A = Param('A', csc_array(np.array([[2.0, 1.0], [1.0, 3.0]])),
+            dim=2, sparse=True)
+```
+
+On a dense 2×2 matrix the difference is invisible, but for anything
+larger than a few dozen rows the sparse path is substantially faster
+and (more importantly) keeps the Jacobian assembly off the fallback
+path.
 
 ## API Reference
 
