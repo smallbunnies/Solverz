@@ -64,12 +64,23 @@ def test_Param():
     except ValueError as e:
         assert e.args[0] == 'Incompatible length between value series and time series!'
 
-    G = TimeSeriesParam(name='G',
+    # Sparse 2-D ``TimeSeriesParam`` used to be silently constructable
+    # even though the downstream code generator (both the legacy
+    # ``MatVecMul`` path and the 0.8.1 ``Mat_Mul`` fast path) snapshots
+    # the matrix's CSC decomposition at ``model.create_instance``
+    # time — any runtime ``get_v_t(t)`` update to a specific index
+    # would never propagate into the cached ``<name>_data`` / etc.
+    # arrays that the generated code actually reads. Construction is
+    # now rejected up front.
+    import pytest
+    with pytest.raises(NotImplementedError,
+                       match=r"sparse 2-D ``TimeSeriesParam``"):
+        TimeSeriesParam(name='G',
                         v_series=[2, 10000, 10000, 2, 2],
                         time_series=[0, 0.002, 0.03, 0.032, 10],
-                        value=np.array([[1, 0, 3], [0, 0.1, -0.4], [1.2, -np.pi, 0]]),
+                        value=np.array([[1, 0, 3],
+                                        [0, 0.1, -0.4],
+                                        [1.2, -np.pi, 0]]),
                         index=(1, 1),
                         dim=2,
                         sparse=True)
-    assert (G.get_v_t(0.001).toarray().__str__() ==
-            '[[ 1.00000000e+00  0.00000000e+00  3.00000000e+00]\n [ 0.00000000e+00  5.00100000e+03 -4.00000000e-01]\n [ 1.20000000e+00 -3.14159265e+00  0.00000000e+00]]')

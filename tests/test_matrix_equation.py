@@ -247,32 +247,81 @@ def test_triggerable_vector_next_to_matmul_allowed():
     assert J0.shape == (2, 2)
 
 
-def test_triggerable_matrix_in_matmul_errors():
-    """Finding 2 (R1-narrowed): a triggerable 2-D *sparse matrix* used
-    as the matrix operand of ``Mat_Mul`` MUST raise
-    ``NotImplementedError`` at ``FormJac`` time. The Layer-2 kernel
-    would otherwise bake the matrix's ``.data`` into the generated
-    scatter-add loop and keep using the frozen values after a trigger
-    fires — producing wrong Newton steps.
+def test_triggerable_sparse_matrix_rejected_at_construction():
+    """Time-varying sparse ``dim=2`` matrices are unsupported in
+    Solverz: every downstream code path (``MatVecMul``, ``Mat_Mul``
+    fast path, mutable-matrix Jacobian scatter-add) caches the
+    matrix's CSC fields at model-build time, so a runtime trigger
+    update would silently be ignored and produce wrong Newton
+    steps. Construction must fail at the ``Param(...)`` line
+    itself — not deep inside ``FormJac`` — so the error points at
+    the offending declaration in the user's source.
     """
     import pytest
-    import numpy as np
     from scipy.sparse import csc_array
-    m = Model()
-    m.x = Var('x', [0.5, 0.5])
-    m.b = Param('b', [4.0, 5.0])
-    # Triggerable 2-D sparse matrix as Mat_Mul operand — forbidden.
-    m.A = Param('A', csc_array(np.array([[2., 1.], [1., 3.]])),
-                dim=2, sparse=True,
-                triggerable=True, trigger_var=['x'],
-                trigger_fun=lambda x: csc_array(
-                    np.array([[2., 1.], [1., 3.]])))
-    m.eqn = Eqn('f', Mat_Mul(m.A, m.x) - m.b)
-
-    smdl, y0 = m.create_instance()
     with pytest.raises(NotImplementedError,
-                       match=r"triggerable 2-D sparse parameter 'A'"):
-        smdl.FormJac(y0)
+                       match=r"sparse 2-D ``Param``.*triggerable"):
+        Param('A', csc_array(np.array([[2., 1.], [1., 3.]])),
+              dim=2, sparse=True,
+              triggerable=True, trigger_var=['x'],
+              trigger_fun=lambda x: csc_array(
+                  np.array([[2., 1.], [1., 3.]])))
+
+
+def test_timeseries_sparse_matrix_rejected_at_construction():
+    """Same policy for ``TimeSeriesParam``: a sparse ``dim=2``
+    time-series param is rejected at construction, independently
+    of whether it's ever used in a ``Mat_Mul``.
+    """
+    import pytest
+    from Solverz import TimeSeriesParam
+    from scipy.sparse import csc_array
+    I = csc_array(np.eye(2))
+    with pytest.raises(NotImplementedError,
+                       match=r"sparse 2-D ``TimeSeriesParam``"):
+        TimeSeriesParam('A', v_series=[I, I],
+                        time_series=[0.0, 1.0],
+                        dim=2, sparse=True)
+
+
+def test_formjac_backstop_rejects_tainted_triggerable_sparse_param():
+    """Backstop check: even if a triggerable sparse ``dim=2`` Param
+    slips past ``Param.__init__`` (e.g. via ``__new__`` and
+    attribute assignment, or post-hoc flag mutation), the
+    ``FormJac`` backstop ``_check_no_timevar_sparse_matrices`` must
+    still raise ``NotImplementedError``.
+
+    Tested directly at the method level, rather than by trying to
+    coerce a full ``Model`` / ``create_instance`` flow into a
+    tainted state — the intervening ``trigger_param_updater``
+    machinery fights back when ``triggerable`` is flipped after
+    construction, and the point here is that the backstop catches
+    a tainted ``PARAM`` dict regardless of how it got that way.
+    """
+    import pytest
+    from scipy.sparse import csc_array
+    from Solverz.equation.equations import Equations as SymEquations
+
+    # Build a legal Equations-like container and stuff a tainted
+    # Param into its PARAM dict by bypassing ``Param.__init__``.
+    eqs = SymEquations.__new__(SymEquations)
+    eqs.PARAM = {}
+
+    tainted = Param.__new__(Param)
+    tainted.name = 'A'
+    tainted.dim = 2
+    tainted.sparse = True
+    tainted.triggerable = True
+    tainted.trigger_var = None
+    tainted.trigger_fun = None
+    tainted.is_alias = False
+    tainted.dtype = float
+    tainted._ParamBase__v = csc_array(np.eye(2))
+    eqs.PARAM['A'] = tainted
+
+    with pytest.raises(NotImplementedError,
+                       match=r"triggerable sparse ``dim=2`` parameter"):
+        eqs._check_no_timevar_sparse_matrices()
 
 
 def test_dense_dim2_param_warning():
@@ -418,42 +467,16 @@ def test_selective_njit_gating_element_wise_happy_path(tmp_path):
         'Expected @njit on inner_J for pure element-wise model'
 
 
-def test_selective_njit_gating_sparse_triggerable_skips_njit(tmp_path):
-    """Finding 1 (R6.3 negative case): a model whose ``PARAM`` dict
-    contains a sparse triggerable param must NOT put ``@njit`` on
-    ``inner_F`` / ``inner_J`` — Numba cannot digest scipy.sparse
-    arguments, and the gate must fire based on ``PARAM`` content, not
-    solely on equation structure.
-    """
-    from scipy.sparse import csc_array
-    m = Model()
-    m.x = Var('x', [1.0, 1.0])
-    m.a = Param('a', 2.0)
-    # Sparse + triggerable → unconditionally enters param_list via
-    # the ``if not sparse or triggerable`` branch in print_param.
-    m.K = Param('K', csc_array(np.array([[1.0, 0.0], [0.0, 1.0]])),
-                dim=2, sparse=True,
-                triggerable=True, trigger_var=['x'],
-                trigger_fun=lambda x: csc_array(np.diag(x)))
-    # Simple element-wise equation — K is NOT used in the residual,
-    # but it still lands in PARAM and therefore in param_list.
-    m.eqn = Eqn('f', m.a * m.x - 1.0)
-    smdl, y0 = m.create_instance()
-
-    dir_mod = str(tmp_path / 'njit_gated')
-    printer = module_printer(smdl, y0, 'njit_gated_mod',
-                             directory=dir_mod, jit=True)
-    printer.render()
-    num_func_path = os.path.join(dir_mod, 'njit_gated_mod', 'num_func.py')
-    with open(num_func_path) as f:
-        source = f.read()
-    lines = source.split('\n')
-    for i, line in enumerate(lines):
-        if line.startswith('def inner_F(') or line.startswith('def inner_J('):
-            prev = lines[i - 1] if i > 0 else ''
-            assert '@njit' not in prev, (
-                f'Expected NO @njit above {line!r} when PARAM contains '
-                f'a sparse triggerable Param, got prev={prev!r}')
+# NOTE: the 0.8.1 R6.3 negative test (sparse triggerable Param →
+# @njit skipped) has been removed because sparse ``dim=2``
+# triggerable / TimeSeriesParam instances are now rejected at
+# ``Param(...)`` construction time (see
+# ``test_triggerable_sparse_matrix_rejected_at_construction``). Any
+# equation system that previously relied on the @njit gating for
+# a sparse 2-D time-varying param is now a construction error; the
+# ``_has_sparse_in_param_list`` function is still kept as defence
+# in depth for sparse 1-D time-varying params (an edge case that
+# is neither rejected nor common in practice).
 
 
 def test_nested_matmul_smoke(tmp_path):

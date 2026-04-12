@@ -88,75 +88,48 @@ class Equations:
            var_list: List[str] = None) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         pass
 
-    def _check_matmul_triggerable(self):
-        """Reject Mat_Mul equations whose **matrix operand** is triggerable.
+    def _check_no_timevar_sparse_matrices(self):
+        """Backstop check: reject any time-varying sparse ``dim=2``
+        ``Param`` in the equation system.
 
-        The Layer-2 mutable-matrix Jacobian pipeline freezes a sparse
-        matrix's ``.data`` array into the generated scatter-add kernel
-        (the ``_sz_mb_{N}_rs_dat_*`` / ``_sz_mb_{N}_cs_dat_*`` cache in
-        ``mutable_mat_analyzer.py``). That is safe for immutable
-        matrices but silently wrong if the same matrix is mutated at
-        runtime via a trigger function — the Jacobian would keep using
-        the frozen values while the residual kept evolving with the
-        new ones.
-
-        The restriction is **specific to matrices flowing through
-        ``Mat_Mul``**. A triggerable vector or scalar multiplied into
-        the *result* of a ``Mat_Mul`` (or inside its vector operand)
-        is unaffected: the J_ wrapper reads the current parameter
-        value on every Newton step through ``p_[name]``, so the
-        bake-in logic never touches it. Only 2-D matrix operands of
-        ``Mat_Mul`` are rejected here.
-
-        The walk mirrors :meth:`_warn_dense_matmul_params` — for every
-        ``Mat_Mul`` node in every mixed-matrix-vector equation, inspect
-        ``arg.free_symbols`` for any 2-D triggerable ``Para``. Dense
-        2-D params reach the ``MutableMatJacDataModule`` fallback path
-        which re-evaluates the full sparse expression on every call
-        and is therefore triggerable-safe — the narrow check skips
-        them (they already get a performance warning in
-        :meth:`_warn_dense_matmul_params`).
+        The primary defence lives in :class:`ParamBase.__init__` /
+        :class:`TimeSeriesParam.__init__`, which reject the offending
+        shape at the point of construction. This method re-checks at
+        ``FormJac`` time to cover the unusual paths where a Param is
+        built via ``__new__`` without going through ``__init__``, or
+        where its ``triggerable`` flag is set after construction. A
+        wrong model that slips past both defences would silently
+        produce incorrect Jacobians because every downstream code
+        path (the legacy ``MatVecMul`` CSC decomposition, the 0.8.1
+        ``Mat_Mul`` ``SolCF.csc_matvec`` fast path, and the
+        mutable-matrix Jacobian scatter-add kernel) caches the sparse
+        matrix's ``.data`` / ``.indices`` / ``.indptr`` arrays at
+        model-build time.
         """
-        for eqn_name, eqn in self.EQNs.items():
-            if not eqn.mixed_matrix_vector:
+        for name, p in self.PARAM.items():
+            if not (getattr(p, 'dim', 0) == 2
+                    and getattr(p, 'sparse', False)):
                 continue
-            for mm in eqn.RHS.atoms(Mat_Mul):
-                for arg in mm.args:
-                    matrix_paras = {
-                        s for s in arg.free_symbols
-                        if isinstance(s, Para) and s.dim == 2
-                    }
-                    for sym in matrix_paras:
-                        if sym.name not in self.PARAM:
-                            continue
-                        p = self.PARAM[sym.name]
-                        # Dense dim=2 → fallback path, safe (and already
-                        # warned about elsewhere). Only sparse 2-D
-                        # matrices flow through the scatter-add cache.
-                        if not getattr(p, 'sparse', False):
-                            continue
-                        is_ts = isinstance(p, TimeSeriesParam)
-                        is_trig = getattr(p, 'triggerable', False)
-                        if not (is_ts or is_trig):
-                            continue
-                        kind = 'time-series' if is_ts else 'triggerable'
-                        raise NotImplementedError(
-                            f"Equation {eqn_name!r} uses {kind} 2-D sparse "
-                            f"parameter {sym.name!r} as a ``Mat_Mul`` matrix "
-                            f"operand. ``Mat_Mul`` bakes the sparse matrix "
-                            f"``.data`` array into the generated scatter-add "
-                            f"Jacobian kernel at model-build time; a "
-                            f"{kind} update at runtime would silently be "
-                            f"ignored and the Jacobian would freeze on the "
-                            f"initial matrix values while the residual kept "
-                            f"evolving — producing wrong Newton steps. If "
-                            f"{sym.name!r} must change at runtime, split the "
-                            f"residual so that the ``Mat_Mul({sym.name}, ..)``"
-                            f" term lives in its own equation and rewrite "
-                            f"that equation in explicit elementwise form "
-                            f"(one scalar ``Eqn`` per row) instead of using "
-                            f"``Mat_Mul``."
-                        )
+            is_ts = isinstance(p, TimeSeriesParam)
+            is_trig = getattr(p, 'triggerable', False)
+            if not (is_ts or is_trig):
+                continue
+            kind = 'time-series' if is_ts else 'triggerable'
+            raise NotImplementedError(
+                f"Parameter {name!r} is a {kind} sparse ``dim=2`` "
+                f"parameter. Time-varying sparse matrices are not "
+                f"supported by Solverz because the code generator "
+                f"caches the matrix's CSC fields at model-build "
+                f"time; a runtime {kind} update would silently be "
+                f"ignored by every downstream consumer (legacy "
+                f"``MatVecMul``, ``Mat_Mul`` fast path, and the "
+                f"mutable-matrix Jacobian scatter-add). Rewrite the "
+                f"equation in explicit element-wise form (one scalar "
+                f"``Eqn`` per row) or use a dense ``dim=2`` "
+                f"parameter (``sparse=False``) — the fallback scipy "
+                f"path re-evaluates the full expression on every "
+                f"call and tolerates updates."
+            )
 
     def _warn_dense_matmul_params(self):
         """Warn when a dense ``dim=2`` parameter is used inside a
@@ -195,7 +168,7 @@ class Equations:
                 ):
         self.assign_eqn_var_address(y)
 
-        self._check_matmul_triggerable()
+        self._check_no_timevar_sparse_matrices()
         self._warn_dense_matmul_params()
 
         Fy_list = self.Fy(y, self.a.object_list, self.var_address.object_list)
