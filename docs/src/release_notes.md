@@ -34,16 +34,38 @@ upgrade — 0.8.0 has a latent miscompilation when two independent
   triggerable param, or a `TimeSeriesParam` — objects Numba cannot
   lower. Pure element-wise models are unaffected.
 
+- **`FormJac` and `JacBlock` agree on the mutable-matrix predicate.**
+  The "is this block a mutable-matrix block?" decision is now made
+  in a single place using the same criterion on both sides —
+  matrix-valued derivative that is not a plain `Para` / `-Para`.
+  Previously `FormJac` additionally required the expression to
+  contain both `Mat_Mul` and `Diag`, while `JacBlock.is_mutable_matrix`
+  did not. The divergence would have let a derivative like
+  `Diag(x)` skip the `SpDiag` perturbation step and produce a
+  shrunken `CooRow` / `CooCol` at a flat start — the downstream
+  scatter-add kernel would then write to fewer output positions
+  than the runtime expected. No known model hit this in practice
+  but the fix closes the corner case.
+
 ### API Changes
 
-- **`Mat_Mul` + triggerable / time-series params now errors out.**
-  Using a `triggerable=True` parameter or a `TimeSeriesParam` in the
-  same equation as `Mat_Mul` raises `NotImplementedError` at
-  `FormJac` / `create_instance` time. Previously the combination
-  silently froze the triggered values inside the generated Jacobian
-  kernel and produced wrong Newton steps once the trigger fired.
-  Users who hit this restriction should rewrite the matrix assembly
-  elementwise.
+- **`Mat_Mul` + triggerable 2-D sparse matrix now errors out.** Using
+  a `triggerable=True` (or `TimeSeriesParam`) 2-D sparse parameter as
+  the **matrix operand** of a `Mat_Mul` raises `NotImplementedError`
+  at `FormJac` / `create_instance` time. The Layer-2 scatter-add
+  Jacobian kernel bakes the matrix's `.data` array into its compiled
+  code at model-build time; a trigger firing at runtime would
+  silently be ignored and the Jacobian would freeze on the initial
+  values while the residual kept evolving. Users who need a
+  triggerable matrix must split the residual and write the affected
+  equation in explicit elementwise form (one scalar `Eqn` per row).
+
+  The check is deliberately narrow: a triggerable *vector* or
+  *scalar* sitting next to a `Mat_Mul`, or used *inside* the vector
+  operand of a `Mat_Mul`, is unaffected and allowed — the `F_` / `J_`
+  wrappers read the current parameter value from `p_` on every
+  Newton step, so no bake-in can happen. `TimeSeriesParam` is always
+  1-D and is therefore always allowed to coexist with `Mat_Mul`.
 
 - **Reserved symbol prefixes `_sz_mm_` and `_sz_mb_`.** Any user
   symbol (`Var`, `Param`, `iVar`, `Para`, ...) whose name starts with
@@ -69,6 +91,26 @@ upgrade — 0.8.0 has a latent miscompilation when two independent
     names actually emitted by the code printer.
   - Explicit note about the `+=` accumulation rule for diagonal
     scatter-add terms.
+  - New explicit list of the cases that push a mutable-matrix
+    block onto the {ref}`fallback path <fallback-path>` — useful
+    when a model is slower than expected and you want to know
+    whether a block is hitting the fast or slow path.
+  - The immutability warning now spells out that the restriction
+    only strictly applies to matrices used in the vectorised
+    `Mat_Mul` fast path (the fallback path re-evaluates the full
+    expression each call and would reflect mutations), but still
+    recommends treating all sparse matrix params as immutable.
+
+### Internal cleanup
+
+- Removed the dead `include_sparse_in_list` parameter from
+  `print_F` / `print_inner_F` / `print_J` / `print_inner_J` and from
+  `_has_sparse_in_param_list`. With the Mat_Mul precompute
+  architecture every caller hard-coded `False` and the parameter was
+  vestigial.
+- Dropped the unused `_var_base_name` / `_var_access_expr` helpers
+  from `mutable_mat_analyzer`; they were leftovers from an earlier
+  draft of `print_inner_J`.
 
 ### Full Changelog
 

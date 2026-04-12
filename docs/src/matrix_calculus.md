@@ -55,8 +55,14 @@ Solverz relies on this assumption for maximum runtime efficiency:
 If your application truly needs to update sparse-matrix values between solves
 (e.g., sweeping a parameter), rebuild the model with `model.create_instance()`
 each time. Mutating `p_["A"].data` after creation will silently produce wrong
-Jacobians because the stored index mappings and precomputed factors no longer
-match.
+Jacobians **for matrices that flow through the vectorised Mat_Mul fast path** —
+scatter-add kernels cache `M.data` at analysis time and the cache becomes
+stale. Matrices that only land in the `MutableMatJacDataModule` fallback path
+(see {ref}`Fallback path <fallback-path>`) re-evaluate the full expression on
+every `J_()` call and would reflect the mutation, but there is no way to
+guarantee a particular block won't be *promoted* to the fast path in a future
+release, so the rule is still: **do not mutate sparse matrix params
+post-build**.
 
 Dense parameters (`Param(..., dim=2, sparse=False)`) are fine to update via
 `mdl.p["name"] = new_value`; the restriction only applies to **sparse**
@@ -391,13 +397,31 @@ Solverz exploits this in a pattern-match compiler:
 
    | Shape | Generated code contribution |
    |---|---|
-   | `Diag(u_expr)` (diagonal term) | `data[out_pos] = u[src_idx]` |
+   | `Diag(u_expr)` (diagonal term) | `data[out_pos] += u[src_idx]` |
    | `Mat_Mul(Diag(v), M)` (row-scale) | `data[out_pos] += v[src_row] * M_data[k]` |
    | `Mat_Mul(M, Diag(v))` (col-scale) | `data[out_pos] += v[src_col] * M_data[k]` |
 
-   Unrecognised terms are deferred to a correct-but-slower fallback
-   that evaluates the full sub-expression via scipy.sparse and extracts
-   values by fancy indexing.
+   **A term is deferred to the fallback path when any of the
+   following is true**:
+
+   - it has a non-unit numeric coefficient other than `±1` (e.g.
+     `3 * Diag(x)`) — the analyser only unwraps `±1` via
+     `_extract_sign_and_core`;
+   - it is `Mat_Mul(Diag(v), X)` or `Mat_Mul(X, Diag(v))` where
+     ``X`` is **not** a plain `Para` (or `-Para`) — for instance
+     a matrix expression such as `A @ B`, or a user-constructed
+     product that the matrix calculus engine hasn't simplified
+     down to a single leaf matrix;
+   - it is a ``Mat_Mul`` with three or more arguments that the
+     matrix-calculus engine didn't fold into a nested binary form;
+   - it is any other shape the classifier doesn't recognise
+     (transpose of a mutable matrix, element-wise matrix product,
+     a non-sparse matrix leaf, etc.).
+
+   Unrecognised terms are deferred to the
+   {ref}`fallback path <fallback-path>`, which is correct but slower:
+   it evaluates the full sub-expression via scipy.sparse on every
+   `J_()` call and extracts values by fancy indexing.
 
 2. **Precompute the output sparsity pattern (once).** At model
    initialisation (inside `FormJac`, `Solverz/equation/equations.py`),
@@ -534,6 +558,7 @@ original pre-0.8 architecture (direct `@njit` on `inner_F` receiving
 only dense vectors and scalar params). Performance on pure
 element-wise models is therefore unchanged by the Mat_Mul rewrite.
 
+(fallback-path)=
 ### Fallback path
 
 If a Jacobian block contains a term whose shape the symbolic analyser
