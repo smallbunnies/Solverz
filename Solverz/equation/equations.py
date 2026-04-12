@@ -12,9 +12,9 @@ from scipy.sparse import csc_array, coo_array
 # from cvxopt import spmatrix, matrix
 
 from Solverz.equation.eqn import Eqn, Ode, EqnDiff
-from Solverz.equation.param import ParamBase, Param, IdxParam
+from Solverz.equation.param import ParamBase, Param, IdxParam, TimeSeriesParam
 from Solverz.sym_algebra.symbols import iVar, idx, IdxVar, Para, iAliasVar
-from Solverz.sym_algebra.functions import Slice
+from Solverz.sym_algebra.functions import Slice, Mat_Mul, Diag, SpDiag
 from Solverz.variable.variables import Vars
 from Solverz.utilities.address import Address, combine_Address
 from Solverz.utilities.type_checker import is_integer
@@ -88,10 +88,88 @@ class Equations:
            var_list: List[str] = None) -> List[Tuple[str, str, EqnDiff, np.ndarray]]:
         pass
 
+    def _check_no_timevar_sparse_matrices(self):
+        """Backstop check: reject any time-varying sparse ``dim=2``
+        ``Param`` in the equation system.
+
+        The primary defence lives in :class:`ParamBase.__init__` /
+        :class:`TimeSeriesParam.__init__`, which reject the offending
+        shape at the point of construction. This method re-checks at
+        ``FormJac`` time to cover the unusual paths where a Param is
+        built via ``__new__`` without going through ``__init__``, or
+        where its ``triggerable`` flag is set after construction. A
+        wrong model that slips past both defences would silently
+        produce incorrect Jacobians because every downstream code
+        path (the legacy ``MatVecMul`` CSC decomposition, the 0.8.1
+        ``Mat_Mul`` ``SolCF.csc_matvec`` fast path, and the
+        mutable-matrix Jacobian scatter-add kernel) caches the sparse
+        matrix's ``.data`` / ``.indices`` / ``.indptr`` arrays at
+        model-build time.
+        """
+        for name, p in self.PARAM.items():
+            if not (getattr(p, 'dim', 0) == 2
+                    and getattr(p, 'sparse', False)):
+                continue
+            is_ts = isinstance(p, TimeSeriesParam)
+            is_trig = getattr(p, 'triggerable', False)
+            if not (is_ts or is_trig):
+                continue
+            kind = 'time-series' if is_ts else 'triggerable'
+            raise NotImplementedError(
+                f"Parameter {name!r} is a {kind} sparse ``dim=2`` "
+                f"parameter. Time-varying sparse matrices are not "
+                f"supported by Solverz because the code generator "
+                f"caches the matrix's CSC fields at model-build "
+                f"time; a runtime {kind} update would silently be "
+                f"ignored by every downstream consumer (legacy "
+                f"``MatVecMul``, ``Mat_Mul`` fast path, and the "
+                f"mutable-matrix Jacobian scatter-add). Rewrite the "
+                f"equation in explicit element-wise form (one scalar "
+                f"``Eqn`` per row) or use a dense ``dim=2`` "
+                f"parameter (``sparse=False``) — the fallback scipy "
+                f"path re-evaluates the full expression on every "
+                f"call and tolerates updates."
+            )
+
+    def _warn_dense_matmul_params(self):
+        """Warn when a dense ``dim=2`` parameter is used inside a
+        ``Mat_Mul``. Such parameters fall back to the slower
+        scipy/ndarray fancy-indexing path and do not benefit from the
+        vectorised mutable-matrix Jacobian code. Each offending param is
+        warned about exactly once per system.
+        """
+        warned = set()
+        for eqn_name, eqn in self.EQNs.items():
+            if not eqn.mixed_matrix_vector:
+                continue
+            for mm in eqn.RHS.atoms(Mat_Mul):
+                for arg in mm.args:
+                    free_paras = {s for s in arg.free_symbols if isinstance(s, Para)}
+                    for sym in free_paras:
+                        if sym.name not in self.PARAM:
+                            continue
+                        p = self.PARAM[sym.name]
+                        if p.dim == 2 and not p.sparse and sym.name not in warned:
+                            warnings.warn(
+                                f"Parameter {sym.name!r} is a dense 2-D "
+                                f"``Param(..., dim=2, sparse=False)`` used "
+                                f"inside ``Mat_Mul``. Dense matrices bypass "
+                                f"the vectorised mutable-matrix Jacobian "
+                                f"fast path and fall back to a slower "
+                                f"scipy/ndarray indexing path. Declare "
+                                f"{sym.name!r} with ``sparse=True`` for "
+                                f"substantially better performance.",
+                                UserWarning, stacklevel=3
+                            )
+                            warned.add(sym.name)
+
     def FormJac(self,
                 y
                 ):
         self.assign_eqn_var_address(y)
+
+        self._check_no_timevar_sparse_matrices()
+        self._warn_dense_matmul_params()
 
         Fy_list = self.Fy(y, self.a.object_list, self.var_address.object_list)
 
@@ -107,11 +185,64 @@ class Equations:
             args = self.obtain_eqn_args(DiffVarEqn, y, 0)
             DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
 
-            # The value of deri can be either matrix, vector, or scalar(number). We cannot reshape it.
-            if isinstance(fy[3], csc_array):
-                Value0 = fy[3]
+            # Mutable-matrix-block detection. This predicate MUST match
+            # ``JacBlock.is_mutable_matrix`` in ``jac.py:167-169`` exactly
+            # — FormJac picks Value0 here and JacBlock picks the
+            # downstream codegen path from the *same* flag, so any
+            # divergence between the two locations would produce blocks
+            # whose Value0 sparsity pattern disagreed with the kernel the
+            # code generator then emitted (e.g. a flat-start ``Diag(x)``
+            # Value0 would collapse to empty while the scatter-add loop
+            # expected a full diagonal).
+            #
+            # Criterion (same as JacBlock): the derivative is
+            # matrix-valued AND its symbolic form is not a plain
+            # ``Para`` / ``-Para``. We probe "matrix-valued" from the
+            # already-evaluated ``fy[3]`` (either a ``csc_array`` from
+            # a sparse expression or an ndarray with ``ndim == 2`` from
+            # a dense one).
+            fy_value = fy[3]
+            fy_is_matrix = (
+                isinstance(fy_value, csc_array)
+                or (isinstance(fy_value, np.ndarray) and fy_value.ndim == 2)
+            )
+            deri_is_para = (isinstance(DeriExpr, Para)
+                            or isinstance(-DeriExpr, Para))
+            is_mutable_matrix_block = fy_is_matrix and not deri_is_para
+            # For such blocks we MUST use sps.diags (not np.diagflat) so
+            # that Value0's sparsity pattern captures ALL structural
+            # non-zeros (union of each term's pattern), independently of
+            # the numerical values at y0. This guarantees
+            # Value0.tocsc().data order == runtime .tocsc().data order,
+            # so the runtime can do O(nnz) direct data copy without any
+            # fancy indexing.
+            if is_mutable_matrix_block:
+                sparse_expr = DeriExpr.replace(Diag, SpDiag)
+                sparse_eqn = Eqn('_MutMatJb_' + EqnName + '_' + DiffVar.name,
+                                 sparse_expr)
+                sparse_args = self.obtain_eqn_args(sparse_eqn, y, 0)
+                # Perturb variable values with distinct non-zero samples so
+                # that ``sps.diags(v) @ M`` doesn't collapse to the empty
+                # matrix when v happens to be zero at y0 (as in flat start).
+                # Value0 is only used for sparsity-pattern tracking — the
+                # data is overwritten at the first J_() call — so the
+                # perturbation is harmless.
+                rng = np.random.default_rng(seed=20260412)
+                perturbed_args = []
+                for symbol, arg in zip(sparse_eqn.SYMBOLS.values(), sparse_args):
+                    if symbol.name in y.var_list:
+                        perturbed_args.append(rng.random(arg.shape) + 1.0)
+                    else:
+                        perturbed_args.append(arg)
+                Value0 = sparse_eqn.NUM_EQN(*perturbed_args)
+                if not isinstance(Value0, csc_array):
+                    Value0 = csc_array(Value0)
             else:
-                Value0 = np.array(fy[3])
+                # The value of deri can be either matrix, vector, or scalar.
+                if isinstance(fy[3], csc_array):
+                    Value0 = fy[3]
+                else:
+                    Value0 = np.array(fy[3])
 
             jb = JacBlock(EqnName,
                           EqnAddr,

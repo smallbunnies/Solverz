@@ -181,6 +181,66 @@ def print_Hvp_prototype(eqs_type: str, func_name: str = 'Hvp_', nstep=0):
     return fp
 
 
+def extract_matmuls(expr):
+    """Extract Mat_Mul nodes from an expression and replace with placeholders.
+
+    Walks the expression tree, finds all Mat_Mul nodes, and replaces them with
+    iVar placeholders (_sz_mm_0, _sz_mm_1, ...). Handles nested Mat_Mul correctly —
+    inner Mat_Mul is extracted first, then the outer one uses the placeholder.
+
+    Short-circuit: if the expression contains no Mat_Mul, returns
+    ``(expr, [])`` unchanged without tree reconstruction, so non-matrix
+    equations are untouched.
+
+    Parameters
+    ----------
+    expr : sympy.Expr
+        Input expression that may contain Mat_Mul nodes.
+
+    Returns
+    -------
+    new_expr : sympy.Expr
+        Expression with Mat_Mul nodes replaced by iVar placeholders.
+    matmul_list : list of tuple
+        List of (placeholder_iVar, matrix_arg, operand_arg) triples. To
+        precompute: ``placeholder = matrix_arg @ operand_arg``.
+    """
+    # Fast path: no Mat_Mul means no transformation at all — preserves
+    # original expression and avoids reconstruction side effects.
+    if not (hasattr(expr, 'has') and expr.has(Mat_Mul)):
+        return expr, []
+
+    matmul_list = []
+    counter = [0]
+
+    def walk(e):
+        if isinstance(e, Mat_Mul):
+            # Recurse into args first (handle nested Mat_Mul)
+            new_args = [walk(a) for a in e.args]
+            name = f'_sz_mm_{counter[0]}'
+            counter[0] += 1
+            placeholder = iVar(name, internal_use=True)
+            if len(new_args) == 2:
+                matrix_arg = new_args[0]
+                operand_arg = new_args[1]
+            else:
+                # Mat_Mul(A, B, C, ...): fold into A @ (B @ C @ ...)
+                matrix_arg = new_args[0]
+                operand_arg = Mat_Mul(*new_args[1:])
+            matmul_list.append((placeholder, matrix_arg, operand_arg))
+            return placeholder
+        if hasattr(e, 'args') and len(e.args) > 0 and not e.is_Atom:
+            new_args = [walk(a) for a in e.args]
+            try:
+                return e.func(*new_args)
+            except Exception:
+                return e
+        return e
+
+    new_expr = walk(expr)
+    return new_expr, matmul_list
+
+
 def print_eqn_assignment(EQNs: Dict[str, Eqn],
                          EqnAddr: Address,
                          module_printer=False):

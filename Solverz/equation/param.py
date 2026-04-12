@@ -20,6 +20,39 @@ class ParamBase:
                  dtype=float,
                  sparse=False,
                  is_alias=False):
+        # Time-varying sparse 2-D Params are unsupported by design.
+        # Solverz's code generation — both the legacy ``MatVecMul``
+        # path and the 0.8.1 ``Mat_Mul`` ``SolCF.csc_matvec`` fast
+        # path — freezes a sparse ``dim=2`` param's CSC
+        # decomposition (``<name>_data`` / ``_indices`` / ``_indptr``
+        # / ``_shape0``) at model-build time. The mutable-matrix
+        # Jacobian kernel caches its ``.data`` inside @njit scatter-
+        # add loops, also at model-build time. A runtime trigger
+        # update would silently be ignored by every downstream
+        # consumer and produce wrong Newton steps.
+        #
+        # Reject at construction time so the error fires at the line
+        # where the user wrote the offending declaration, rather
+        # than deep inside ``FormJac``. ``TimeSeriesParam`` has the
+        # same restriction (checked in its own ``__init__`` below,
+        # since it always passes ``triggerable=False`` to this
+        # constructor).
+        if sparse and dim == 2 and triggerable:
+            raise NotImplementedError(
+                f"Parameter {name!r}: a sparse 2-D ``Param`` cannot "
+                f"be declared ``triggerable=True``. Time-varying "
+                f"sparse matrices are unsupported because Solverz's "
+                f"code generation caches the matrix's CSC fields at "
+                f"model-build time; a runtime trigger update would "
+                f"silently be ignored. If you need a matrix whose "
+                f"values change at runtime, rewrite the equation in "
+                f"explicit element-wise form (one scalar ``Eqn`` per "
+                f"row) using the per-row coefficients as 1-D "
+                f"``Param`` or ``TimeSeriesParam`` instances, or use "
+                f"a dense ``dim=2`` parameter (``sparse=False``) — "
+                f"the fallback scipy path re-evaluates the full "
+                f"expression on every call and tolerates updates."
+            )
         self.name = name
         self.triggerable = triggerable
         self.trigger_var = [trigger_var] if isinstance(trigger_var, str) else trigger_var
@@ -113,6 +146,23 @@ class TimeSeriesParam(Param):
                  dtype=float,
                  sparse=False
                  ):
+        # ``TimeSeriesParam`` is the other class of time-varying
+        # parameter Solverz supports. The same immutability
+        # constraint as in ``ParamBase.__init__`` applies to sparse
+        # 2-D matrices: the generated module caches CSC fields at
+        # build time and ``get_v_t(t)`` updates would be invisible
+        # to the downstream fast path.
+        if sparse and dim == 2:
+            raise NotImplementedError(
+                f"Parameter {name!r}: a sparse 2-D "
+                f"``TimeSeriesParam`` is not supported. Solverz's "
+                f"code generation caches the matrix's CSC fields at "
+                f"model-build time; a time-series update at runtime "
+                f"would silently be ignored. Use a 1-D "
+                f"``TimeSeriesParam`` (scale / per-row coefficients) "
+                f"and assemble the matrix element-wise, or use a "
+                f"dense ``dim=2`` parameter (``sparse=False``)."
+            )
         if value is None:
             value = v_series[0]
         super().__init__(name,

@@ -340,7 +340,6 @@ expected6 = """def F_(t, y_, p_):
     ax = p_["ax"]
     lam = p_["lam"]
     G6 = p_["G6"].get_v_t(t)
-    A = p_["A"]
     ax = ax_trigger_func(x)
     return inner_F(_F_, omega, delta, x, y, ax, lam, G6)
 """.strip()
@@ -433,8 +432,8 @@ expected9 = """def inner_F0(delta, omega):
 expected10 = """def inner_F1(lam, x, y):
     return lam*y + x
 """.strip()
-expected11 = """def inner_F2(A, x):
-    return (A@x)
+expected11 = """def inner_F2(_sz_mm_0):
+    return _sz_mm_0
 """.strip()
 
 
@@ -450,8 +449,11 @@ def test_print_sub_inner_F():
     EQNs['b'] = Ode('b', x + y * lam, diff_var=x)
     EQNs['c'] = Eqn('c', Mat_Mul(A, x))
 
-    code_blocks, no_njit = print_sub_inner_F(EQNs)
+    code_blocks, precompute_info = print_sub_inner_F(EQNs)
     assert code_blocks[0] == expected9
     assert code_blocks[1] == expected10
     assert code_blocks[2] == expected11
-    assert no_njit == {2}  # EQNs['c'] uses Mat_Mul
+    # Mat_Mul equation got precompute info; others are empty
+    assert precompute_info[2]['matmuls']  # EQNs['c'] has one Mat_Mul
+    assert not precompute_info[0]['matmuls']  # non-Mat_Mul: empty
+    assert not precompute_info[1]['matmuls']

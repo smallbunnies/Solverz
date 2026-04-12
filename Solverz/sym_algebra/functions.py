@@ -163,6 +163,40 @@ class Diag(MatrixFunction):
         return r'diag(' + printer._print(self.args[0], **kwargs) + r')'
 
 
+class SpDiag(MatrixFunction):
+    """Sparse-format diagonal matrix constructor.
+
+    Same semantics as ``Diag`` but prints to ``sps.diags`` (scipy.sparse)
+    instead of ``np.diagflat`` (dense). Used by the module printer to compute
+    mutable matrix Jacobian blocks with sparse ops at both init time
+    (``Value0``) and runtime, so the sparsity patterns match exactly.
+
+    Do not construct this directly — it is created via
+    ``expr.replace(Diag, SpDiag)`` in mutable-matrix code generation.
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        if len(args) != 1:
+            raise TypeError(f"SpDiag takes 1 positional argument but {len(args)} were given!")
+        if args[0] == S.Zero:
+            return 0
+        elif isinstance(args[0], Number):
+            return args[0]
+
+    def _sympystr(self, printer, **kwargs):
+        return 'sp_diag({operand})'.format(operand=printer._print(self.args[0]))
+
+    def _numpycode(self, printer, **kwargs):
+        return r'sps.diags(' + printer._print(self.args[0], **kwargs) + r')'
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
 # %% Univariate func
 @VarParser
 class UniVarFunc(Function):

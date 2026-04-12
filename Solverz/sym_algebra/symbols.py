@@ -70,6 +70,17 @@ Solverz_internal_name = ['y_', 'F_', 'F__' 'p_', 'J_', 'p__'
                          'row', 'col', 'data', '_F_', 'data_', 'Hvp_', 'v_', 'row_hvp', 'col_hvp', 'data_hvp',
                          '_data_', '_data_hvp']
 
+# Reserved *prefixes* for code-generator internal helper identifiers.
+# Any user symbol whose name starts with one of these is rejected at
+# model-build time so the code generator can emit unlimited helpers of
+# the form ``<prefix><int>`` without risk of shadowing a user symbol.
+#
+# - ``_sz_mm_`` : Mat_Mul precompute placeholders in the F_/J_ wrapper
+#                 (e.g. ``_sz_mm_0 = G @ e``).
+# - ``_sz_mb_`` : mutable-matrix Jacobian block helpers (diag inners,
+#                 row/col-scale scaling vectors, mapping arrays).
+Solverz_internal_prefixes = ['_sz_mm_', '_sz_mb_']
+
 
 class SolSymBasic(Symbol):
     """
@@ -83,6 +94,15 @@ class SolSymBasic(Symbol):
             if not internal_use:
                 raise ValueError(
                     f"Solverz built-in name {name}, cannot be used as variable name.")
+        if not internal_use:
+            for prefix in Solverz_internal_prefixes:
+                if name.startswith(prefix):
+                    raise ValueError(
+                        f"Symbol name {name!r} starts with Solverz-reserved "
+                        f"internal prefix {prefix!r}. This prefix is used by "
+                        f"the code generator for Mat_Mul / mutable-matrix "
+                        f"Jacobian helper names and cannot be used for user "
+                        f"variables or parameters.")
         obj = Symbol.__new__(cls, f'{name}')
         obj.name = f'{name}'
         obj.dim = dim
