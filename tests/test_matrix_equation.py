@@ -489,3 +489,198 @@ def test_nested_matmul_smoke(tmp_path):
     expected = np.linalg.solve(AB, np.array([3.0, 4.0]))
     np.testing.assert_allclose(sol_inline.y.array, expected, atol=1e-10)
     np.testing.assert_allclose(sol_mod.y.array, expected, atol=1e-10)
+
+
+def test_nested_matmul_outer_fallback_demotes_inner(tmp_path):
+    """Review R2: when the outer of a nested ``Mat_Mul`` cannot hit
+    the fast path (e.g. ``Mat_Mul(-A, Mat_Mul(B, x))`` — the outer
+    matrix is ``-A``, not a bare ``Para``), the inner placeholder
+    must be **demoted** from the fast path to the fallback. The
+    wrapper needs to define ``_sz_mm_0`` (the inner B@x) before the
+    outer ``_sz_mm_1 = (-A) @ _sz_mm_0`` scipy SpMV runs. A classifier
+    that looks only at ``matrix_arg`` leaves ``_sz_mm_0`` on the
+    fast path (B is a bare sparse Para) and the generated wrapper
+    references an undefined local.
+
+    Locks in the dependency-aware classification added after the
+    ``csc_matvec`` review pass.
+    """
+    m = Model()
+    m.x = Var('x', [0.5, 0.5])
+    m.b = Param('b', [3.0, 4.0])
+    m.A = Param('A', [[1.0, 0.5], [0.5, 1.0]], dim=2, sparse=True)
+    m.B = Param('B', [[2.0, 0.0], [0.0, 2.0]], dim=2, sparse=True)
+    # Outer ``-A`` is Mul(-1, A) — not a bare Para — so it falls
+    # back. Inner Mat_Mul(B, x) looks fast in isolation but must be
+    # demoted because the outer fallback references it.
+    m.eqn = Eqn('f', Mat_Mul(-m.A, Mat_Mul(m.B, m.x)) - m.b)
+
+    spf, y0 = m.create_instance()
+
+    # Inline solve (independent correctness reference)
+    mdl_inline = made_numerical(spf, y0, sparse=True)
+    sol_inline = nr_method(mdl_inline, y0)
+
+    # Module solve — this is the path that had the R2 bug. If the
+    # inner placeholder is still fast-path-classified, the wrapper
+    # emits ``_sz_mm_1 = (-A) @ _sz_mm_0`` with ``_sz_mm_0`` never
+    # defined anywhere and ``F_`` raises ``NameError`` on entry.
+    dir_mod = str(tmp_path / 'nested_neg')
+    printer = module_printer(spf, y0, 'nested_neg_mod',
+                             directory=dir_mod, jit=True)
+    printer.render()
+    sys.path.insert(0, dir_mod)
+    from nested_neg_mod import mdl as mdl_mod, y as y_mod
+    sol_mod = nr_method(mdl_mod, y_mod)
+
+    # Analytical: -A @ B @ x = b → x = solve(-AB, b)
+    A = np.array([[1.0, 0.5], [0.5, 1.0]])
+    B = np.array([[2.0, 0.0], [0.0, 2.0]])
+    expected = np.linalg.solve(-A @ B, np.array([3.0, 4.0]))
+    np.testing.assert_allclose(sol_inline.y.array, expected, atol=1e-10)
+    np.testing.assert_allclose(sol_mod.y.array, expected, atol=1e-10)
+
+    # Also inspect the generated source to make sure the wrapper
+    # actually emits both ``_sz_mm_0`` and ``_sz_mm_1`` in
+    # topological order. A regression that re-introduces the R2
+    # bug would skip the ``_sz_mm_0`` assignment.
+    num_func_path = os.path.join(dir_mod, 'nested_neg_mod', 'num_func.py')
+    with open(num_func_path) as f:
+        source = f.read()
+    # The F_ wrapper body must contain both precompute assignments,
+    # and _sz_mm_0 must come before _sz_mm_1 (topological order).
+    f_body_start = source.index('def F_(')
+    f_body_end = source.index('@njit', f_body_start)
+    f_body = source[f_body_start:f_body_end]
+    pos_mm0 = f_body.find('_sz_mm_0 = ')
+    pos_mm1 = f_body.find('_sz_mm_1 = ')
+    assert pos_mm0 >= 0, (
+        'F_ wrapper missing _sz_mm_0 assignment — inner fast path '
+        'was not demoted even though outer fallback depends on it')
+    assert pos_mm1 >= 0, 'F_ wrapper missing _sz_mm_1 assignment'
+    assert pos_mm0 < pos_mm1, (
+        'F_ wrapper emits _sz_mm_1 before _sz_mm_0 — non-topological '
+        'precompute order would break at runtime')
+
+
+def test_print_F_keeps_sparse_params_in_param_list():
+    """Review R1: ``print_F`` must not drop a wrapper assignment for
+    a sparse ``dim=2`` ``Param`` whose name ends up in
+    ``param_list``. ``print_param``'s ``TimeSeriesParam`` branch
+    appends every time-series parameter to ``param_list``
+    unconditionally, so a sparse time-series parameter is (a)
+    loaded in the wrapper as ``A = p_["A"].get_v_t(t)`` and (b)
+    passed through to ``inner_F`` as an argument. A filter that
+    checks only ``dim == 2 and sparse`` would drop the wrapper
+    load but still emit ``inner_F(..., A, ...)``, producing a
+    ``NameError`` on the first call.
+
+    We test the filter directly via ``print_F`` with a constructed
+    ``PARAM`` dict — a sparse 2-D ``TimeSeriesParam`` is hard to
+    build end-to-end through ``Model``/``create_instance`` because
+    its ``v_series`` is forced to 1-D, but the filter logic is
+    what the reviewer flagged and it is fully testable in
+    isolation.
+    """
+    from scipy.sparse import csc_array
+    from Solverz.code_printer.python.module.module_printer import print_F
+    from Solverz.equation.param import TimeSeriesParam
+    from Solverz.utilities.address import Address
+
+    # Construct a 2-D sparse ``TimeSeriesParam`` by reaching past
+    # the ``Array(v_series, dim=1)`` normalisation: set the
+    # attributes the filter actually inspects. This is the minimum
+    # shape the R1 regression reasons about.
+    ts = TimeSeriesParam.__new__(TimeSeriesParam)
+    ts.name = 'A'
+    ts.dim = 2
+    ts.sparse = True
+    ts.is_alias = False
+    ts.triggerable = False
+    ts.trigger_var = None
+    ts.trigger_fun = None
+    ts.dtype = float
+    # Stash a csc_array so the wrapper could actually use it if it
+    # wanted to. The filter never dereferences v, but parse_p might.
+    ts._ParamBase__v = csc_array(np.array([[1.0, 0.0], [0.0, 1.0]]))
+
+    PARAM = {'A': ts}
+    var_addr = Address()
+    var_addr.add('x', 2)
+
+    source = print_F('AE', var_addr, PARAM, nstep=0, precompute_info=None)
+    # Before the R1 fix, the filter would strip the wrapper load
+    # even though ``A`` is still in ``param_list`` — so ``inner_F``
+    # received ``A`` as an argument with no prior definition.
+    assert 'A = p_["A"].get_v_t' in source, (
+        'print_F dropped the TimeSeriesParam wrapper load; inner_F '
+        'will reference an undefined local A')
+    # And ``inner_F`` is still called with A in its argument list
+    # (we care about the symmetry).
+    assert 'inner_F(_F_, x, A)' in source, (
+        'print_F dropped A from the inner_F call site — the filter '
+        'is now too aggressive in the other direction')
+
+
+def test_matmul_three_arg_operand_falls_back(tmp_path):
+    """Review R3: ``Mat_Mul(A, B, x)`` — Solverz allows 3+-argument
+    ``Mat_Mul`` nodes, and ``extract_matmuls`` folds them into a
+    single placeholder with ``matrix_arg = A`` and
+    ``operand_arg = Mat_Mul(B, x)`` (the fresh inner ``Mat_Mul`` is
+    *not* re-walked). A classifier that looks only at ``matrix_arg``
+    would route this into the ``SolCF.csc_matvec`` fast path and
+    emit a call whose operand is ``B @ x`` — but ``B`` is a sparse
+    ``dim=2`` ``Para``, not available inside ``inner_F`` by name,
+    so the generated code would fail.
+
+    The fix is the ``_shape_is_fast`` operand check: fast path
+    requires the operand to contain neither ``Mat_Mul`` nodes nor
+    sparse ``dim=2`` ``Para`` references.
+    """
+    m = Model()
+    m.x = Var('x', [0.5, 0.5])
+    m.b = Param('b', [3.0, 4.0])
+    m.A = Param('A', [[1.0, 0.5], [0.5, 1.0]], dim=2, sparse=True)
+    m.B = Param('B', [[2.0, 0.0], [0.0, 2.0]], dim=2, sparse=True)
+    # 3-arg Mat_Mul: A @ B @ x
+    m.eqn = Eqn('f', Mat_Mul(m.A, m.B, m.x) - m.b)
+
+    spf, y0 = m.create_instance()
+    mdl_inline = made_numerical(spf, y0, sparse=True)
+    sol_inline = nr_method(mdl_inline, y0)
+
+    dir_mod = str(tmp_path / 'three_arg')
+    printer = module_printer(spf, y0, 'three_arg_mod',
+                             directory=dir_mod, jit=True)
+    printer.render()
+    sys.path.insert(0, dir_mod)
+    from three_arg_mod import mdl as mdl_mod, y as y_mod
+    sol_mod = nr_method(mdl_mod, y_mod)
+
+    A = np.array([[1.0, 0.5], [0.5, 1.0]])
+    B = np.array([[2.0, 0.0], [0.0, 2.0]])
+    expected = np.linalg.solve(A @ B, np.array([3.0, 4.0]))
+    np.testing.assert_allclose(sol_inline.y.array, expected, atol=1e-10)
+    np.testing.assert_allclose(sol_mod.y.array, expected, atol=1e-10)
+
+    # The generated F_ wrapper must keep B loaded (it appears in the
+    # fallback operand) and must NOT invoke ``SolCF.csc_matvec`` with
+    # a ``(B@x)`` operand — a regression would do either.
+    num_func_path = os.path.join(dir_mod, 'three_arg_mod', 'num_func.py')
+    with open(num_func_path) as f:
+        source = f.read()
+    f_body_start = source.index('def F_(')
+    f_body_end = source.index('@njit', f_body_start)
+    f_body = source[f_body_start:f_body_end]
+    assert 'B = p_["B"]' in f_body, (
+        'F_ wrapper filter removed B load even though B is needed by '
+        'the fallback Mat_Mul(A, B, x) evaluation')
+    # And check that the csc_matvec fast path is NOT used for this
+    # placeholder — a regression would emit
+    # ``SolCF.csc_matvec(A_data, ..., (B@x))`` inside inner_F.
+    inner_body_start = source.index('def inner_F(')
+    inner_body_end = source.index('def inner_F0', inner_body_start)
+    inner_body = source[inner_body_start:inner_body_end]
+    assert 'SolCF.csc_matvec' not in inner_body, (
+        'inner_F routed a Mat_Mul(A, B, x) placeholder through the '
+        'csc_matvec fast path — operand is not a clean vector')

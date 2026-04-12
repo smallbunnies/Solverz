@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, Set, Tuple
+
 import numpy as np
 from sympy import Function
 from Solverz.code_printer.python.utilities import *
@@ -343,29 +345,154 @@ def print_inner_J(var_addr: Address,
             'mut_mat_mappings': mut_mat_mappings}
 
 
-def _is_csc_matvec_fast_path(matrix_arg, PARAM):
-    """Whether a ``Mat_Mul(matrix_arg, operand)`` placeholder can be
-    computed by the Numba ``SolCF.csc_matvec`` helper inside
-    ``inner_F`` instead of a scipy SpMV in the Python ``F_`` wrapper.
+def _classify_matmul_placeholders(precompute_info, PARAM):
+    """Classify every extracted ``Mat_Mul`` placeholder into fast /
+    fallback and compute which ``Para`` symbols the fallback code
+    path still needs to have loaded in the ``F_`` wrapper.
 
-    The condition is strict: the matrix must be a bare ``Para`` (no
-    ``Mul(-1, ...)``, no nested expression) backed by a
-    ``Param(dim=2, sparse=True)`` in the equation's ``PARAM`` dict.
-    Those matrices already have their CSC decomposition
-    (``_data``/``_indices``/``_indptr``/``_shape0``) emitted into
-    ``inner_F``'s argument list by ``print_param``, so the fast path
-    just assembles the matvec call.
+    This replaces the earlier per-placeholder ``_is_csc_matvec_fast_path``
+    check, which looked only at ``matrix_arg`` and did not account for
+    three concrete regressions that broke generated code:
 
-    Anything else (negated matrices, matrix-matrix products,
-    operands that are themselves placeholder iVars, dense dim=2
-    params) falls back to the existing scipy SpMV path in ``F_``.
+    1. **Nested fallbacks referencing fast placeholders** — e.g.
+       ``Mat_Mul(-A, Mat_Mul(B, x))``. ``extract_matmuls`` visits the
+       inner ``Mat_Mul(B, x)`` first and produces placeholder
+       ``_sz_mm_0``; the outer's matrix is ``-A`` (fallback) and its
+       operand is ``_sz_mm_0``. A naive classifier marks ``_sz_mm_0``
+       as fast (matrix is a bare ``Para``) but the outer fallback
+       still expects ``_sz_mm_0`` to be materialised in the wrapper
+       before its scipy SpMV runs, so the wrapper emits a reference
+       to an undefined name.
+
+    2. **Unresolved matrix factors in the operand** — e.g.
+       ``Mat_Mul(A, B, x)``. Solverz's ``Mat_Mul`` accepts any number
+       of arguments; ``extract_matmuls`` folds 3+-arg nodes into
+       ``matrix_arg = A`` / ``operand_arg = Mat_Mul(B, x)``, and the
+       freshly-constructed inner ``Mat_Mul(B, x)`` is not re-walked.
+       A classifier that accepts this as fast would feed
+       ``Mat_Mul(B, x)`` into ``SolCF.csc_matvec`` as if it were a
+       plain vector, which either crashes (``B`` isn't in ``inner_F``'s
+       argument list) or silently produces wrong results.
+
+    3. **Sparse matrix references in the operand** — e.g. an operand
+       expression that still contains a sparse ``dim=2`` ``Para``
+       symbol. These symbols are not in ``inner_F``'s argument list
+       (only their CSC flat fields are), so inlining the operand
+       inside ``inner_F`` would reference an undefined name.
+
+    The algorithm is a two-pass fixed point:
+
+    - **Shape filter** — a placeholder is a *fast candidate* iff its
+      ``matrix_arg`` is a bare sparse ``dim=2`` ``Para`` **and** its
+      ``operand_arg`` contains neither ``Mat_Mul`` atoms nor sparse
+      ``dim=2`` ``Para`` references.
+    - **Demotion** — any fast candidate whose name appears as a free
+      symbol in another (non-fast) placeholder's ``matrix_arg`` or
+      ``operand_arg`` is demoted to fallback. The scan repeats until
+      no more demotions happen (needed because demotion can cascade
+      in a chain of nested ``Mat_Mul``s, though this is rare).
+
+    Returns
+    -------
+    fast_info : dict[str, tuple[str, sympy.Expr]]
+        Maps a fast-path placeholder's name to ``(matrix_name,
+        operand_arg)`` so callers can emit the
+        ``SolCF.csc_matvec(<m>_data, ..., operand)`` call directly.
+    fallback_names : set[str]
+        Names of placeholders that must be computed in the ``F_``
+        wrapper (via scipy) and passed through ``inner_F`` as extra
+        arguments.
+    fallback_symbols : set[str]
+        Para names that appear anywhere in a fallback placeholder's
+        ``matrix_arg`` or ``operand_arg``. The wrapper must load each
+        of these (``A = p_["A"]``) or the scipy evaluation below
+        fails.
     """
-    if not isinstance(matrix_arg, Para):
-        return False
-    if matrix_arg.name not in PARAM:
-        return False
-    p = PARAM[matrix_arg.name]
-    return getattr(p, 'dim', 0) == 2 and getattr(p, 'sparse', False)
+    fast_info: Dict[str, Tuple[str, Any]] = {}
+    fallback_names: Set[str] = set()
+    fallback_symbols: Set[str] = set()
+
+    if not precompute_info:
+        return fast_info, fallback_names, fallback_symbols
+
+    # Gather (name, matrix_arg, operand_arg) triples, deduped by name.
+    all_triples: List[Tuple[str, Any, Any]] = []
+    seen: Set[str] = set()
+    for eqn_info in precompute_info:
+        for placeholder, matrix_arg, operand_arg in eqn_info['matmuls']:
+            if placeholder.name in seen:
+                continue
+            seen.add(placeholder.name)
+            all_triples.append((placeholder.name, matrix_arg, operand_arg))
+
+    def _shape_is_fast(mat, op):
+        # matrix_arg must be a bare sparse dim=2 Para
+        if not isinstance(mat, Para):
+            return False
+        if mat.name not in PARAM:
+            return False
+        p = PARAM[mat.name]
+        if not (getattr(p, 'dim', 0) == 2
+                and getattr(p, 'sparse', False)):
+            return False
+        # operand_arg must not contain any Mat_Mul node — ``Mat_Mul``
+        # inside an operand means extract_matmuls folded a multi-arg
+        # Mat_Mul and left an inner product unresolved (see R3).
+        if hasattr(op, 'has') and op.has(Mat_Mul):
+            return False
+        # operand_arg must not reference any sparse dim=2 Para — those
+        # are not available by name inside ``inner_F`` (only their CSC
+        # flat fields are), so a direct reference would NameError.
+        if hasattr(op, 'free_symbols'):
+            for s in op.free_symbols:
+                if isinstance(s, Para) and s.name in PARAM:
+                    p_op = PARAM[s.name]
+                    if (getattr(p_op, 'dim', 0) == 2
+                            and getattr(p_op, 'sparse', False)):
+                        return False
+        return True
+
+    # Pass 1 — shape-based classification.
+    fast_candidates: Set[str] = set()
+    for name, mat, op in all_triples:
+        if _shape_is_fast(mat, op):
+            fast_candidates.add(name)
+
+    # Pass 2 — demote fast candidates consumed by any non-fast
+    # placeholder's matrix or operand. Repeat until fixed point so
+    # cascading dependencies propagate.
+    changed = True
+    while changed:
+        changed = False
+        for name, mat, op in all_triples:
+            if name in fast_candidates:
+                continue  # not a consumer of interest — fast placeholders
+                          # cannot create wrapper-side dependencies
+            for expr in (mat, op):
+                if not hasattr(expr, 'free_symbols'):
+                    continue
+                for s in expr.free_symbols:
+                    s_name = getattr(s, 'name', None)
+                    if s_name and s_name in fast_candidates:
+                        fast_candidates.discard(s_name)
+                        changed = True
+
+    # Build the output sets.
+    for name, mat, op in all_triples:
+        if name in fast_candidates:
+            # ``mat`` is guaranteed to be a Para by _shape_is_fast.
+            fast_info[name] = (mat.name, op)
+        else:
+            fallback_names.add(name)
+            # Collect every Para referenced by the fallback expression
+            # so the wrapper filter keeps the corresponding loads.
+            for expr in (mat, op):
+                if hasattr(expr, 'free_symbols'):
+                    for s in expr.free_symbols:
+                        if isinstance(s, Para):
+                            fallback_symbols.add(s.name)
+
+    return fast_info, fallback_names, fallback_symbols
 
 
 def print_F(eqs_type: str,
@@ -399,38 +526,38 @@ def print_F(eqs_type: str,
     param_assignments, param_list = print_param(PARAM,
                                                 include_sparse_in_list=False)
 
-    # Identify sparse dim=2 Paras that are *only* used as fast-path
-    # ``Mat_Mul`` matrix operands. These don't need to be loaded in
-    # the wrapper at all — their CSC decomposition
-    # (``<name>_data``/``_indices``/``_indptr``/``_shape0``) already
-    # flows through ``param_list`` to ``inner_F`` and the fast-path
-    # matvec runs entirely inside ``inner_F``. Loading the whole
-    # sparse matrix in the wrapper would be dead work.
-    fallback_mat_symbols = set()
-    if precompute_info:
-        for eqn_info in precompute_info:
-            for _, matrix_arg, _ in eqn_info['matmuls']:
-                if _is_csc_matvec_fast_path(matrix_arg, PARAM):
-                    continue
-                # Fallback case: any Para shown inside the fallback
-                # matrix_arg is still needed in the wrapper for the
-                # scipy SpMV to execute correctly.
-                if hasattr(matrix_arg, 'free_symbols'):
-                    for s in matrix_arg.free_symbols:
-                        if isinstance(s, Para):
-                            fallback_mat_symbols.add(s.name)
+    # Shared classification (matches what ``print_inner_F`` computes,
+    # see :func:`_classify_matmul_placeholders`). ``fallback_symbols``
+    # names every ``Para`` that the wrapper must still materialise so
+    # the scipy SpMV in a fallback precompute can execute correctly.
+    _, fallback_names, fallback_symbols = _classify_matmul_placeholders(
+        precompute_info, PARAM)
 
-    # Filter param_assignments: drop sparse dim=2 loads whose matrix
-    # is never referenced outside fast-path Mat_Mul.
+    # Drop sparse dim=2 ``Para`` wrapper loads that are (a) not
+    # referenced by any fallback scipy SpMV **and** (b) not in
+    # ``param_list`` — i.e., they are loaded purely as a side-effect
+    # of ``print_param`` but never used downstream. The
+    # ``param_list`` guard is what keeps sparse ``TimeSeriesParam``
+    # loads (``A = p_["A"].get_v_t(t)``) in place: those params are
+    # *in* ``param_list`` because ``print_param``'s TimeSeriesParam
+    # branch appends them, and dropping the wrapper load would leave
+    # ``inner_F(..., A, ...)`` referencing an undefined local.
+    param_list_names = set()
+    for entry in param_list:
+        n = getattr(entry, 'name', None)
+        if n is not None:
+            param_list_names.add(n)
     filtered_assignments = []
     for assign in param_assignments:
         lhs_name = getattr(assign.lhs, 'name', None)
         if lhs_name and lhs_name in PARAM:
             p_obj = PARAM[lhs_name]
-            if (getattr(p_obj, 'dim', 0) == 2
-                    and getattr(p_obj, 'sparse', False)
-                    and lhs_name not in fallback_mat_symbols):
-                continue  # fast-path only, no need to load in wrapper
+            is_sparse_dim2 = (getattr(p_obj, 'dim', 0) == 2
+                              and getattr(p_obj, 'sparse', False))
+            if (is_sparse_dim2
+                    and lhs_name not in fallback_symbols
+                    and lhs_name not in param_list_names):
+                continue  # nothing downstream needs this load
         filtered_assignments.append(assign)
     body.extend(filtered_assignments)
     body.extend(print_trigger(PARAM))
@@ -438,7 +565,10 @@ def print_F(eqs_type: str,
     # Generate precompute assignments for fallback placeholders only:
     # ``_sz_mm_N = matrix_arg @ operand_arg``. Fast-path placeholders
     # are handled inside ``inner_F`` via ``SolCF.csc_matvec`` and do
-    # not need a wrapper-level precompute.
+    # not need a wrapper-level precompute. Iteration order is
+    # precompute_info order, which is ``extract_matmuls`` post-order
+    # (inner Mat_Mul first), so any fallback that references a
+    # previously-demoted fast placeholder sees it defined.
     inner_extra_args = []
     if precompute_info:
         seen_placeholders = set()
@@ -447,8 +577,8 @@ def print_F(eqs_type: str,
                 if placeholder.name in seen_placeholders:
                     continue
                 seen_placeholders.add(placeholder.name)
-                if _is_csc_matvec_fast_path(matrix_arg, PARAM):
-                    continue
+                if placeholder.name not in fallback_names:
+                    continue  # handled inside inner_F
                 # Fallback: _sz_mm_N = matrix_arg @ operand_arg
                 body.append(Assignment(placeholder,
                                        Mat_Mul(matrix_arg, operand_arg)))
@@ -491,21 +621,28 @@ def print_inner_F(EQNs: Dict[str, Eqn],
     for var in var_list + param_list:
         args.append(symbols(var.name, real=True))
 
-    # Classify each placeholder as fast-path (handled inline via
-    # SolCF.csc_matvec) vs fallback (passed as arg from the wrapper).
-    fast_path_matvec = []  # list of (placeholder_iVar, matrix_name, operand_expr)
-    fallback_placeholders = []  # list of iVar
+    # Shared classification with ``print_F``. Both functions must
+    # agree on which placeholders are fast-path vs fallback —
+    # divergence produces ``inner_F`` that either references an
+    # undefined local or receives ``_sz_mm_N`` twice.
+    fast_info, fallback_names, _ = _classify_matmul_placeholders(
+        precompute_info, PARAM)
+
+    # Collect ordered lists for code emission.
+    fast_path_matvec = []   # [(placeholder_iVar, matrix_name, operand)]
+    fallback_placeholders = []  # [iVar]
     if precompute_info:
         seen = set()
         for eqn_info in precompute_info:
-            for placeholder, matrix_arg, operand_arg in eqn_info['matmuls']:
+            for placeholder, _, _ in eqn_info['matmuls']:
                 if placeholder.name in seen:
                     continue
                 seen.add(placeholder.name)
-                if _is_csc_matvec_fast_path(matrix_arg, PARAM):
+                if placeholder.name in fast_info:
+                    mat_name, operand_arg = fast_info[placeholder.name]
                     fast_path_matvec.append(
-                        (placeholder, matrix_arg.name, operand_arg))
-                else:
+                        (placeholder, mat_name, operand_arg))
+                elif placeholder.name in fallback_names:
                     fallback_placeholders.append(placeholder)
 
     # Fallback placeholders come in as extra arguments (old path).
