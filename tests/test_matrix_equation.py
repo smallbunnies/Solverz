@@ -217,28 +217,61 @@ def test_reserved_prefix_rejected():
         Param('_sz_mm_42', [1.0])
 
 
-def test_triggerable_param_in_matmul_errors():
-    """Finding 2: a triggerable parameter used in the same equation as
-    ``Mat_Mul`` must raise ``NotImplementedError`` at ``FormJac`` /
-    ``create_instance`` time. Silently freezing the triggered values
-    would lead to wrong Newton steps once the trigger fires.
+def test_triggerable_vector_next_to_matmul_allowed():
+    """Finding 2 (narrowed in review pass R1): a triggerable *vector*
+    parameter sitting next to a ``Mat_Mul`` — but **not** inside its
+    matrix operand — must be allowed. The vector's current value is
+    read from ``p_`` on every Newton step, so the Layer-2 scatter-add
+    cache never sees a stale copy of it. Rejecting this case was the
+    original R1 complaint.
     """
-    import pytest
+    import scipy.sparse.linalg
     m = Model()
     m.x = Var('x', [0.5, 0.5])
-    m.b = Param('b', [4.0, 5.0])
-    # A triggerable param in the SAME equation as Mat_Mul.
+    m.b = Param('b', [5.0, 6.0])
     m.K = Param('K', [1.0, 1.0], triggerable=True,
                 trigger_var=['x'], trigger_fun=lambda x: 2 * x)
     m.A = Param('A', [[2, 1], [1, 3]], dim=2, sparse=True)
     m.eqn = Eqn('f', m.K * m.x + Mat_Mul(m.A, m.x) - m.b)
 
-    smdl, _ = m.create_instance()
-    from Solverz.variable.variables import Vars
-    from Solverz.utilities.address import Address
-    # Reuse the existing y0 from create_instance
-    _, y0 = m.create_instance()
-    with pytest.raises(NotImplementedError, match='Mat_Mul'):
+    smdl, y0 = m.create_instance()
+    # The narrow check must NOT fire for a triggerable scalar vector.
+    smdl.FormJac(y0)
+    mdl = made_numerical(smdl, y0, sparse=True)
+    # And the model must still compute a correct Newton step. Only
+    # sanity-check the residual at y0 (not convergence, since the
+    # triggerable term has no dK/dx in the analytical Jacobian).
+    F0 = mdl.F(y0, mdl.p)
+    J0 = mdl.J(y0, mdl.p)
+    assert F0.shape == (2,)
+    assert J0.shape == (2, 2)
+
+
+def test_triggerable_matrix_in_matmul_errors():
+    """Finding 2 (R1-narrowed): a triggerable 2-D *sparse matrix* used
+    as the matrix operand of ``Mat_Mul`` MUST raise
+    ``NotImplementedError`` at ``FormJac`` time. The Layer-2 kernel
+    would otherwise bake the matrix's ``.data`` into the generated
+    scatter-add loop and keep using the frozen values after a trigger
+    fires — producing wrong Newton steps.
+    """
+    import pytest
+    import numpy as np
+    from scipy.sparse import csc_array
+    m = Model()
+    m.x = Var('x', [0.5, 0.5])
+    m.b = Param('b', [4.0, 5.0])
+    # Triggerable 2-D sparse matrix as Mat_Mul operand — forbidden.
+    m.A = Param('A', csc_array(np.array([[2., 1.], [1., 3.]])),
+                dim=2, sparse=True,
+                triggerable=True, trigger_var=['x'],
+                trigger_fun=lambda x: csc_array(
+                    np.array([[2., 1.], [1., 3.]])))
+    m.eqn = Eqn('f', Mat_Mul(m.A, m.x) - m.b)
+
+    smdl, y0 = m.create_instance()
+    with pytest.raises(NotImplementedError,
+                       match=r"triggerable 2-D sparse parameter 'A'"):
         smdl.FormJac(y0)
 
 
@@ -262,3 +295,197 @@ def test_dense_dim2_param_warning():
                           and 'dense 2-D' in str(x.message)]
         assert len(dense_warnings) >= 1, \
             'expected a UserWarning about dense dim=2 in Mat_Mul'
+
+
+def test_dense_dim2_param_jacobian_numerical(tmp_path):
+    """Finding 3 (R6.1): dense ``dim=2`` ``Param(sparse=False)`` must
+    not just warn — it must produce a *numerically correct* Jacobian
+    via the ``MutableMatJacDataModule`` fallback path. Inline mode
+    already works (it always re-evaluates the expression); the
+    regression risk is the module printer, which until the R1 fix
+    for the dense-vs-sparse decomposition would crash or silently
+    mis-index the fallback. Compare the two paths block-for-block.
+    """
+    m = Model()
+    m.x = Var('x', [0.5, 0.5])
+    m.b = Param('b', [4.0, 5.0])
+    m.A = Param('A', np.array([[2.0, 1.0], [1.0, 3.0]]),
+                dim=2, sparse=False)
+    m.eqn = Eqn('f', m.x * Mat_Mul(m.A, m.x) - m.b)
+
+    spf, y0 = m.create_instance()
+
+    # --- 1. Inline ---
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', UserWarning)
+        mdl_inline = made_numerical(spf, y0, sparse=True)
+
+    # --- 2. Module (jit=True) ---
+    dir_mod = str(tmp_path / 'dense_mat')
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', UserWarning)
+        printer = module_printer(spf, y0, 'dense_mat_mod',
+                                 directory=dir_mod, jit=True)
+        printer.render()
+    sys.path.insert(0, dir_mod)
+    from dense_mat_mod import mdl as mdl_mod, y as y_mod
+
+    # Drive by a non-trivial iterate so every block gets a distinct
+    # numeric value. 5 steps is plenty for NR on 2 unknowns.
+    y_test = copy.deepcopy(y0)
+    y_test_mod = copy.deepcopy(y_mod)
+    rng = np.random.default_rng(20260413)
+    seed = rng.uniform(0.5, 1.5, size=y0.array.shape[0])
+    y_test.array[:] = seed
+    y_test_mod.array[:] = seed
+    for step in range(5):
+        J_i = mdl_inline.J(y_test, mdl_inline.p)
+        J_m = mdl_mod.J(y_test_mod, mdl_mod.p)
+        np.testing.assert_allclose(
+            J_i.toarray(), J_m.toarray(), rtol=1e-10, atol=1e-12,
+            err_msg=f'dense dim=2 fallback J mismatch at step {step}')
+        F_val = mdl_inline.F(y_test, mdl_inline.p)
+        dy = scipy.sparse.linalg.spsolve(J_i, -F_val)
+        y_test.array[:] = y_test.array + dy
+        y_test_mod.array[:] = y_test_mod.array + dy
+
+
+def test_timeseries_param_next_to_matmul_allowed():
+    """Finding 2 / R1 (R6.2): a ``TimeSeriesParam`` (always 1-D) can
+    never be a ``Mat_Mul`` matrix operand, so the narrow R1
+    triggerable check never fires for it. A time-series scalar
+    sitting next to a ``Mat_Mul`` must therefore be allowed to build
+    and the J_ wrapper must be able to compute F and J without error.
+    Locks in that R1's narrowing also covers TimeSeriesParam.
+    """
+    from Solverz import TimeSeriesParam
+    m = Model()
+    m.x = Var('x', [0.5, 0.5])
+    m.b = Param('b', [5.0, 6.0])
+    # Scalar-valued time series — 1-D is the only shape TimeSeriesParam
+    # supports, which is also exactly why R1 narrowing is safe for it.
+    m.t_scale = TimeSeriesParam('t_scale',
+                                v_series=[1.0, 2.0],
+                                time_series=[0.0, 1.0])
+    m.A = Param('A', [[2, 1], [1, 3]], dim=2, sparse=True)
+    # TimeSeriesParam modulates the forcing term, not the variable
+    # being differentiated. This keeps the mutable-matrix Jacobian
+    # independent of t_scale while still making t_scale a free symbol
+    # of an equation that also contains Mat_Mul — exactly the scenario
+    # the narrow R1 check is meant to accept.
+    m.eqn = Eqn('f', Mat_Mul(m.A, m.x) - m.t_scale * m.b)
+
+    smdl, y0 = m.create_instance()
+    # The sole R1 assertion: the narrow check must NOT reject a
+    # TimeSeriesParam that sits in a Mat_Mul equation as long as it
+    # isn't the Mat_Mul matrix operand (which TimeSeriesParam can
+    # never be anyway — it's 1-D only). Downstream AE evaluation of
+    # TimeSeriesParam needs a ``t`` in the wrapper signature that
+    # plain AE models don't expose; that's orthogonal to R1 and is
+    # intentionally not exercised here.
+    smdl.FormJac(y0)
+    # The Jacobian block for ∂f/∂x is just ``A`` (constant), so we
+    # can inspect it structurally without calling F_ / J_.
+    assert len(smdl.jac.blocks) == 1
+    [jbs_row] = smdl.jac.blocks.values()
+    assert all(jb.DeriType == 'matrix' and not jb.is_mutable_matrix
+               for jb in jbs_row.values())
+
+
+def test_selective_njit_gating_element_wise_happy_path(tmp_path):
+    """Finding 1 (R6.3 positive case): a pure element-wise model with
+    NO sparse params must still produce ``@njit``-decorated ``inner_F``
+    / ``inner_J``. This locks in that the selective gating in
+    ``_has_sparse_in_param_list`` does not accidentally strip @njit
+    from the happy path.
+    """
+    m = Model()
+    m.x = Var('x', [1.0, 1.0])
+    m.a = Param('a', 2.0)
+    m.eqn = Eqn('f', m.a * m.x - 1.0)
+    smdl, y0 = m.create_instance()
+
+    dir_mod = str(tmp_path / 'njit_happy')
+    printer = module_printer(smdl, y0, 'njit_happy_mod',
+                             directory=dir_mod, jit=True)
+    printer.render()
+    num_func_path = os.path.join(dir_mod, 'njit_happy_mod', 'num_func.py')
+    with open(num_func_path) as f:
+        source = f.read()
+    assert '@njit(cache=True)\ndef inner_F(' in source, \
+        'Expected @njit on inner_F for pure element-wise model'
+    assert '@njit(cache=True)\ndef inner_J(' in source, \
+        'Expected @njit on inner_J for pure element-wise model'
+
+
+def test_selective_njit_gating_sparse_triggerable_skips_njit(tmp_path):
+    """Finding 1 (R6.3 negative case): a model whose ``PARAM`` dict
+    contains a sparse triggerable param must NOT put ``@njit`` on
+    ``inner_F`` / ``inner_J`` — Numba cannot digest scipy.sparse
+    arguments, and the gate must fire based on ``PARAM`` content, not
+    solely on equation structure.
+    """
+    from scipy.sparse import csc_array
+    m = Model()
+    m.x = Var('x', [1.0, 1.0])
+    m.a = Param('a', 2.0)
+    # Sparse + triggerable → unconditionally enters param_list via
+    # the ``if not sparse or triggerable`` branch in print_param.
+    m.K = Param('K', csc_array(np.array([[1.0, 0.0], [0.0, 1.0]])),
+                dim=2, sparse=True,
+                triggerable=True, trigger_var=['x'],
+                trigger_fun=lambda x: csc_array(np.diag(x)))
+    # Simple element-wise equation — K is NOT used in the residual,
+    # but it still lands in PARAM and therefore in param_list.
+    m.eqn = Eqn('f', m.a * m.x - 1.0)
+    smdl, y0 = m.create_instance()
+
+    dir_mod = str(tmp_path / 'njit_gated')
+    printer = module_printer(smdl, y0, 'njit_gated_mod',
+                             directory=dir_mod, jit=True)
+    printer.render()
+    num_func_path = os.path.join(dir_mod, 'njit_gated_mod', 'num_func.py')
+    with open(num_func_path) as f:
+        source = f.read()
+    lines = source.split('\n')
+    for i, line in enumerate(lines):
+        if line.startswith('def inner_F(') or line.startswith('def inner_J('):
+            prev = lines[i - 1] if i > 0 else ''
+            assert '@njit' not in prev, (
+                f'Expected NO @njit above {line!r} when PARAM contains '
+                f'a sparse triggerable Param, got prev={prev!r}')
+
+
+def test_nested_matmul_smoke(tmp_path):
+    """R6.4: ``Mat_Mul(A, Mat_Mul(B, x))`` — nested Mat_Mul — must
+    render (the ``extract_matmuls`` helper creates one placeholder
+    per nested level) and solve to the analytical solution.
+    """
+    m = Model()
+    m.x = Var('x', [0.5, 0.5])
+    m.b = Param('b', [3.0, 4.0])
+    m.A = Param('A', [[1.0, 0.5], [0.5, 1.0]], dim=2, sparse=True)
+    m.B = Param('B', [[2.0, 0.0], [0.0, 2.0]], dim=2, sparse=True)
+    # f = A @ B @ x - b
+    m.eqn = Eqn('f', Mat_Mul(m.A, Mat_Mul(m.B, m.x)) - m.b)
+
+    spf, y0 = m.create_instance()
+
+    # Inline solve
+    mdl_inline = made_numerical(spf, y0, sparse=True)
+    sol_inline = nr_method(mdl_inline, y0)
+
+    # Module solve (exercise the precompute deduplication + rendering)
+    dir_mod = str(tmp_path / 'nested_mm')
+    printer = module_printer(spf, y0, 'nested_mm_mod',
+                             directory=dir_mod, jit=True)
+    printer.render()
+    sys.path.insert(0, dir_mod)
+    from nested_mm_mod import mdl as mdl_mod, y as y_mod
+    sol_mod = nr_method(mdl_mod, y_mod)
+
+    # Analytical: AB @ x = b → x = solve(AB, b)
+    AB = np.array([[1.0, 0.5], [0.5, 1.0]]) @ np.array([[2.0, 0.0], [0.0, 2.0]])
+    expected = np.linalg.solve(AB, np.array([3.0, 4.0]))
+    np.testing.assert_allclose(sol_inline.y.array, expected, atol=1e-10)
+    np.testing.assert_allclose(sol_mod.y.array, expected, atol=1e-10)
