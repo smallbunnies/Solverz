@@ -8,6 +8,61 @@ Hotfix release addressing correctness findings in the 0.8.0 `Mat_Mul`
 mutable-matrix Jacobian code generation. Users of `Mat_Mul` should
 upgrade — 0.8.0 has a latent miscompilation when two independent
 `Diag(...)` terms land on the same `(i,i)` positions (see Bug Fixes).
+The release also brings a large runtime-performance improvement to
+the `Mat_Mul` hot-F path (see Performance below).
+
+### Performance
+
+- **`Mat_Mul` hot F: 4.4× speedup on small networks.** Before 0.8.1
+  every `Mat_Mul(A, v)` precompute executed as a `scipy.sparse` SpMV
+  in the Python `F_` wrapper (`_sz_mm_N = A @ v`). On small systems
+  this was dispatch-bound: each SpMV crossed Python → scipy → C →
+  back and cost ≈ 1.5 µs *per call* of pure overhead, regardless of
+  how little arithmetic the matrix actually had. Eight SpMVs per
+  power-flow `F_()` call added up to ≈ 12 µs of scipy dispatch on
+  case30, compared to well under 1 µs of actual matvec work.
+
+  The 0.8.1 code generator now recognises plain sparse `dim=2`
+  `Para` matrix operands and emits the matvec **inside** `inner_F`
+  using the existing `SolCF.csc_matvec` Numba helper
+  (`Solverz/num_api/custom_function.py`). The CSC decomposition
+  (`<name>_data` / `<name>_indices` / `<name>_indptr` / `<name>_shape0`)
+  that `Solverz/model/basic.py` already emits for every sparse
+  `dim=2` `Param` is the direct input for the helper — no new
+  `setting` entries, no new helper function.
+
+  Case30 power-flow benchmark (per `F_()` call, Apple M4):
+
+  | Formulation | 0.8.1 baseline | **0.8.1 fast path** | Speedup |
+  |---|---:|---:|---:|
+  | `Mat_Mul` (rectangular) | 14.1 µs | **3.23 µs** | **4.4×** |
+  | For-loop (polar) reference | 1.40 µs | 1.11 µs | — |
+
+  The `Mat_Mul` / polar hot-F ratio drops from **10.1× to 2.9×**.
+  `J` call, cold compile, module render, and every other phase
+  are unchanged. The remaining 2.9× gap is the structural cost of
+  8 `SolCF.csc_matvec` calls + 3 sub-function calls + dispatcher in
+  Mat_Mul vs 53 inlined scalar kernels in polar; closing it further
+  would require SpMV fusion or switching to CSR format, neither of
+  which is in this release. See
+  {ref}`When to use (and not use) Mat_Mul <when-to-use-mat_mul>`
+  in the matrix calculus guide for a full decision matrix.
+
+- **Fallback path** — `Mat_Mul` placeholders whose matrix operand is
+  not a plain sparse `Para` (negated matrices `Mat_Mul(-A, x)`,
+  nested matrix expressions, dense `dim=2` params) keep the old
+  scipy SpMV path in the wrapper. They are functionally correct
+  but do not benefit from the fast path; users who hit performance
+  regressions should check whether they can rewrite `-Mat_Mul(A,x)`
+  instead of `Mat_Mul(-A,x)`, or declare matrices with
+  `sparse=True`.
+
+- **`print_F` dead-load cleanup.** With the fast path in place, the
+  `F_` wrapper no longer loads `A = p_["A"]` for sparse `dim=2`
+  matrices that are used *only* as fast-path `Mat_Mul` operands —
+  previously that line was dead but still emitted. The filter
+  inspects each placeholder's `matrix_arg` and only keeps the
+  matrix load if at least one fallback `Mat_Mul` needs it.
 
 ### Bug Fixes
 

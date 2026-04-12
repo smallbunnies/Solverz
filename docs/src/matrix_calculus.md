@@ -310,7 +310,7 @@ pattern or its `.data` values as a constant; mutating them in-place
 will silently corrupt results without raising any error.
 ```
 
-### Layer 1 — Precompute `Mat_Mul` in the `F_` wrapper
+### Layer 1 — `Mat_Mul` precomputes as ``@njit`` CSC matvec
 
 The code printer walks every residual RHS looking for `Mat_Mul(A, v)`
 sub-trees, where `A` is a sparse parameter and `v` is any vector-valued
@@ -327,34 +327,51 @@ expression (a variable, a slice, or a larger expression). It performs
    into a single placeholder. The power-flow example below computes
    `G_nr @ e` once even though both the P-balance and Q-balance
    residuals reference it.
-3. **Emit precompute statements in the wrapper.** Each placeholder gets
-   one line of the form `_sz_mm_N = A @ operand` inserted at the top of
-   the `F_()` function body, *outside* the Numba-compiled inner
-   functions.
+3. **Classify each placeholder.** The classifier (implemented in
+   `_is_csc_matvec_fast_path` in
+   `Solverz/code_printer/python/module/module_printer.py`) decides
+   whether the precompute can go on the **fast path** (matrix is a
+   plain sparse `dim=2` `Para`) or the **fallback path** (anything
+   else: `-Para`, nested `Mat_Mul`, dense `dim=2` matrices, or a
+   matrix expression).
 
-The runtime effect: the *only* scipy.sparse matrix-vector product that
-happens inside a Newton step is the one at the very top of `F_()`.
-Every downstream computation (`inner_F`, `inner_F0`, `inner_F1`, …)
-receives `_sz_mm_N` as a plain dense numpy array and can run under
-`@njit(cache=True)`:
+**Fast path** — the matvec is computed **inside `inner_F`** via the
+existing `SolCF.csc_matvec` Numba helper
+(`Solverz/num_api/custom_function.py`). Each sparse dim=2 `Param` is
+already decomposed at model-build time into its CSC flat arrays
+(`A_data` / `A_indices` / `A_indptr` / `A_shape0`) by
+`Solverz/model/basic.py`; these flat arrays flow through
+`param_list` to `inner_F` as ordinary numpy arrays, and `inner_F`
+issues a `SolCF.csc_matvec(A_data, A_indices, A_indptr, A_shape0,
+operand)` call per placeholder. The wrapper `F_()` does not load the
+sparse matrix object `A` at all — the whole matvec lives in Numba
+land and pays zero scipy dispatch cost:
 
 ```python
 def F_(y_, p_):
     e = y_[0:29]
     f = y_[29:58]
-    G_nr = p_["G_nr"]              # csc_array, scipy.sparse
-    B_nr = p_["B_nr"]
-    _sz_mm_0 = (G_nr @ e)          # ← precomputed, one scipy SpMV
-    _sz_mm_1 = (B_nr @ f)          # ← dedup: B_nr@f appears in 2 equations
-    _sz_mm_2 = (B_nr @ e)
-    _sz_mm_3 = (G_nr @ f)
+    G_nr_data = p_["G_nr_data"]
+    G_nr_indices = p_["G_nr_indices"]
+    G_nr_indptr = p_["G_nr_indptr"]
+    G_nr_shape0 = p_["G_nr_shape0"]
+    B_nr_data = p_["B_nr_data"]
+    ...   # dense vector params follow
     return inner_F(_F_, e, f, p_ref, q_ref,
-                   _sz_mm_0, _sz_mm_1, _sz_mm_2, _sz_mm_3, ...)
+                   G_nr_data, G_nr_indices, G_nr_indptr, G_nr_shape0,
+                   B_nr_data, B_nr_indices, B_nr_indptr, B_nr_shape0,
+                   ...)
 
 @njit(cache=True)
 def inner_F(_F_, e, f, p_ref, q_ref,
-            _sz_mm_0, _sz_mm_1, _sz_mm_2, _sz_mm_3, ...):
-    _F_[0:29] = inner_F0(e, f, p_ref, _sz_mm_0, _sz_mm_1, _sz_mm_2, _sz_mm_3)
+            G_nr_data, G_nr_indices, G_nr_indptr, G_nr_shape0,
+            B_nr_data, B_nr_indices, B_nr_indptr, B_nr_shape0, ...):
+    # Fast-path matvecs: all inside @njit, no scipy dispatch.
+    _sz_mm_0 = SolCF.csc_matvec(G_nr_data, G_nr_indices, G_nr_indptr, G_nr_shape0, e)
+    _sz_mm_1 = SolCF.csc_matvec(B_nr_data, B_nr_indices, B_nr_indptr, B_nr_shape0, f)
+    _sz_mm_2 = SolCF.csc_matvec(B_nr_data, B_nr_indices, B_nr_indptr, B_nr_shape0, e)
+    _sz_mm_3 = SolCF.csc_matvec(G_nr_data, G_nr_indices, G_nr_indptr, G_nr_shape0, f)
+    _F_[0:29] = inner_F0(e, f, p_ref, q_ref, _sz_mm_0, _sz_mm_1, _sz_mm_2, _sz_mm_3)
     _F_[29:53] = inner_F1(...)
     return _F_
 
@@ -363,12 +380,120 @@ def inner_F0(e, f, p_ref, q_ref, _sz_mm_0, _sz_mm_1, _sz_mm_2, _sz_mm_3):
     return e * (p_ref - _sz_mm_1 + _sz_mm_0) + f * (q_ref + _sz_mm_2 + _sz_mm_3) - Pinj
 ```
 
-Why this matters: scipy.sparse matrix-vector products are already
-implemented in C and fairly fast, but *constructing intermediate sparse
-matrices* (e.g. `diag(e) @ G` returning a new csr_matrix) is not — the
-construction allocates, copies, and eventually eliminates explicit
-zeros. By forcing the sparse work into a handful of clean SpMVs and
-leaving the rest to Numba, we get the best of both worlds.
+Why this matters: scipy.sparse matrix-vector products are implemented
+in C and fast per se, but each call crosses Python → scipy dispatch
+→ C → back, which on a 58×58 matrix costs ~1.5 µs of pure dispatch
+overhead — 10× the actual arithmetic. Eight such SpMVs in a hot F
+made `Mat_Mul` catastrophically slow on small networks
+(`case30` hot F was 10× worse than the for-loop form). Moving the
+matvec into `SolCF.csc_matvec` inside `inner_F` eliminates all Python
+dispatch: the helper is `@njit(cache=True)` and `inner_F` calls it as
+an intra-Numba function call, which the LLVM inline pass typically
+flattens into the caller's body. On `case30`, this drops hot F from
+≈14 µs to ≈3 µs (~4.4× speedup) without any other code change.
+
+**Fallback path** — when the matrix operand is *not* a plain sparse
+`Para` (e.g. `-G_nr`, `Mat_Mul(A, B)`, or a dense `dim=2` parameter),
+the old path is kept: `F_()` emits `_sz_mm_N = matrix_expr @ operand`
+in the wrapper (using scipy.sparse or numpy `@`) and passes
+`_sz_mm_N` as an extra dense argument to `inner_F`. These
+placeholders do not benefit from the fast path and pay the scipy
+dispatch cost per call. Dense `dim=2` parameters fire a one-shot
+`UserWarning` at `FormJac` time — see
+{ref}`Restrictions and reserved names <restrictions>`.
+
+```{note}
+The fast path reuses infrastructure that predates the `Mat_Mul`
+interface: the same `SolCF.csc_matvec` helper and the same
+`<name>_data` / `_indices` / `_indptr` / `_shape0` Param decomposition
+were introduced for the legacy `MatVecMul` operator. Before 0.8.1
+fast path, those fields were still emitted into `inner_F`'s argument
+list but never referenced — they are now the conduit for the Layer 1
+matvec. Legacy `MatVecMul` users already benefited from this pipeline;
+from 0.8.1 `Mat_Mul` users do as well, without any model-level
+changes.
+```
+
+(when-to-use-mat_mul)=
+#### When to use (and not use) `Mat_Mul`
+
+`Mat_Mul` wins decisively for **every compile and build phase** of
+the workflow: `Model` construction, `FormJac`, `made_numerical`
+(inline compile), `module_printer.render`, and — most importantly —
+the first-time Numba module compile. On a typical matpower case30
+power-flow model the compile phases are **20–40× faster** under
+`Mat_Mul` than under the equivalent element-wise for-loop
+formulation. The hot `J` call is also slightly faster (vectorised
+scatter-add in the mutable-matrix blocks). See the
+[power-flow chapter of the Solverz Cookbook](https://solverz-cookbook.readthedocs.io/en/latest/ae/pf/pf.html)
+for the full benchmark table.
+
+**Use `Mat_Mul` when**:
+
+- You are iterating on the model (changing parameters, equations, or
+  dimensions) — compile-time savings are paid on *every* rebuild and
+  dwarf the runtime differences.
+- The system has more than a handful of unknowns — for ≳ 50 unknowns
+  the scipy/Numba dispatch overhead is amortised over enough
+  arithmetic that hot F is within striking distance of (or beats)
+  the for-loop form.
+- You want compact model code. `Mat_Mul(G, e)` replaces `nb` scalar
+  `Eqn` definitions per bus and makes the equations read like the
+  paper.
+- All sparse matrices used in `Mat_Mul` are plain
+  `Param(..., dim=2, sparse=True)` — this unlocks the Layer 1 Numba
+  fast path described above.
+
+**Consider the for-loop form when** *all* of the following hold:
+
+- The system is very small (≲ 30 unknowns);
+- Your hot loop is dominated by `F` evaluations (not Jacobian, not
+  linear solve), so the raw hot-F number actually matters;
+- The module is compiled once and then reused many times, so the
+  compile-time saving of `Mat_Mul` is not recovered.
+
+This combination of conditions is rare in practice — most power-flow
+and DHS workloads hit the Jacobian assembly and linear solve at
+least as often as F, and both of those are independent of (or
+favourable to) `Mat_Mul`.
+
+**Known performance regression**: on very small networks (≈
+case30-scale) the `Mat_Mul` hot F is ~3 µs per call while the
+equivalent for-loop form runs at ~1.1 µs (≈ 2.9× slower). The
+difference is the structural cost of 8 `SolCF.csc_matvec` calls
+dispatched through `inner_F` plus the sub-function dispatch layer,
+versus 53 inlined scalar kernels the element-wise form collapses
+into. The 2 µs gap is usually invisible next to the J call
+(~55 µs) and the linear solve, but if your workload is millions of
+pure F evaluations on a tiny network, the for-loop form still wins.
+
+The gap shrinks and flips with problem size. For networks large
+enough that each SpMV does meaningful arithmetic — roughly
+case118 and above — the element-wise form's huge cold-compile cost
+and per-call dispatch overhead on every scalar `inner_F{i}` make
+`Mat_Mul` the strictly better choice on all metrics.
+
+**Matrices that fall out of the fast path** (and therefore pay the
+scipy SpMV dispatch cost on every `F_` call, ≈ 1.5 µs per SpMV):
+
+- **Negated matrices** — `Mat_Mul(-G, x)`. `G` is a plain `Para` but
+  `-G` is a `Mul(-1, G)` expression the classifier doesn't recognise.
+  Workaround: fold the sign into the coefficient of the surrounding
+  expression — write `-Mat_Mul(G, x)` instead of `Mat_Mul(-G, x)`.
+- **Dense `dim=2` params** — `Param(A, dim=2, sparse=False)`. `FormJac`
+  fires a one-shot `UserWarning` for these; they fall back to the
+  `MutableMatJacDataModule` path. Convert to sparse with
+  `csc_array(A)` and declare `sparse=True`.
+- **Nested `Mat_Mul`** — `Mat_Mul(A, Mat_Mul(B, x))`. The outer call
+  receives the inner placeholder `_sz_mm_N` as its operand, which
+  hits the fast path; the *inner* call still hits the fast path
+  because its matrix is a plain `Para`. Only the inner is made fast,
+  though, and only if both are plain Paras. Triple-nested is uncommon
+  but would degrade similarly.
+- **Matrix expressions** — `Mat_Mul(A + B, x)` or similar. The
+  classifier recognises only a bare `Para` as the matrix operand.
+  Workaround: materialise the combined matrix as a single `Param`
+  (`A + B`) outside the equation.
 
 ### Layer 2 — Mutable matrix Jacobian blocks
 
