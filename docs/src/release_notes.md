@@ -2,6 +2,98 @@
 
 # Release Notes
 
+## 0.8.2
+
+**Documentation-only release.** No source-code, test, or behaviour
+changes. The PyPI wheel for 0.8.2 is bit-identical to 0.8.1 modulo
+the in-tree documentation.
+
+The release rewrites the {ref}`Matrix-Vector Calculus
+<matrix_calculus>` chapter to address eight reviewer comments about
+misleading language, stale code references, missing terminology, and
+content duplication with the
+[Solverz Cookbook power-flow chapter](https://solverz-cookbook.readthedocs.io/en/latest/ae/pf/pf.html).
+
+### Documentation
+
+- **New {ref}`Glossary <matrix-calculus-glossary>` section** at the
+  top of the matrix calculus chapter, defining
+  {term}`SpMV`, {term}`SpMM`, {term}`CSC / CSR <CSC / CSR>`,
+  {term}`@njit`, {term}`scatter-add`, {term}`fancy indexing`,
+  {term}`fast path`, {term}`fallback path`, {term}`lambdify`,
+  {term}`hot F / hot J <hot F / hot J>`, {term}`cold compile`,
+  {term}`LICM`, {term}`inline mode`, and {term}`module printer mode`.
+  Every body usage of these terms now hyperlinks to the glossary
+  entry.
+
+- **Supported Operations table clarified.** The third column was
+  renamed from "Derivative" to "Jacobian block (∂/∂x for vector x)"
+  and a paragraph was added above the table explaining that Solverz
+  first computes the elementwise vector derivative (e.g. `cos(x)`
+  for `sin(x)`) and only inserts the `diag(...)` matrix wrapper at
+  Jacobian assembly time. The previous wording risked making
+  vector-equation users think `sin(x)` produces a matrix directly.
+
+- **Stale `Mat_Mul` + scipy.sparse claim removed.** The first note
+  block under `## Supported Operations` previously said "Mat_Mul
+  uses scipy.sparse directly", which was true for 0.8.0 but false
+  for 0.8.1 (where the fast path moves the matvec into
+  `SolCF.csc_matvec` inside `inner_F`). The note now describes
+  the fast / fallback split correctly and points users at the
+  Layer 1 discussion.
+
+- **Newton-step language replaced with solver-neutral phrasing.**
+  `matrix_calculus.md` is the API reference for Solverz's matrix
+  calculus engine, which is shared across AE / FDAE / DAE / ODE.
+  Wherever the previous text said "every Newton step assembles
+  Jacobian block data", it now says "every `J_(y, p)` call" or
+  "every solver step", with one explicit paragraph noting that
+  the cost model applies to all `J_` consumers, not just
+  algebraic-equation Newton solvers. The remaining "Newton"
+  references are intentional and concrete (e.g. naming
+  Newton-Raphson as one specific solver among several).
+
+- **Layer 1 narrative refreshed for the second-pass review fixes.**
+  References to the obsolete `_is_csc_matvec_fast_path` helper
+  were updated to the current `_classify_matmul_placeholders`
+  (with inner shape predicate `_shape_is_fast`). A new paragraph
+  describes the **dependency-aware demotion** introduced in the
+  second-pass review fix: a fast-path candidate consumed by a
+  fallback placeholder's matrix or operand expression is demoted
+  to fallback so the wrapper never emits a reference to a
+  not-yet-materialised placeholder.
+
+- **Fallback path subsections rewritten.** The earlier "Why not
+  fancy indexing?" subsection title and prose suggested that
+  fancy indexing was an option Solverz "still supports". The new
+  title is "Two paths: scatter-add (fast) and fancy indexing
+  (fallback)", and the body makes explicit that **both paths
+  always co-exist** in every generated module — the runtime picks
+  per Jacobian block based on what the symbolic classifier
+  recognised at code-gen time. There is no on/off switch.
+
+- **Benchmark environment block added** to the Performance
+  subsection: hardware (Apple M4), OS (macOS 26.4), Python
+  (3.11.13), library versions (numpy 2.3.3, scipy 1.16.0,
+  numba 0.65.0, sympy 1.13.3, Solverz 0.8.1+), and methodology
+  (10 warm-up + 5000–20000 timed iterations, median of three
+  repeats). Without this metadata the absolute numbers in the
+  doc were unreproducible.
+
+- **"When to use Mat_Mul" section slimmed down**, deferring the
+  full case30 decision matrix and the known hot-F regression case
+  to the [Solverz Cookbook power-flow chapter](https://solverz-cookbook.readthedocs.io/en/latest/ae/pf/pf.html#performance-comparison-mat_mul-vs-for-loop).
+  The Solverz-dev doc is the API reference and now keeps just the
+  3-bullet API guidance plus the "matrix shapes that fall out of
+  the fast path" reference list. The Cookbook is the right place
+  for the case-driven narrative; this avoids contradictions when
+  one of the two docs drifts.
+
+The companion **Solverz-Cookbook v0.8.2** release does the same
+three things in `pf.md` (terminology cleanup, benchmark environment
+block, refined "Newton step" wording on the one line where it
+overgeneralised). The Cookbook's heat flow chapter is unchanged.
+
 ## 0.8.1
 
 Hotfix release addressing correctness findings in the 0.8.0 `Mat_Mul`

@@ -13,10 +13,52 @@ This module is based on the approach described in:
 
 See also: [matrixcalculus.org](https://www.matrixcalculus.org/)
 
+(matrix-calculus-glossary)=
+## Glossary
+
+This page uses several abbreviations and design terms that recur
+throughout the document. They are collected here for reference; each
+one is hyperlinked from its first use in the body so you don't have
+to scroll back. The terms describe Solverz's code-generation strategy
+and the underlying numerical building blocks.
+
+| Term | Definition |
+|---|---|
+| **SpMV** | *Sparse Matrix-Vector multiplication* — computing $y = M\,x$ where $M$ is stored in a sparse format. |
+| **SpMM** | *Sparse Matrix-Matrix multiplication* — computing $C = M\,B$ where $B$ has more than one column. |
+| **CSC / CSR** | *Compressed Sparse Column* / *Compressed Sparse Row* — the two scipy.sparse storage formats Solverz uses. CSC stores `data`, `indices`, `indptr` walking columns; CSR walks rows. The legacy `MatVecMul` and the 0.8.1 `Mat_Mul` fast path both consume CSC. |
+| **`@njit`** | The Numba decorator that compiles a Python function to native LLVM-backed code at first call. Solverz uses `@njit(cache=True)` so the compiled code is cached on disk and reused across processes. |
+| **scatter-add** | An assembly pattern where many indexed reads are accumulated (`+=`) into a fixed output buffer. The mutable-matrix Jacobian kernels are pure scatter-add loops over precomputed index arrays — see [Layer 2](#layer-2-mutable-matrix-jacobian-blocks). |
+| **fancy indexing** | NumPy / scipy.sparse indexing with arrays of indices, e.g. `M[[r0, r1, r2], [c0, c1, c2]]`, returning the values at those positions. The slow {term}`fallback path` uses this to extract block values from a freshly-built sparse expression. |
+| **fast path** | The Solverz code-gen path used for `Mat_Mul(A, x)` placeholders where `A` is a plain sparse `dim=2` `Para`: the matvec runs **inside** `inner_F` via the Numba `SolCF.csc_matvec` helper, with zero scipy.sparse calls per evaluation. Mutable-matrix Jacobian blocks have a parallel fast path of typed scatter-add kernels. |
+| **fallback path** | The slower-but-correct path used whenever a `Mat_Mul` operand or a Jacobian block doesn't fit the fast-path shape — for instance negated matrices, nested `Mat_Mul`, dense `dim=2`, or general matrix expressions. The wrapper falls back to `scipy.sparse @` and (for Jacobian blocks) fancy indexing into a freshly-built sparse matrix. The fast and fallback paths **co-exist**: the runtime picks per placeholder / per Jacobian block based on what the symbolic classifier recognises. |
+| **`lambdify`** | SymPy's symbolic-to-callable converter. Solverz's "inline" mode uses `lambdify` to turn each equation's symbolic expression into a Python function on every call (no JIT). |
+| **hot F / hot J** | Steady-state per-call wall-clock time for `F_(y, p)` / `J_(y, p)` after JIT warm-up. Distinguished from {term}`cold compile`. |
+| **cold compile** | The first call into a freshly-rendered module — pays the Numba `@njit` compile cost for every decorated helper. Cached to disk so subsequent process starts skip it. |
+| **LICM** | *Loop-Invariant Code Motion*, an LLVM optimisation pass that hoists computations out of inner loops when their inputs do not change inside the loop. |
+| **inline mode** | Solverz's `made_numerical(spf, y0)` code path — uses `lambdify` to build callable F/J from the SymPy expressions on every call. No Numba compilation. |
+| **module printer mode** | Solverz's `module_printer(spf, y0).render()` code path — emits a Python module file with `@njit`-decorated helpers, cached to disk. The fast / fallback distinction only applies to this mode. |
+
 ## Supported Operations
 
-| Operation | Symbolic Form | Example | Derivative |
-|-----------|---------------|---------|------------|
+For each supported operation the table below shows three things: the
+Solverz symbolic constructor, the mathematical form it represents, and
+the **Jacobian block** $\partial f / \partial x$ that the matrix
+calculus engine emits when the equation is differentiated with respect
+to a vector variable `x`.
+
+The "Jacobian block" column is **not** the symbolic intermediate
+Solverz computes for each equation. For an element-wise function like
+`sin(x)`, Solverz first produces the elementwise vector `cos(x)` —
+the same shape as the input — and only at Jacobian assembly time wraps
+that vector in `diag(...)` to express the diagonal structure of the
+matrix block. Equation residuals stay vector-valued throughout
+symbolic processing; the matrix wrapper only appears in the final
+Jacobian. Read the third column as "the matrix you would get if you
+materialised $\partial f / \partial x$ as a dense block".
+
+| Operation | Symbolic Form | Example | Jacobian block ($\partial f / \partial x$ for vector $x$) |
+|-----------|---------------|---------|---|
 | Matrix-vector multiply | `Mat_Mul(A, x)` | $Ax$ | $A$ |
 | Element-wise multiply | `x * y` | $x \odot y$ | $\operatorname{diag}(y)$ |
 | Addition | `x + y` | $x + y$ | $I$ |
@@ -29,9 +71,24 @@ See also: [matrixcalculus.org](https://www.matrixcalculus.org/)
 | Diagonal | `Diag(x)` | $\operatorname{diag}(x)$ | $\operatorname{diag}(\cdot)$ |
 
 ```{note}
-`Mat_Mul` is the recommended interface for matrix-vector products. The legacy `MatVecMul` function
-(which decomposes sparse matrices into CSC components for Numba) is deprecated. `Mat_Mul` uses
-`scipy.sparse` directly, which is both faster and supports full matrix calculus.
+`Mat_Mul` is the recommended interface for matrix-vector products in
+new Solverz models. It is *symbolic-first*: the symbolic engine sees
+each `Mat_Mul(A, x)` as a real operator, walks it through the
+matrix-calculus pipeline, and emits an analytical Jacobian block
+automatically.
+
+On the {term}`fast path` — when `A` is a plain sparse `dim=2` `Param`
+— `Mat_Mul` ends up calling exactly the same Numba helper
+(`SolCF.csc_matvec`) the legacy `MatVecMul` interface uses. The two
+have the same per-call cost; the difference is that `Mat_Mul` survives
+the matrix-calculus engine and `MatVecMul` does not. On the
+{term}`fallback path` (negated matrices, nested `Mat_Mul`, dense
+`dim=2` parameters, or other matrix expressions) `Mat_Mul` falls
+through to `scipy.sparse @` in the wrapper — see the
+[Layer 1](#layer-1-mat_mul-precomputes-as-njit-csc-matvec)
+discussion below.
+
+`MatVecMul` is still deprecated for new models; pick `Mat_Mul`.
 ```
 
 ```{warning} **Sparse matrices MUST be immutable after modelling**
@@ -45,9 +102,10 @@ Solverz relies on this assumption for maximum runtime efficiency:
 - At code-generation time, the sparsity pattern of every mutable-matrix Jacobian
   block is analysed *once*, the output data-array layout is fixed, and a pre-
   computed index mapping is baked into a Numba-compiled scatter-add loop.
-- At runtime, each Newton step assembles Jacobian block data by directly
-  indexing into `Matrix.data` using the pre-computed row/column mappings —
-  **no scipy.sparse matrix is constructed per iteration**.
+- At runtime, every `J_(y, p)` call assembles Jacobian block data by
+  directly indexing into `Matrix.data` using the pre-computed
+  row/column mappings — **no scipy.sparse matrix is constructed per
+  call**.
 - For sparse-matrix parameters used in `Mat_Mul(A, x)`, the matrix-vector
   product `A @ x` is precomputed in the `F_` wrapper and passed as a dense
   vector to the `@njit`-compiled equation functions.
@@ -327,13 +385,24 @@ expression (a variable, a slice, or a larger expression). It performs
    into a single placeholder. The power-flow example below computes
    `G_nr @ e` once even though both the P-balance and Q-balance
    residuals reference it.
-3. **Classify each placeholder.** The classifier (implemented in
-   `_is_csc_matvec_fast_path` in
+3. **Classify each placeholder.** The classifier
+   (`_classify_matmul_placeholders`, with the inner shape predicate
+   `_shape_is_fast`, in
    `Solverz/code_printer/python/module/module_printer.py`) decides
-   whether the precompute can go on the **fast path** (matrix is a
-   plain sparse `dim=2` `Para`) or the **fallback path** (anything
-   else: `-Para`, nested `Mat_Mul`, dense `dim=2` matrices, or a
-   matrix expression).
+   whether the precompute can go on the {term}`fast path` (matrix is
+   a plain sparse `dim=2` `Para` **and** the operand is a clean vector
+   expression) or the {term}`fallback path` (anything else:
+   `-Para`, nested `Mat_Mul`, dense `dim=2` matrices, matrix
+   expressions, or operands that still contain unresolved
+   `Mat_Mul` / sparse `dim=2` `Para` references).
+
+   A fast-path candidate is also **demoted** to the fallback path if
+   another fallback placeholder's `matrix_arg` or `operand_arg`
+   references it as a free symbol — otherwise the wrapper would emit
+   a scipy {term}`SpMV` like `_sz_mm_1 = (-A) @ _sz_mm_0` whose
+   `_sz_mm_0` operand was never materialised. The classifier iterates
+   this demotion to a fixed point so chains of nested `Mat_Mul`s
+   land on a topologically valid emission order.
 
 **Fast path** — the matvec is computed **inside `inner_F`** via the
 existing `SolCF.csc_matvec` Numba helper
@@ -415,85 +484,57 @@ changes.
 ```
 
 (when-to-use-mat_mul)=
-#### When to use (and not use) `Mat_Mul`
+#### When to use `Mat_Mul`
 
-`Mat_Mul` wins decisively for **every compile and build phase** of
-the workflow: `Model` construction, `FormJac`, `made_numerical`
-(inline compile), `module_printer.render`, and — most importantly —
-the first-time Numba module compile. On a typical matpower case30
-power-flow model the compile phases are **20–40× faster** under
-`Mat_Mul` than under the equivalent element-wise for-loop
-formulation. The hot `J` call is also slightly faster (vectorised
-scatter-add in the mutable-matrix blocks). See the
-[power-flow chapter of the Solverz Cookbook](https://solverz-cookbook.readthedocs.io/en/latest/ae/pf/pf.html)
-for the full benchmark table.
+API-level rules of thumb. The detailed case study with full
+benchmark numbers, decision matrix, and the case30-scale hot-F
+regression analysis lives in the
+[power-flow chapter of the Solverz Cookbook](https://solverz-cookbook.readthedocs.io/en/latest/ae/pf/pf.html#performance-comparison-mat_mul-vs-for-loop)
+— this section just states the API guidance.
 
-**Use `Mat_Mul` when**:
+**Use `Mat_Mul`** when any of the following hold:
 
-- You are iterating on the model (changing parameters, equations, or
-  dimensions) — compile-time savings are paid on *every* rebuild and
-  dwarf the runtime differences.
-- The system has more than a handful of unknowns — for ≳ 50 unknowns
-  the scipy/Numba dispatch overhead is amortised over enough
-  arithmetic that hot F is within striking distance of (or beats)
-  the for-loop form.
-- You want compact model code. `Mat_Mul(G, e)` replaces `nb` scalar
-  `Eqn` definitions per bus and makes the equations read like the
-  paper.
-- All sparse matrices used in `Mat_Mul` are plain
-  `Param(..., dim=2, sparse=True)` — this unlocks the Layer 1 Numba
-  fast path described above.
+- You want compact, paper-faithful equations. `Mat_Mul(G, e)`
+  replaces `nb` scalar `Eqn` definitions and lets the matrix
+  calculus engine derive the Jacobian automatically.
+- You iterate on the model. Every compile / build phase
+  (`Model` construction, `FormJac`, `made_numerical`,
+  `module_printer.render`, and the first-time Numba {term}`cold compile`)
+  is dramatically faster under `Mat_Mul` than under the equivalent
+  element-wise for-loop form.
+- All matrix operands are plain `Param(..., dim=2, sparse=True)` —
+  this unlocks the Layer 1 {term}`fast path` described above.
 
-**Consider the for-loop form when** *all* of the following hold:
+The narrow case where the for-loop form still wins (very small
+network, F-dominated hot loop, single compile) and the underlying
+case30 numbers are documented in the Cookbook chapter linked above.
 
-- The system is very small (≲ 30 unknowns);
-- Your hot loop is dominated by `F` evaluations (not Jacobian, not
-  linear solve), so the raw hot-F number actually matters;
-- The module is compiled once and then reused many times, so the
-  compile-time saving of `Mat_Mul` is not recovered.
-
-This combination of conditions is rare in practice — most power-flow
-and DHS workloads hit the Jacobian assembly and linear solve at
-least as often as F, and both of those are independent of (or
-favourable to) `Mat_Mul`.
-
-**Known performance regression**: on very small networks (≈
-case30-scale) the `Mat_Mul` hot F is ~3 µs per call while the
-equivalent for-loop form runs at ~1.1 µs (≈ 2.9× slower). The
-difference is the structural cost of 8 `SolCF.csc_matvec` calls
-dispatched through `inner_F` plus the sub-function dispatch layer,
-versus 53 inlined scalar kernels the element-wise form collapses
-into. The 2 µs gap is usually invisible next to the J call
-(~55 µs) and the linear solve, but if your workload is millions of
-pure F evaluations on a tiny network, the for-loop form still wins.
-
-The gap shrinks and flips with problem size. For networks large
-enough that each SpMV does meaningful arithmetic — roughly
-case118 and above — the element-wise form's huge cold-compile cost
-and per-call dispatch overhead on every scalar `inner_F{i}` make
-`Mat_Mul` the strictly better choice on all metrics.
-
-**Matrices that fall out of the fast path** (and therefore pay the
-scipy SpMV dispatch cost on every `F_` call, ≈ 1.5 µs per SpMV):
+**Matrix shapes that fall out of the fast path** and therefore pay
+the scipy {term}`SpMV` dispatch cost on every `F_` call (~1.5 µs
+per SpMV — consequential at small network scale, negligible
+elsewhere):
 
 - **Negated matrices** — `Mat_Mul(-G, x)`. `G` is a plain `Para` but
   `-G` is a `Mul(-1, G)` expression the classifier doesn't recognise.
-  Workaround: fold the sign into the coefficient of the surrounding
-  expression — write `-Mat_Mul(G, x)` instead of `Mat_Mul(-G, x)`.
+  Workaround: write `-Mat_Mul(G, x)` instead of `Mat_Mul(-G, x)` so
+  the sign flows through the outer expression and `G` stays on the
+  fast path.
 - **Dense `dim=2` params** — `Param(A, dim=2, sparse=False)`. `FormJac`
-  fires a one-shot `UserWarning` for these; they fall back to the
+  fires a one-shot `UserWarning` for these; they fall through to the
   `MutableMatJacDataModule` path. Convert to sparse with
   `csc_array(A)` and declare `sparse=True`.
-- **Nested `Mat_Mul`** — `Mat_Mul(A, Mat_Mul(B, x))`. The outer call
-  receives the inner placeholder `_sz_mm_N` as its operand, which
-  hits the fast path; the *inner* call still hits the fast path
-  because its matrix is a plain `Para`. Only the inner is made fast,
-  though, and only if both are plain Paras. Triple-nested is uncommon
-  but would degrade similarly.
+- **Nested `Mat_Mul`** — `Mat_Mul(A, Mat_Mul(B, x))`. The
+  classifier's dependency-aware demotion takes care of the
+  topological ordering, but only the inner `Mat_Mul` ends up on
+  the fast path when both matrices are plain Paras; the outer
+  pays the wrapper SpMV cost.
+- **Three-or-more-arg `Mat_Mul`** — `Mat_Mul(A, B, x)`. The
+  operand of the placeholder is itself a `Mat_Mul`, so the
+  classifier rejects it from the fast path.
 - **Matrix expressions** — `Mat_Mul(A + B, x)` or similar. The
   classifier recognises only a bare `Para` as the matrix operand.
-  Workaround: materialise the combined matrix as a single `Param`
-  (`A + B`) outside the equation.
+  Workaround: materialise the combined matrix as a single
+  `Param(A + B, dim=2, sparse=True)` outside the equation.
 
 ### Layer 2 — Mutable matrix Jacobian blocks
 
@@ -509,7 +550,7 @@ on the full expression. Consider the power-flow block
 ```
 
 All three terms are *mutable* — they depend on $e$ and $f$ and must be
-re-evaluated every Newton step. But their **sparsity pattern is
+re-evaluated on every `J_(y, p)` call. But their **sparsity pattern is
 constant**: the union of the diagonal, the pattern of $G$, and the
 pattern of $B$ — all fixed at modelling time.
 
@@ -635,40 +676,58 @@ used `=` and silently dropped one of the two terms.
    runtime. The data for row/col-scale terms comes straight from the
    pre-baked `_sz_mb_{N}_rs_dat_{k}` arrays.
 
-The net effect on a Newton step is that the Jacobian assembly cost is
-dominated by (i) the constant `inner_J` call for element-wise blocks
-and (ii) a handful of SpMVs for the diag inner vectors. The actual
-mutable-matrix blocks themselves are assembled in
+The net effect on each `J_(y, p)` call is that Jacobian assembly cost
+is dominated by (i) the constant `inner_J` call for element-wise
+blocks and (ii) a handful of {term}`SpMV`s for the diag inner
+vectors. The actual mutable-matrix blocks themselves are assembled in
 $\mathcal{O}(\text{nnz})$ vectorised Numba loops — no sparse matrix
 allocation, no sparsity reconstruction, no format conversion.
 
-#### Why not fancy indexing?
+This benefit applies to **every solver that calls `J_(y, p)`** —
+algebraic-equation Newton solvers (`nr_method`, `sicnm`), DAE
+integrators (which call `J_` at every implicit substep), FDAE
+solvers, and any future solver that consumes Solverz's Jacobian
+contract. The cost model is "per `J_` call", not "per Newton step".
 
-An earlier iteration of the pipeline used `expr.tocsr()[[row],[col]]`
-fancy indexing — build the sparse matrix with `sps.diags` and read
-back the nonzero values at the precomputed COO positions. It is
-correct and elegant but slow: scipy has to construct several
-intermediate sparse matrices per step, sum them (with explicit-zero
+#### Two paths: scatter-add (fast) and fancy indexing (fallback)
+
+Solverz keeps **both** assembly paths in every generated module and
+picks per Jacobian block at code-gen time. The {term}`fast path` is
+the typed scatter-add described above; the {term}`fallback path`
+exists for blocks whose term structure the symbolic analyser cannot
+classify (see [Layer 2 step 1](#parse-the-block-into-typed-terms))
+and is described in the next subsection. There is no on/off switch —
+both paths co-exist, and the runtime always uses whichever the
+classifier picked.
+
+The fallback path is what an earlier iteration of the pipeline used
+*everywhere*: build the sparse matrix with `sps.diags` and friends,
+then read back the nonzero values at the precomputed COO positions
+via {term}`fancy indexing` (`expr.tocsr()[[rows], [cols]]`). It is
+correct and elegant but slow — scipy has to construct several
+intermediate sparse matrices per call, sum them (with explicit-zero
 elimination), and then perform a linear-scan lookup for each output
-position. On a 30-bus power flow case, each Jacobian call took ≈ 280
-µs. The scatter-add Numba path drops that to ≈ 50 µs while producing
+position. On a 30-bus power flow case, each `J_(y, p)` call took
+≈ 280 µs in that pre-0.8 architecture. The scatter-add Numba path
+introduced in 0.8.0 drops that to ≈ 50 µs while producing
 bit-identical results.
 
-The fallback path still uses fancy indexing, so if you write an
-equation whose Jacobian term structure the analyser doesn't recognise,
-you get *correct* results — just slower. Profile with
-`pytest --durations=10` and look for mutable-matrix blocks lingering
-in the slow path if performance matters.
+If you want to know whether a particular block in your model is on
+the fast path or the fallback, profile with `pytest --durations=10`
+or `cProfile` and look for `MutableMatJacDataModule` in the traces
+— its presence in the hot `J_()` line indicates that block is on
+the fallback.
 
 ### Layer 3 — Selective `@njit`
 
 All generated inner loops — `inner_F`, every per-equation
 `inner_F{N}`, `inner_J`, every per-block `inner_J{N}`, and every
 `_mut_block_{N}` — carry `@njit(cache=True)`. Only the `F_` / `J_`
-wrappers remain pure Python; they host the scipy.sparse SpMV
-precomputes, the module-level parameter unpacks, and the final
-`sps.coo_array((data, (row, col)), shape).tocsc()` that packages the
-Jacobian back into a scipy object for the downstream Newton solver.
+wrappers remain pure Python; they host any fallback-path
+{term}`SpMV` precomputes, the module-level parameter unpacks, and
+the final `sps.coo_array((data, (row, col)), shape).tocsc()` that
+packages the Jacobian back into a scipy object for the downstream
+solver (algebraic Newton-style or DAE/ODE integrator).
 
 The selectivity matters: Numba absolutely cannot digest a
 `scipy.sparse.csc_array` argument, which is why the wrappers exist at
@@ -684,12 +743,15 @@ only dense vectors and scalar params). Performance on pure
 element-wise models is therefore unchanged by the Mat_Mul rewrite.
 
 (fallback-path)=
-### Fallback path
+### Fallback path — scipy.sparse + fancy indexing
 
-If a Jacobian block contains a term whose shape the symbolic analyser
+When a Jacobian block contains a term shape the symbolic analyser
 does not recognise — for example an unusual nested `Mat_Mul`, a
-non-parameter matrix, or a matrix-valued non-linear expression — that
-single block is handled by a slower but always-correct path:
+non-parameter matrix, a matrix-valued non-linear expression, or a
+term with a non-`±1` coefficient — that single block is handled by
+the {term}`fallback path`. The wrapper rebuilds the block with
+`scipy.sparse` and reads the requested nonzero values back via
+{term}`fancy indexing`:
 
 ```python
 data[start:stop] = asarray(
@@ -698,75 +760,87 @@ data[start:stop] = asarray(
 ).ravel()
 ```
 
-This builds the block with scipy.sparse and reads its values at the
-precomputed COO positions. It is $\mathcal{O}(\text{nnz} \log n)$ per
-call instead of the $\mathcal{O}(\text{nnz})$ scatter-add path, but it
-never misses a derivative term. Only the single affected block falls
-back; the rest of the Jacobian still uses the fast path.
-
-If you want to know whether your model is hitting the fallback,
-profile with `pytest --durations=20` or `cProfile` and look for
-`MutableMatJacDataModule` in the traces — its presence in the hot
-`J_()` line indicates a fallback block.
+It is $\mathcal{O}(\text{nnz} \log n)$ per call instead of the
+$\mathcal{O}(\text{nnz})$ scatter-add path, but it never misses a
+derivative term. **The two paths co-exist** in every generated
+module: only the single affected block falls back; the rest of the
+Jacobian still uses the fast scatter-add path. There is no
+fallback-only mode and no opt-in switch — Solverz simply picks per
+block based on what the classifier recognised at code-gen time.
 
 ### Performance
 
-Measurements below are per `J_()` call on a 2025 MacBook Air (Apple
-M4), averaged over 5000–10000 iterations.
+The full case30 power-flow benchmark — every phase from `Model`
+construction through cold compile to {term}`hot F` / hot J — lives
+in the
+[Solverz Cookbook power-flow chapter](https://solverz-cookbook.readthedocs.io/en/latest/ae/pf/pf.html#performance-comparison-mat_mul-vs-for-loop).
+This subsection only carries one extra micro-benchmark (DHS
+hydraulic on Barry Island) that exercises a Jacobian shape the
+power-flow case does not.
 
-**Case A — rectangular power flow on MATPOWER `case30`**
-(58 unknowns, 450 Jacobian nonzeros, 6 mutable-matrix blocks, the flow
-has meaningful $G\,e$, $B\,f$, $B\,e$, $G\,f$ combinations):
+**Benchmark environment.** All numbers below were measured under:
 
-| Pipeline | `J_()` per call |
-|---|---|
-| Inline mode (lambdify + scipy SpMV) | ≈ 268 µs |
-| Module printer, old `tocsr()[rows, cols]` | ≈ 283 µs |
-| **Module printer, vectorized @njit** | **≈ 50 µs** |
+- **Hardware:** 2025 MacBook Air, Apple M4, AC power, no thermal
+  throttling observed during the runs.
+- **OS:** macOS 26.4 (build 25E246).
+- **Python:** 3.11.13.
+- **Library versions:** `numpy==2.3.3`, `scipy==1.16.0`,
+  `numba==0.65.0`, `sympy==1.13.3`, `Solverz==0.8.1` (the
+  post-`csc_matvec` {term}`fast path`).
+- **Methodology:** 10 warm-up calls (to bake the Numba caches and
+  prime the CPU branch predictor) followed by 5000–20000 timed
+  iterations, median of three repeats. The {term}`cold compile`
+  measurement (Cookbook only) is run in a fresh Python subprocess
+  with `__pycache__` and Numba `.nbi` / `.nbc` caches wiped
+  beforehand. The same per-call timing helper is used in the
+  Cookbook's `bench_pf_matmul_vs_polar.py`; the per-`J_` numbers
+  below were captured by importing the rendered DHS module and
+  calling `mdl.J(y, mdl.p)` in a tight loop.
 
-**Case B — DHS hydraulic subproblem on `BarryIsland`**
-(35 unknowns, 1 loop, 1 mutable-matrix block — the loop pressure
-Jacobian contains two col-scale terms
-$L\,\operatorname{diag}(K \odot |m|)$ and
-$L\,\operatorname{diag}(K \odot m \odot \operatorname{sign}(m))$ whose
-scaling vectors are non-trivial expressions of the variable):
+**DHS hydraulic subproblem on `BarryIsland`** (35 unknowns, 1 loop,
+1 mutable-matrix block — the loop pressure Jacobian contains two
+col-scale terms $L\,\operatorname{diag}(K \odot |m|)$ and
+$L\,\operatorname{diag}(K \odot m \odot \operatorname{sign}(m))$
+whose scaling vectors are non-trivial expressions of the variable):
 
 | Pipeline | `J_()` per call |
 |---|---|
 | Element-wise inline (one scalar `Eqn` per node + loop) | ≈ 103 µs |
-| Mat_Mul inline (lambdify) | ≈ 45 µs |
-| **Mat_Mul module printer, vectorized @njit** | **≈ 28 µs** |
+| `Mat_Mul` inline (lambdify) | ≈ 45 µs |
+| **`Mat_Mul` module printer, vectorized @njit** | **≈ 28 µs** |
 
-- **Element-wise vs Mat_Mul inline.** Writing the same hydraulic
+- **Element-wise vs `Mat_Mul` inline.** Writing the same hydraulic
   system as `V @ m - m_inj = 0` plus `L @ (K m |m|) = 0` (two vector
   equations total) instead of 35 scalar equations cuts inline time by
-  more than half, because lambdify has far fewer expression nodes to
-  walk at runtime.
+  more than half, because {term}`lambdify` has far fewer expression
+  nodes to walk on every call.
 - **Inline vs module printer.** Even on a small system (only 79
   nonzeros), the module printer wins once every mutable-matrix term
-  reaches the vectorised scatter-add path. Here the loop-pressure
-  Jacobian has two col-scale terms whose scaling vectors
-  (``K * |m|`` and ``K * m * sign(m)``) are computed once per `J_`
+  reaches the vectorised {term}`scatter-add` path. Here the loop-
+  pressure Jacobian has two col-scale terms whose scaling vectors
+  (`K * |m|` and `K * m * sign(m)`) are computed once per `J_(y, p)`
   call as dense numpy expressions in the wrapper, then handed to a
-  Numba kernel that does two 10-iteration scatter-add loops. The only
-  remaining overhead is the final `coo_array(...).tocsc()` packing.
+  Numba kernel that does two 10-iteration scatter-add loops. The
+  only remaining overhead is the final `coo_array(...).tocsc()`
+  packing.
 
-Rule of thumb: **module printer wins whenever the mutable-matrix
-blocks successfully match the fast path**; it can lose to inline for
-models that fall through to the fallback (scipy-sparse + fancy
-indexing), or models small enough that the final COO-to-CSC packing
-dominates. Profile with `%timeit mdl.J(y, mdl.p)` on a representative
-iterate if in doubt, and check the generated `num_func.py` for any
-lingering `MutableMatJacDataModule` (= fallback) calls.
+Rule of thumb: **the module printer wins whenever the mutable-matrix
+blocks successfully match the fast path**; it can lose to
+{term}`inline mode` for models that fall through to the
+{term}`fallback path`, or models small enough that the final
+COO-to-CSC packing dominates. Profile with
+`%timeit mdl.J(y, mdl.p)` on a representative iterate if in doubt,
+and check the generated `num_func.py` for any lingering
+`MutableMatJacDataModule` (= fallback) calls.
 
-The scatter-add path is strictly $\mathcal{O}(\text{nnz})$ in the block
-contents, while the old fancy-indexing path was dominated by the cost
-of constructing the intermediate sparse matrices — so the speed-up
-scales with nnz and with the number of mutable-matrix blocks. For
-models with many rows and few blocks the advantage is small; for
-models with many blocks per variable (such as power flow, with
-distinct $\partial/\partial e$ and $\partial/\partial f$ blocks for
-both $P$ and $Q$ balances) the advantage compounds.
+The scatter-add path is strictly $\mathcal{O}(\text{nnz})$ in the
+block contents, while the old fancy-indexing path was dominated by
+the cost of constructing the intermediate sparse matrices — so the
+speed-up scales with nnz and with the number of mutable-matrix
+blocks. For models with many rows and few blocks the advantage is
+small; for models with many blocks per variable (such as power flow,
+with distinct $\partial/\partial e$ and $\partial/\partial f$ blocks
+for both $P$ and $Q$ balances) the advantage compounds.
 
 (restrictions)=
 ## Restrictions and reserved names
@@ -828,8 +902,9 @@ wrote the offending declaration.
 None of these caches are invalidated when `p_["K"].trigger_fun`
 fires or `p_["G"].get_v_t(t)` returns a fresh matrix. The runtime
 update simply gets lost, the Jacobian keeps using the initial
-values, and the Newton iteration either diverges or converges to
-the wrong solution — silently.
+values, and the downstream solver (Newton-Raphson, DAE integrator,
+or any other consumer of `J_`) either diverges or converges to the
+wrong solution — silently.
 
 Historically the check was narrow (only equations containing
 `Mat_Mul` were rejected, and the check ran at `FormJac` time). In
@@ -849,7 +924,7 @@ check).
   + `sparse=True` combination is rejected. Write
   `m.K * m.x + Mat_Mul(m.A, m.x) - m.b` with `K` a triggerable 1-D
   vector and `A` a plain sparse 2-D matrix — the wrapper rebuilds
-  `K` on every Newton step via the `trigger_var` mechanism and the
+  `K` on every solver step via the `trigger_var` mechanism and the
   `Mat_Mul(A, x)` fast path uses the unchanged `A`.
 - **Element-wise rewrite.** If you genuinely need the matrix
   itself to evolve, write the residual out one scalar `Eqn` per
