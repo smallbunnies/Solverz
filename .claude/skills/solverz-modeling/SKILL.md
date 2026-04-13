@@ -273,6 +273,7 @@ This skill bundles canonical end-to-end snippets:
 - **`references/examples/heat-flow.md`** — Canonical AE with **mutable-matrix Jacobian** (loop pressure drop with `Diag(K * m * |m|)`).
 - **`references/examples/m3b9-dynamics.md`** — Canonical DAE: synchronous machine dynamics with `TimeSeriesParam` for fault events, solved with `Rodas`.
 - **`references/examples/gas-characteristics.md`** — Canonical FDAE: gas pipeline by method of characteristics with `AliasVar` for previous-step state.
+- **`references/examples/integrated-energy-system.md`** — **The composition example.** Uses all three SolUtil flow solvers (`PowerFlow` / `DhsFlow` / `GasFlow`) to bootstrap initial conditions, then composes a multi-domain DAE with SolMuseum prebuilt blocks (`gt`, `pv`, `st`, `eb`, `eps_network`, `heat_network`, `gas_network`) via `model.add(...)`. Read this when you don't want to hand-write the equations and just need to wire prebuilt blocks together.
 
 For deeper coverage:
 
