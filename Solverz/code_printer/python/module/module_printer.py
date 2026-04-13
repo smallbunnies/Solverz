@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any, Set, Tuple
 
 import numpy as np
-from sympy import Function
+from sympy import Function, Mul, S
 from Solverz.code_printer.python.utilities import *
 from Solverz.code_printer.python.module.mutable_mat_analyzer import (
     analyze_mutable_mat_expr,
@@ -345,7 +346,7 @@ def print_inner_J(var_addr: Address,
             'mut_mat_mappings': mut_mat_mappings}
 
 
-def _classify_matmul_placeholders(precompute_info, PARAM):
+def _classify_matmul_placeholders(precompute_info, PARAM, emit_warnings=False):
     """Classify every extracted ``Mat_Mul`` placeholder into fast /
     fallback and compute which ``Para`` symbols the fallback code
     path still needs to have loaded in the ``F_`` wrapper.
@@ -492,7 +493,79 @@ def _classify_matmul_placeholders(precompute_info, PARAM):
                         if isinstance(s, Para):
                             fallback_symbols.add(s.name)
 
+    if emit_warnings:
+        _emit_l1_fallback_warnings(all_triples, fast_candidates, PARAM)
+
     return fast_info, fallback_names, fallback_symbols
+
+
+def _classify_l1_fallback_reason(mat, op, PARAM):
+    """Identify which Layer 1 fallback shape this ``(matrix_arg,
+    operand_arg)`` pair hits and return ``(reason, expression_str,
+    suggestion)`` for the user-facing diagnostic warning.
+
+    Each return triple is consumed by ``_emit_l1_fallback_warnings``
+    to format a multi-line ``UserWarning`` body. The classification is
+    deliberately deterministic and shape-based — no symbolic
+    rewriting — so users see the *exact* expression that broke the
+    fast path next to the suggested rewrite.
+    """
+    # Negation: Mat_Mul(-A, x) where A is a sparse dim=2 Para.
+    if isinstance(mat, Mul):
+        if len(mat.args) >= 2 and mat.args[0] == S.NegativeOne:
+            rest = mat.args[1:]
+            if len(rest) == 1 and isinstance(rest[0], Para):
+                inner = rest[0]
+                p = PARAM.get(inner.name)
+                if (p is not None
+                        and getattr(p, 'dim', 0) == 2
+                        and getattr(p, 'sparse', False)):
+                    return (
+                        f"matrix operand is `-{inner.name}` (negation of a "
+                        f"sparse Param), not a bare Param",
+                        f"-{inner.name}",
+                        f"-Mat_Mul({inner.name}, <operand>) — move the "
+                        f"negation outside Mat_Mul",
+                    )
+
+    # Generic fallback (not yet specialised — covered by later tests).
+    return (
+        "matrix operand is not a bare sparse `dim=2` Param",
+        str(mat),
+        "rewrite the matrix expression so the matrix argument is a "
+        "bare sparse `dim=2` Param",
+    )
+
+
+def _emit_l1_fallback_warnings(all_triples, fast_candidates, PARAM):
+    """Emit one ``UserWarning`` per Mat_Mul fallback placeholder.
+
+    Skips placeholders whose matrix is a dense ``dim=2`` Param —
+    those are already covered by ``_warn_dense_matmul_params`` in
+    ``equations.py``, which fires at ``FormJac`` time and applies
+    equally to inline mode (where Layer 1 / Layer 2 fallback
+    distinctions don't exist).
+    """
+    for name, mat, op in all_triples:
+        if name in fast_candidates:
+            continue
+        # Skip dense dim=2 Param — already warned by _warn_dense_matmul_params.
+        if isinstance(mat, Para):
+            p = PARAM.get(mat.name)
+            if (p is not None
+                    and getattr(p, 'dim', 0) == 2
+                    and not getattr(p, 'sparse', False)):
+                continue
+        reason, expression_str, suggestion = _classify_l1_fallback_reason(
+            mat, op, PARAM)
+        warnings.warn(
+            f"Mat_Mul placeholder {name!r} falls back to scipy.sparse "
+            f"SpMV (slower than the @njit csc_matvec fast path).\n"
+            f"  Reason: {reason}\n"
+            f"  Expression: Mat_Mul({expression_str}, <operand>)\n"
+            f"  Suggested rewrite: {suggestion}",
+            UserWarning, stacklevel=4
+        )
 
 
 def print_F(eqs_type: str,
@@ -530,8 +603,13 @@ def print_F(eqs_type: str,
     # see :func:`_classify_matmul_placeholders`). ``fallback_symbols``
     # names every ``Para`` that the wrapper must still materialise so
     # the scipy SpMV in a fallback precompute can execute correctly.
+    #
+    # ``emit_warnings=True`` is set here (not in ``print_inner_F`` or
+    # ``print_J``) so each fallback placeholder produces exactly one
+    # ``UserWarning`` per render, not three. ``print_F`` is the first
+    # function to call the classifier in ``render_modules``.
     _, fallback_names, fallback_symbols = _classify_matmul_placeholders(
-        precompute_info, PARAM)
+        precompute_info, PARAM, emit_warnings=True)
 
     # Drop sparse dim=2 ``Para`` wrapper loads that are (a) not
     # referenced by any fallback scipy SpMV **and** (b) not in
