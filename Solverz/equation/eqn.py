@@ -187,7 +187,10 @@ class LoopEqnDiff(EqnDiff):
                  n_outer: int,
                  n_diff: int,
                  var_map: Dict[str, object]):
-        from Solverz.equation.loop_jac import build_loop_jac_kernel_source
+        from Solverz.equation.loop_jac import (
+            build_loop_jac_kernel_source,
+            compute_loop_jac_sparsity,
+        )
         from Solverz.num_api import custom_function as _SolCF
         from Solverz.variable.ssymbol import sSymBasic
         from Solverz.equation.param import ParamBase
@@ -299,6 +302,23 @@ class LoopEqnDiff(EqnDiff):
         self.n_diff = n_diff
         self._loop_var_map = dict(var_map)
         self._kernel_func_name = kernel_name
+
+        # Structural sparsity of the block. Walked from the
+        # canonical expression at construction time:
+        #
+        # - ``δ(outer, diff) * anything`` → diagonal positions
+        # - ``Indexed(Param, outer, diff)`` or the transposed form
+        #   → Param's stored nnz pattern (``param.v.tocoo()``)
+        # - other shapes → dense full ``n_outer × n_diff`` block
+        #
+        # These arrays are the ONLY positions where the block is
+        # structurally non-zero. ``FormJac`` uses them to build a
+        # sparse ``Value0`` (instead of ``csc_array(dense)`` which
+        # would mark every grid position as nnz), so the global
+        # Jacobian sparsity pattern reflects the true structure.
+        self._sparsity_row, self._sparsity_col = compute_loop_jac_sparsity(
+            canonical, outer_idx, diff_idx, var_map, n_outer, n_diff,
+        )
 
 
 def Idx(name: str, n: int = None):
@@ -1100,6 +1120,44 @@ class LoopEqn(Eqn):
                 diff_var=var_iVar,
             )
             self.derivatives[var_iVar.name] = ed
+
+
+class _LoopJacBlockScatter(Function):
+    """Sympy ``Function`` node whose ``_numpycode`` emits fancy
+    indexing into a LoopEqn kernel's dense block result:
+
+        ``<block_var>[<row_sym>, <col_sym>]``
+
+    Used by the JIT module printer's ``print_J`` wrapper — the
+    kernel runs first and stores its ``(n_outer, n_diff)`` result
+    in a local variable, then this scatter node emits the
+    fancy-index Assignment that writes the ``(row_arr, col_arr)``
+    positions of the dense result into ``_data_[addr_slice]``.
+
+    We can't use ``sympy.Indexed`` for this because sympy's
+    ``Assignment._check_args`` tries to infer the shape of
+    ``Indexed`` RHSs by reading the index range bounds — and our
+    row/col ``Symbol``s are plain unbounded symbols pointing at
+    module-level constant arrays, so the shape lookup raises.
+    A custom ``Function`` with a direct ``_numpycode`` bypasses
+    the shape inference entirely.
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        return None
+
+    def _numpycode(self, printer, **kwargs):
+        block_var = printer._print(self.args[0])
+        row = printer._print(self.args[1])
+        col = printer._print(self.args[2])
+        return f'{block_var}[{row}, {col}]'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
 
 
 class _LoopJacBlockCall(Function):

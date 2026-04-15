@@ -4,7 +4,8 @@ import warnings
 from typing import Any, Set, Tuple
 
 import numpy as np
-from sympy import Function, Mul, S
+import sympy as sp
+from sympy import Function, IndexedBase, Mul, S
 from Solverz.code_printer.python.utilities import *
 from Solverz.code_printer.python.module.mutable_mat_analyzer import (
     analyze_mutable_mat_expr,
@@ -216,6 +217,31 @@ def print_J(eqs_type: str,
                 body.append(Assignment(
                     iVar('data', internal_use=True)[mb['addr_slice']],
                     FunctionCall(mb['fn_name'], call_args)))
+            elif mb.get('mode') == 'loop_eqn':
+                # LoopEqn-native path. Call the @njit kernel
+                # (which returns a dense ``(n_outer, n_diff)``
+                # ndarray) and fancy-index into the block's
+                # structural ``(row, col)`` positions. The row /
+                # col arrays arrive as module-level constants
+                # loaded from ``setting[...]`` via
+                # ``mut_mat_mappings``.
+                from Solverz.equation.eqn import _LoopJacBlockScatter
+                kernel_args = [symbols(nm, real=True)
+                               for nm in mb['kernel_symbols']]
+                block_local = iVar(
+                    f'_sz_loop_jac_block_{mb["block_idx"]}',
+                    internal_use=True,
+                )
+                body.append(Assignment(
+                    block_local,
+                    FunctionCall(mb['kernel_fn_name'], kernel_args),
+                ))
+                row_sym = symbols(mb['row_key'], real=True)
+                col_sym = symbols(mb['col_key'], real=True)
+                body.append(Assignment(
+                    iVar('data', internal_use=True)[mb['addr_slice']],
+                    _LoopJacBlockScatter(block_local, row_sym, col_sym),
+                ))
             else:
                 # Fallback: scipy sparse fancy indexing
                 body.append(Assignment(
@@ -260,6 +286,46 @@ def print_inner_J(var_addr: Address,
             jac_constant = jb.IsDeriNumber
 
             if jb.DeriType == 'matrix':
+                # LoopEqn-native J block path (Phase J3.3). The
+                # JacBlock carries a reference to its source
+                # LoopEqnDiff via ``_loop_eqn_diff``, which owns a
+                # pre-generated dense kernel function source. We
+                # emit the kernel as a top-level @njit function
+                # (via ``mut_mat_block_funcs``) and record a block
+                # descriptor for ``print_J`` to render the wrapper
+                # call + fancy-index Assignment.
+                if hasattr(jb, '_loop_eqn_diff'):
+                    ed = jb._loop_eqn_diff
+                    block_idx = len(mutable_matrix_blocks)
+                    kernel_fn_name = f'_sz_loop_jac_kernel_{block_idx}'
+                    # Rename the kernel function (it was
+                    # generated with the sanitized EqnDiff name at
+                    # LoopEqnDiff construction time — that name
+                    # would collide with the inline path's
+                    # closure kernel in an odd edge case, and the
+                    # module-local indexed name is cleaner).
+                    block_source = ed.kernel_source.replace(
+                        ed._kernel_func_name, kernel_fn_name
+                    )
+                    mut_mat_block_funcs.append(block_source)
+
+                    row_key = f'_sz_loop_jac_row_{block_idx}'
+                    col_key = f'_sz_loop_jac_col_{block_idx}'
+                    mut_mat_mappings[row_key] = jb.CooRow.astype(np.int64)
+                    mut_mat_mappings[col_key] = jb.CooCol.astype(np.int64)
+
+                    mutable_matrix_blocks.append({
+                        'addr_slice': addr_by_ele,
+                        'mode': 'loop_eqn',
+                        'block_idx': block_idx,
+                        'kernel_fn_name': kernel_fn_name,
+                        'kernel_symbols': sorted(ed.SYMBOLS.keys()),
+                        'row_key': row_key,
+                        'col_key': col_key,
+                    })
+                    addr_by_ele_0 += jb.SpEleSize
+                    continue
+
                 if jb.is_mutable_matrix:
                     # Mutable matrix derivative: analyze the expression into
                     # typed terms (diag / row_scale / col_scale), generate a

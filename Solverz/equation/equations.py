@@ -212,9 +212,31 @@ class Equations:
                         perturbed_args.append(rng.random(arg.shape) + 1.0)
                     else:
                         perturbed_args.append(arg)
-                Value0 = fy[2].NUM_EQN(*perturbed_args)
-                if not isinstance(Value0, csc_array):
-                    Value0 = csc_array(Value0)
+                # Run the dense kernel to get the perturbed block.
+                dense_val = fy[2].NUM_EQN(*perturbed_args)
+                dense_val = np.asarray(dense_val)
+
+                # Build Value0 as a sparse ``csc_array`` restricted
+                # to the **structural** sparsity pattern
+                # pre-computed on the LoopEqnDiff at construction
+                # time (diagonal for ``δ(outer,diff)`` terms,
+                # Param ``.tocoo()`` for ``Indexed(Param, outer,
+                # diff)`` terms, dense fallback otherwise). This
+                # guarantees the block's sparsity in the global
+                # Jacobian reflects the TRUE structure instead of
+                # ``csc_array(dense)`` which would mark every
+                # grid entry as non-zero.
+                row_arr = fy[2]._sparsity_row
+                col_arr = fy[2]._sparsity_col
+                if row_arr.size > 0:
+                    data_arr = dense_val[row_arr, col_arr]
+                    Value0 = csc_array(
+                        (np.asarray(data_arr, dtype=float),
+                         (row_arr, col_arr)),
+                        shape=(fy[2].n_outer, fy[2].n_diff),
+                    )
+                else:
+                    Value0 = csc_array((fy[2].n_outer, fy[2].n_diff))
 
                 jb = JacBlock(EqnName,
                               EqnAddr,
@@ -223,6 +245,12 @@ class Equations:
                               VarAddr,
                               DeriExpr,
                               Value0)
+                # Side-channel reference so ``print_inner_J``
+                # (module printer) can fetch the pre-generated
+                # kernel source, its function name, and its
+                # sorted arg list without re-walking the RHS
+                # marker.
+                jb._loop_eqn_diff = fy[2]
                 self.jac.add_block(EqnName, DiffVar, jb)
                 continue
 

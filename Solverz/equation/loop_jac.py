@@ -36,8 +36,9 @@ module.
 """
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Tuple
 
+import numpy as np
 import sympy as sp
 from sympy.functions.special.tensor_functions import KroneckerDelta
 
@@ -590,6 +591,145 @@ def _sum_to_matmul(sum_node: sp.Sum,
         Para(param_node.base.name, dim=2),
         var_sol_obj.symbol,
     )
+
+
+def compute_loop_jac_sparsity(canonical: sp.Expr,
+                                outer_idx: sp.Idx,
+                                diff_idx: sp.Idx,
+                                var_map: Dict[str, object],
+                                n_outer: int,
+                                n_diff: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute the **structural** sparsity pattern of a LoopEqn
+    Jacobian block from its canonicalized derivative expression.
+
+    Walks the canonical ``Add`` terms and, for each term,
+    identifies which ``(row, col)`` positions in the ``n_outer ×
+    n_diff`` block can be structurally non-zero:
+
+    - **Diagonal**: a term containing ``KroneckerDelta(outer,
+      diff)`` (possibly multiplied by other factors) contributes
+      only to the diagonal positions ``(i, i)`` for each ``i``
+      where both indices are valid.
+    - **Param sparsity**: a term containing
+      ``Indexed(Param, outer, diff)`` or
+      ``Indexed(Param, diff, outer)`` with ``Param`` a 2-D
+      ``ParamBase`` contributes at the Param's stored nnz
+      positions (from ``param.v.tocoo()``). Transposed indexing
+      swaps row/col appropriately. Dense Params contribute the
+      full ``n_outer × n_diff`` block.
+    - **Dense fallback**: any other term depending on both
+      ``outer_idx`` and ``diff_idx`` in a shape the analyzer
+      can't classify forces the block back to the full dense
+      pattern (conservatively safe).
+
+    The returned ``(row_arr, col_arr)`` is the **sorted union** of
+    all term patterns in row-major order, so downstream
+    ``JacBlock.ParseSp`` / ``csc_array`` conversion sees a
+    deterministic COO layout.
+
+    Why this matters
+    ----------------
+    Without proper sparsity parsing, a LoopEqnDiff's Value0 ends
+    up as a ``csc_array(dense_ndarray)`` with all ``n_outer ×
+    n_diff`` entries marked non-zero — even when the true
+    structure is e.g. diagonal (n entries) or follows a sparse
+    network-admittance pattern (~5n entries for a power grid).
+    The global Jacobian inherits this false density, ``inner_J``
+    writes n² entries per iteration, and the Newton step's
+    ``scipy.sparse.spsolve`` runs on a ``density = 1.0`` matrix
+    — defeating every sparse-code optimization downstream.
+    """
+    from Solverz.equation.param import ParamBase
+
+    outer_name = _name_of(outer_idx)
+    diff_name = _name_of(diff_idx)
+
+    # Each classified term contributes one or more (row, col)
+    # pattern fragments; we accumulate them here and union at
+    # the end.
+    all_positions: set = set()
+    has_dense_fallback = False
+
+    if isinstance(canonical, sp.Add):
+        terms = list(canonical.args)
+    else:
+        terms = [canonical]
+
+    for term in terms:
+        factors = list(term.args) if isinstance(term, sp.Mul) else [term]
+
+        # Look for a top-level KroneckerDelta(outer, diff) factor.
+        has_diag_kron = False
+        for f in factors:
+            if isinstance(f, KroneckerDelta):
+                names = {_name_of(a) for a in f.args}
+                if names == {outer_name, diff_name}:
+                    has_diag_kron = True
+                    break
+
+        # Look for Indexed(Param, outer, diff) among ALL the
+        # term's Indexed atoms (may be inside nested sub-expressions).
+        param_hits = []  # list of (row_arr, col_arr) from Param nnz
+        for idx_node in term.atoms(sp.Indexed):
+            base_name = idx_node.base.name
+            sol = var_map.get(base_name)
+            if not isinstance(sol, ParamBase):
+                continue
+            if sol.dim != 2 or len(idx_node.indices) != 2:
+                continue
+            ix_names = [_name_of(ix) for ix in idx_node.indices]
+            idx_set = set(ix_names)
+            if idx_set != {outer_name, diff_name}:
+                continue  # not a [outer, diff] access — skip
+            # Extract the stored matrix's nnz pattern
+            val = sol.v
+            if hasattr(val, 'tocoo'):
+                coo = val.tocoo()
+                r = np.asarray(coo.row, dtype=np.int64)
+                c = np.asarray(coo.col, dtype=np.int64)
+            else:
+                # Dense 2-D Param: every position is structurally nonzero
+                arr = np.asarray(val)
+                r, c = np.nonzero(np.ones_like(arr, dtype=bool))
+                r = r.astype(np.int64)
+                c = c.astype(np.int64)
+            # If the Param is indexed as [diff_name, outer_name]
+            # (transposed), swap row/col.
+            if ix_names[0] == diff_name:
+                r, c = c, r
+            param_hits.append((r, c))
+
+        if has_diag_kron:
+            n = min(n_outer, n_diff)
+            diag = np.arange(n, dtype=np.int64)
+            all_positions.update(zip(diag.tolist(), diag.tolist()))
+
+        if param_hits:
+            for r, c in param_hits:
+                all_positions.update(zip(r.tolist(), c.tolist()))
+
+        if not has_diag_kron and not param_hits:
+            # Term has no structural indicator — fall back to
+            # the full dense block.
+            has_dense_fallback = True
+            break
+
+    if has_dense_fallback:
+        rows = np.repeat(np.arange(n_outer, dtype=np.int64), n_diff)
+        cols = np.tile(np.arange(n_diff, dtype=np.int64), n_outer)
+        return rows, cols
+
+    if not all_positions:
+        # Defensive: no terms produced structural positions. Fall
+        # back to dense to guarantee correctness.
+        rows = np.repeat(np.arange(n_outer, dtype=np.int64), n_diff)
+        cols = np.tile(np.arange(n_diff, dtype=np.int64), n_outer)
+        return rows, cols
+
+    sorted_positions = sorted(all_positions)
+    row_arr = np.array([p[0] for p in sorted_positions], dtype=np.int64)
+    col_arr = np.array([p[1] for p in sorted_positions], dtype=np.int64)
+    return row_arr, col_arr
 
 
 def build_loop_jac_kernel_source(func_name: str,

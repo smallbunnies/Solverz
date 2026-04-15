@@ -1274,9 +1274,96 @@ def test_loop_eqn_pow_body_newton_j3():
     src = loop_diffs[0].kernel_source
     assert 'if i == _sz_loop_dk' in src or 'if _sz_loop_dk == i' in src
 
+    # Structural sparsity must be the 3x3 diagonal (3 positions)
+    # and NOT the dense 9-entry fallback. ``compute_loop_jac_sparsity``
+    # recognised the ``δ(k,i) * 2 * Vm[i]`` term as contributing
+    # only to (0,0), (1,1), (2,2).
+    ed = loop_diffs[0]
+    assert ed._sparsity_row.tolist() == [0, 1, 2]
+    assert ed._sparsity_col.tolist() == [0, 1, 2]
+
+    # The constructed JacBlock should inherit that sparsity —
+    # not be marked as a 9-entry dense block.
+    spf.FormJac(y0)
+    for jbs_row in spf.jac.blocks_sorted.values():
+        for var, jb in jbs_row.items():
+            if hasattr(jb, '_loop_eqn_diff'):
+                assert jb.SpEleSize == 3, (
+                    f"LoopEqnDiff JacBlock should have 3 nnz, "
+                    f"got {jb.SpEleSize}"
+                )
+                np.testing.assert_array_equal(jb.CooRow, [0, 1, 2])
+                np.testing.assert_array_equal(jb.CooCol, [0, 1, 2])
+
     mdl = made_numerical(spf, y0, sparse=True)
     sol = nr_method(mdl, y0)
     np.testing.assert_allclose(sol.y['Vm'], Vm_target, atol=1e-8)
+
+
+def test_loop_eqn_pow_body_newton_j3_jit_module():
+    """Phase J3.3 end-to-end: render a LoopEqnDiff block through
+    the JIT module path and solve via the compiled module.
+
+    Asserts:
+
+    - ``module_printer(jit=True).render()`` succeeds — the
+      LoopEqnDiff's dense kernel source lands in ``num_func.py``
+      as a top-level ``@njit(cache=True)`` def, and the J_
+      wrapper calls it + fancy-indexes the block's structural
+      (row, col) positions into ``_data_[addr_slice]``.
+    - The generated ``num_func.py`` contains the kernel def line
+      and the row/col array loads from ``setting``.
+    - Importing the module + running Newton converges to
+      ``Vm = sqrt(rhs)``.
+    """
+    import os as _os
+    import sys as _sys
+    import tempfile as _tempfile
+    from Solverz import LoopEqn
+
+    n = 3
+    Vm_target = np.array([1.0, 2.0, 3.0])
+    rhs_value = Vm_target ** 2
+
+    m = Model()
+    m.Vm = Var('Vm', np.array([0.8, 2.3, 2.7]))
+    m.rhs = Param('rhs', rhs_value)
+
+    i = Idx('i', n)
+    body = m.Vm[i] ** 2 - m.rhs[i]
+    m.eqn = LoopEqn('sq_eqn', outer_index=i, body=body, model=m)
+
+    spf, y0 = m.create_instance()
+
+    with _tempfile.TemporaryDirectory() as d:
+        printer = module_printer(spf, y0, 'phase_j3_pow',
+                                 directory=d, jit=True)
+        printer.render()
+
+        module_path = _os.path.join(d, 'phase_j3_pow', 'num_func.py')
+        with open(module_path) as f:
+            src = f.read()
+        # The kernel source should be emitted as a @njit def.
+        assert '_sz_loop_jac_kernel_0' in src
+        # Row / col arrays loaded from setting at module level.
+        assert '_sz_loop_jac_row_0 = setting["_sz_loop_jac_row_0"]' in src
+        assert '_sz_loop_jac_col_0 = setting["_sz_loop_jac_col_0"]' in src
+        # The J_ wrapper should do the kernel call + fancy-index.
+        assert '_sz_loop_jac_kernel_0(' in src
+        assert '_sz_loop_jac_block_0' in src
+
+        _sys.path.insert(0, d)
+        try:
+            import phase_j3_pow
+            mdl = phase_j3_pow.mdl
+            y0_loaded = phase_j3_pow.y
+            sol = nr_method(mdl, y0_loaded)
+            np.testing.assert_allclose(sol.y['Vm'], Vm_target, atol=1e-8)
+        finally:
+            _sys.path.remove(d)
+            for mod_name in list(_sys.modules):
+                if mod_name.startswith('phase_j3_pow'):
+                    del _sys.modules[mod_name]
 
 
 def test_loop_eqn_polar_pf_trig_f_side():
