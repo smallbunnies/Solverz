@@ -193,104 +193,383 @@ def loop_jac_to_solverz_expr(expr: sp.Expr,
                               var_map: Dict[str, object]) -> sp.Expr:
     """Translate a *canonicalized* LoopEqn Jacobian expression back
     to a Solverz expression that ``FormJac`` and ``JacBlock`` can
-    classify via ``is_constant_matrix_deri``.
+    process through the existing constant / mutable-matrix paths.
 
-    Phase J1 coverage
-    -----------------
-    Handles exactly the shapes the legacy ``_translate_loop_jac``
-    was able to map:
+    Phase J1 — **constant** patterns handled via
+    ``is_constant_matrix_deri``:
 
     - ``KroneckerDelta(outer, diff)`` → ``_LoopJacEye(n_outer)``
-    - ``Indexed(Base, outer, diff)`` with ``Base`` a 2-D ``Param``
+    - ``Indexed(Param, outer, diff)`` with ``Param`` a 2-D ``Param``
       → ``Para(name, dim=2)``
-    - ``Add`` / ``Mul`` thereof — reconstructed via ``sp.Add`` /
-      ``sp.Mul`` in terms of the above
+    - ``Add`` / ``Mul`` / numeric coeffs over the above
 
-    Anything else raises ``NotImplementedError``: Phase J2 will
-    route mutable shapes (``δ(outer) * Sum(...)``, row/col scale,
-    bilinear entries, trig) through a new per-block kernel emitter
-    that bypasses ``is_constant_matrix_deri`` entirely.
+    Phase J2 — **mutable** patterns handled via the existing
+    ``mutable_mat_analyzer`` (Solverz ``Diag`` / ``Mat_Mul``
+    decomposition into diag / row-scale / col-scale terms):
+
+    - ``δ(outer, diff) * Sum(Param[outer, dummy] * Var[dummy], dummy)``
+      (DiagTerm) → ``Diag(Mat_Mul(Para(name, dim=2), iVar(name)))``
+    - ``Indexed(Param, outer, diff) * Indexed(Var, outer)``
+      (RowScale) → ``Mat_Mul(Diag(iVar(name)), Para(name, dim=2))``
+    - ``Indexed(Param, outer, diff) * Indexed(Var, diff)``
+      (ColScale) → ``Mat_Mul(Para(name, dim=2), Diag(iVar(name)))``
+
+    Phase J3 (deferred):
+
+    - ``Indexed(Param, outer, diff) * h(Var[outer], Var[diff])``
+      with arbitrary ``h`` (e.g. ``cos(Va[i] - Va[k])``) — requires
+      a LoopEqn-native per-entry scatter kernel.
+    - Fully dense bilinear blocks with no ``Param`` carrier.
     """
     from Solverz.equation.eqn import _LoopJacEye
     from Solverz.equation.param import ParamBase
 
+    # Top-level: distribute Add. Each addend is classified and
+    # translated independently; the result is reassembled with sp.Add.
+    if isinstance(expr, sp.Add):
+        return sp.Add(*(
+            loop_jac_to_solverz_expr(t, outer_idx, diff_idx,
+                                      n_outer, var_map)
+            for t in expr.args
+        ))
+
+    # Numeric constant — pass through.
+    if isinstance(expr, (sp.Integer, sp.Float, sp.Rational, sp.Number)):
+        return expr
+
+    # Single-atom cases that don't need the Mul-splitting classifier.
+    if isinstance(expr, KroneckerDelta):
+        arg_names = {_name_of(a) for a in expr.args}
+        if arg_names == {_name_of(outer_idx), _name_of(diff_idx)}:
+            return _LoopJacEye(sp.Integer(n_outer))
+        raise NotImplementedError(
+            f"LoopEqn J translator: unsupported KroneckerDelta args "
+            f"{expr.args}"
+        )
+
+    if isinstance(expr, sp.Indexed):
+        return _translate_indexed_param(
+            expr, outer_idx, diff_idx, var_map
+        )
+
+    # Everything from here is a Mul (or a Sum without sign — fall
+    # through to classifier) representing one term of the sum.
+    # Extract the sign, examine the remaining factors, and classify.
+    return _classify_and_translate_term(
+        expr, outer_idx, diff_idx, n_outer, var_map
+    )
+
+
+def _translate_indexed_param(e: sp.Indexed,
+                              outer_idx: sp.Idx,
+                              diff_idx: sp.Idx,
+                              var_map: Dict[str, object]) -> sp.Expr:
+    """Translate a bare ``Indexed(Param, (outer, diff))`` node — the
+    constant 2-D-Param case — into ``Para(name, dim=2)``.
+
+    Used both by the top-level walker (for unwrapped single-term
+    expressions) and by the per-term classifier inside
+    :func:`_classify_and_translate_term`.
+    """
+    from Solverz.equation.param import ParamBase
+
+    base_name = e.base.name
+    sol_obj = var_map.get(base_name)
+    if sol_obj is None:
+        raise NotImplementedError(
+            f"LoopEqn J translator: IndexedBase {base_name!r} has "
+            f"no var_map entry"
+        )
+    if not (isinstance(sol_obj, ParamBase) and sol_obj.dim == 2):
+        raise NotImplementedError(
+            f"LoopEqn J translator: bare IndexedBase {base_name!r} "
+            f"of {type(sol_obj).__name__} dim="
+            f"{getattr(sol_obj, 'dim', None)} — expected a 2-D Param"
+        )
+    if len(e.indices) != 2:
+        raise NotImplementedError(
+            f"LoopEqn J translator: expected 2 indices on "
+            f"{base_name!r}, got {e}"
+        )
+    idx_names = {_name_of(ix) for ix in e.indices}
+    if idx_names != {_name_of(outer_idx), _name_of(diff_idx)}:
+        raise NotImplementedError(
+            f"LoopEqn J translator: 2-D Param {base_name!r} accessed "
+            f"with indices {e.indices} — expected [outer, diff] "
+            f"(in either order)"
+        )
+    return Para(sol_obj.name, dim=2)
+
+
+def _classify_and_translate_term(term: sp.Expr,
+                                  outer_idx: sp.Idx,
+                                  diff_idx: sp.Idx,
+                                  n_outer: int,
+                                  var_map: Dict[str, object]) -> sp.Expr:
+    """Classify a single *term* (post canonicalize_kronecker) into
+    one of the Phase J1 / J2 shapes and translate it to a Solverz
+    expression.
+
+    A term is either a bare factor or a ``Mul`` of factors. We
+    bucket the factors into KroneckerDeltas / Indexed / Sums /
+    numeric coefficients / other, and then match against the known
+    shapes in priority order (most specific first).
+    """
+    from Solverz.equation.eqn import _LoopJacEye
+    from Solverz.equation.param import ParamBase
+    from Solverz.sym_algebra.functions import Diag, Mat_Mul
+    from Solverz.sym_algebra.symbols import iVar
+
+    # Split leading ±1 / numeric coefficients from "real" factors.
+    if isinstance(term, sp.Mul):
+        factors = list(term.args)
+    else:
+        factors = [term]
+
+    coeff = sp.S.One
+    delta_factors = []
+    indexed_factors = []
+    sum_factors = []
+    other_factors = []
+    for f in factors:
+        if isinstance(f, KroneckerDelta):
+            delta_factors.append(f)
+        elif isinstance(f, sp.Indexed):
+            indexed_factors.append(f)
+        elif isinstance(f, sp.Sum):
+            sum_factors.append(f)
+        elif isinstance(f, (sp.Integer, sp.Float, sp.Rational, sp.Number)):
+            coeff = coeff * f
+        else:
+            other_factors.append(f)
+
     outer_name = _name_of(outer_idx)
     diff_name = _name_of(diff_idx)
 
-    def walk(e: sp.Expr) -> sp.Expr:
-        if isinstance(e, (sp.Integer, sp.Float, sp.Rational, sp.Number)):
-            return e
+    # --- Phase J1 shapes ---------------------------------------------
 
-        if isinstance(e, KroneckerDelta):
-            arg_names = {_name_of(a) for a in e.args}
-            if arg_names == {outer_name, diff_name}:
-                return _LoopJacEye(sp.Integer(n_outer))
-            raise NotImplementedError(
-                f"LoopEqn J translator (Phase J1): KroneckerDelta "
-                f"with args {e.args} — only δ(outer, diff) is "
-                f"supported at this phase"
-            )
-
-        if isinstance(e, sp.Indexed):
-            base_name = e.base.name
-            sol_obj = var_map.get(base_name)
-            if sol_obj is None:
-                raise NotImplementedError(
-                    f"LoopEqn J translator: IndexedBase "
-                    f"{base_name!r} has no var_map entry"
-                )
-            if isinstance(sol_obj, ParamBase) and sol_obj.dim == 2:
-                if len(e.indices) != 2:
-                    raise NotImplementedError(
-                        f"LoopEqn J translator: expected 2 indices "
-                        f"on {base_name!r}, got {e}"
-                    )
-                idx_names = {_name_of(ix) for ix in e.indices}
-                if idx_names != {outer_name, diff_name}:
-                    raise NotImplementedError(
-                        f"LoopEqn J translator: 2-D Param "
-                        f"{base_name!r} accessed with indices {e.indices} "
-                        f"— Phase J1 only handles [outer, diff] "
-                        f"(in either order)"
-                    )
-                return Para(sol_obj.name, dim=2)
-            raise NotImplementedError(
-                f"LoopEqn J translator: IndexedBase {base_name!r} of "
-                f"{type(sol_obj).__name__} dim="
-                f"{getattr(sol_obj, 'dim', None)} — reserved for "
-                f"Phase J2"
-            )
-
-        if isinstance(e, sp.Add):
-            return sp.Add(*(walk(a) for a in e.args))
-        if isinstance(e, sp.Mul):
-            return sp.Mul(*(walk(a) for a in e.args))
-
-        if isinstance(e, sp.Sum):
-            # A Sum that survived canonicalization is non-constant
-            # by construction (no KroneckerDelta on its dummy) —
-            # will be handled by the DiagTerm / BilinearEntry
-            # paths in Phase J2.
-            raise NotImplementedError(
-                f"LoopEqn J translator: un-collapsed Sum {e} — "
-                f"reserved for Phase J2"
-            )
-
-        if isinstance(e, sp.Idx):
-            raise NotImplementedError(
-                f"LoopEqn J translator: bare Idx {e!r} in "
-                f"Jacobian expression"
-            )
-        if isinstance(e, sp.Symbol):
-            raise NotImplementedError(
-                f"LoopEqn J translator: unexpected bare Symbol {e!r}"
-            )
+    # Constant identity: KroneckerDelta(outer, diff) * numeric
+    if (len(delta_factors) == 1
+            and len(indexed_factors) == 0
+            and len(sum_factors) == 0
+            and not other_factors):
+        d = delta_factors[0]
+        if ({_name_of(d.args[0]), _name_of(d.args[1])}
+                == {outer_name, diff_name}):
+            return coeff * _LoopJacEye(sp.Integer(n_outer))
         raise NotImplementedError(
-            f"LoopEqn J translator: unsupported node "
-            f"{type(e).__name__}: {e!r}"
+            f"LoopEqn J translator: unsupported KroneckerDelta {d}"
         )
 
-    return walk(expr)
+    # Constant 2-D Param entry: Indexed(Param, outer, diff) * numeric
+    if (len(indexed_factors) == 1
+            and len(delta_factors) == 0
+            and len(sum_factors) == 0
+            and not other_factors):
+        return coeff * _translate_indexed_param(
+            indexed_factors[0], outer_idx, diff_idx, var_map
+        )
+
+    # --- Phase J2 shapes ---------------------------------------------
+
+    # RowScale / ColScale: two Indexed factors — one a 2-D Param
+    # accessed as [outer, diff] (or [diff, outer]), the other a 1-D
+    # Var accessed as [outer] (RowScale) or [diff] (ColScale).
+    if (len(indexed_factors) == 2
+            and len(delta_factors) == 0
+            and len(sum_factors) == 0
+            and not other_factors):
+        param_idx, var_idx = _split_param_var_indexed(
+            indexed_factors, var_map, outer_name, diff_name
+        )
+        if param_idx is not None and var_idx is not None:
+            param_name = param_idx.base.name
+            var_name = var_idx.base.name
+            var_sol_obj = var_map[var_name]
+            if not isinstance(var_sol_obj.symbol, iVar):
+                raise NotImplementedError(
+                    f"LoopEqn J translator: row/col scale with "
+                    f"non-iVar {var_name!r}"
+                )
+            var_sym = var_sol_obj.symbol
+            # Classify as RowScale or ColScale based on the Var's
+            # sole index.
+            var_index_name = _name_of(var_idx.indices[0])
+            param_expr = Para(param_name, dim=2)
+            if var_index_name == outer_name:
+                return coeff * Mat_Mul(Diag(var_sym), param_expr)
+            if var_index_name == diff_name:
+                return coeff * Mat_Mul(param_expr, Diag(var_sym))
+            raise NotImplementedError(
+                f"LoopEqn J translator: Var {var_name}[{var_idx.indices[0]}] "
+                f"— index must be outer or diff"
+            )
+
+    # DiagTermWithSum: KroneckerDelta(outer, diff) * Sum(...)
+    if (len(delta_factors) == 1
+            and len(sum_factors) == 1
+            and len(indexed_factors) == 0
+            and not other_factors):
+        d = delta_factors[0]
+        d_names = {_name_of(d.args[0]), _name_of(d.args[1])}
+        if d_names != {outer_name, diff_name}:
+            raise NotImplementedError(
+                f"LoopEqn J translator: DiagTerm with unsupported "
+                f"KroneckerDelta {d}"
+            )
+        inner_mm = _sum_to_matmul(
+            sum_factors[0], outer_idx, var_map
+        )
+        return coeff * Diag(inner_mm)
+
+    # No shape matched — Phase J3 territory.
+    raise NotImplementedError(
+        f"LoopEqn J translator: cannot classify term {term!r}. "
+        f"Factors: deltas={len(delta_factors)}, "
+        f"indexed={len(indexed_factors)}, sums={len(sum_factors)}, "
+        f"other={len(other_factors)}. Reserved for Phase J3 "
+        f"(LoopEqn-native per-entry kernel emitter)."
+    )
+
+
+def _split_param_var_indexed(indexed_factors,
+                              var_map: Dict[str, object],
+                              outer_name: str,
+                              diff_name: str):
+    """Given two ``Indexed`` factors, identify which is the 2-D
+    ``Param`` accessed as ``[outer, diff]`` (or ``[diff, outer]``)
+    and which is the 1-D ``Var`` / ``Param`` accessed as a single
+    index. Returns ``(param_idx, var_idx)`` or ``(None, None)`` if
+    neither factor is a clean 2-D Param.
+    """
+    from Solverz.equation.param import ParamBase
+    from Solverz.variable.ssymbol import Var
+
+    if len(indexed_factors) != 2:
+        return None, None
+
+    def is_2d_param(idx_node):
+        sol = var_map.get(idx_node.base.name)
+        return (isinstance(sol, ParamBase)
+                and sol.dim == 2
+                and len(idx_node.indices) == 2)
+
+    def indices_match_outer_diff(idx_node):
+        names = {_name_of(ix) for ix in idx_node.indices}
+        return names == {outer_name, diff_name}
+
+    def is_1d_var(idx_node):
+        sol = var_map.get(idx_node.base.name)
+        return (isinstance(sol, Var)
+                and len(idx_node.indices) == 1)
+
+    a, b = indexed_factors
+    if (is_2d_param(a) and indices_match_outer_diff(a)
+            and is_1d_var(b)):
+        return a, b
+    if (is_2d_param(b) and indices_match_outer_diff(b)
+            and is_1d_var(a)):
+        return b, a
+    return None, None
+
+
+def _sum_to_matmul(sum_node: sp.Sum,
+                    outer_idx: sp.Idx,
+                    var_map: Dict[str, object]) -> sp.Expr:
+    """Recognise ``Sum(Param[outer, dummy] * Var[dummy], (dummy, 0,
+    n-1))`` and translate to ``Mat_Mul(Para(param), iVar(var))``.
+
+    This is the matmul-fingerprint used by the DiagTerm classifier.
+    The mutable-matrix analyzer downstream will pre-compute the
+    ``Mat_Mul`` as a dense vector in the ``J_`` wrapper via
+    ``SolCF.csc_matvec`` (if the Param is sparse) and pass it to
+    ``inner_J`` as a ``diag_term`` scaling vector.
+
+    Limitations:
+    - Exactly one 2-D ``Param`` factor indexed ``[outer, dummy]`` or
+      ``[dummy, outer]``
+    - Exactly one 1-D ``Var`` factor indexed ``[dummy]``
+    - Any other factors must be pure numeric coefficients (which
+      get multiplied into the final Mat_Mul)
+    """
+    from Solverz.equation.param import ParamBase
+    from Solverz.sym_algebra.functions import Mat_Mul
+    from Solverz.sym_algebra.symbols import iVar
+    from Solverz.variable.ssymbol import Var
+
+    if len(sum_node.args) != 2:
+        raise NotImplementedError(
+            f"_sum_to_matmul: unsupported Sum shape {sum_node}"
+        )
+    body = sum_node.args[0]
+    dummy, _lo, _hi = sum_node.args[1]
+    dummy_name = _name_of(dummy)
+    outer_name = _name_of(outer_idx)
+
+    if isinstance(body, sp.Mul):
+        factors = list(body.args)
+    else:
+        factors = [body]
+
+    coeff = sp.S.One
+    param_node = None
+    var_node = None
+    for f in factors:
+        if isinstance(f, (sp.Integer, sp.Float, sp.Rational, sp.Number)):
+            coeff = coeff * f
+            continue
+        if isinstance(f, sp.Indexed):
+            base_name = f.base.name
+            sol = var_map.get(base_name)
+            if sol is None:
+                raise NotImplementedError(
+                    f"_sum_to_matmul: Indexed {base_name!r} has no "
+                    f"var_map entry"
+                )
+            if (isinstance(sol, ParamBase) and sol.dim == 2
+                    and len(f.indices) == 2):
+                idx_names = {_name_of(ix) for ix in f.indices}
+                if idx_names != {outer_name, dummy_name}:
+                    raise NotImplementedError(
+                        f"_sum_to_matmul: 2-D Param {base_name!r} "
+                        f"indexed {f.indices} — expected "
+                        f"[{outer_name}, {dummy_name}]"
+                    )
+                if param_node is not None:
+                    raise NotImplementedError(
+                        f"_sum_to_matmul: multiple 2-D Params in "
+                        f"Sum body — not supported"
+                    )
+                param_node = f
+                continue
+            if (isinstance(sol, Var) and len(f.indices) == 1
+                    and _name_of(f.indices[0]) == dummy_name):
+                if var_node is not None:
+                    raise NotImplementedError(
+                        f"_sum_to_matmul: multiple 1-D Vars at "
+                        f"dummy — not supported"
+                    )
+                var_node = f
+                continue
+            raise NotImplementedError(
+                f"_sum_to_matmul: unexpected Indexed factor {f}"
+            )
+        raise NotImplementedError(
+            f"_sum_to_matmul: non-Indexed / non-numeric factor {f} "
+            f"in Sum body — reserved for Phase J3"
+        )
+
+    if param_node is None or var_node is None:
+        raise NotImplementedError(
+            f"_sum_to_matmul: expected one 2-D Param and one 1-D "
+            f"Var in Sum body, got param={param_node}, var={var_node}"
+        )
+
+    var_sol_obj = var_map[var_node.base.name]
+    return coeff * Mat_Mul(
+        Para(param_node.base.name, dim=2),
+        var_sol_obj.symbol,
+    )
 
 
 def _name_of(x) -> str:

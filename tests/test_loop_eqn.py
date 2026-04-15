@@ -1404,6 +1404,94 @@ def test_canonicalize_kronecker_negated_sum():
     assert sp.simplify(canonical - expected) == 0
 
 
+def test_loop_eqn_bilinear_newton_j2():
+    """Phase J2 end-to-end: LoopEqn body ``Sum(A[i,j] * x[i] * x[j],
+    (j, 0, n-1)) - b[i]`` Newton-solves.
+
+    This is the minimum bilinear body that exercises both new
+    classifier shapes at once:
+
+    - ``∂F[i]/∂x[k]`` canonicalizes to
+      ``δ(k,i) * Sum(A[i,j]*x[j], j) + A[i,k]*x[i]``
+    - First term → ``Diag(Mat_Mul(Para(A), iVar(x)))`` (DiagTermWithSum)
+    - Second term → ``Mat_Mul(Diag(iVar(x)), Para(A, dim=2))``
+      (RowScale)
+
+    Both Solverz expressions flow through the existing
+    ``mutable_mat_analyzer`` → ``diag_term`` / ``row_scale_term``
+    decomposition verified by the earlier probe. ``inner_J`` gets
+    emitted as a scatter-add kernel; ``J_`` wrapper pre-computes
+    ``A @ x`` via ``csc_matvec`` (if ``A`` is sparse) once per
+    Newton step and passes it to ``inner_J``. Newton converges to
+    the analytic answer.
+
+    Picked a rank-1 ``A`` so every row of ``A @ x`` equals the
+    scalar ``sum(x)``, making the analytic solution easy to state:
+    choose ``b`` such that ``F[x_target] == 0`` by construction.
+    """
+    nb = 3
+    A_dense = np.array([
+        [1.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0],
+    ])
+    x_target = np.array([1.0, 2.0, 3.0])
+    # F[i] = x_target[i] * sum(x_target) - b[i]; pick b to make F=0 exactly.
+    b_value = x_target * (A_dense @ x_target)
+
+    m = Model()
+    # Start off the target so Newton has real work to do, but close
+    # enough that the bilinear system still converges in a few steps.
+    m.x = Var('x', x_target + np.array([0.3, -0.2, 0.1]))
+    m.A = Param('A', A_dense, dim=2, sparse=False)
+    m.b = Param('b', b_value)
+
+    i = Idx('i', nb)
+    j = Idx('j', nb)
+    body = Sum(m.A[i, j] * m.x[i] * m.x[j], j) - m.b[i]
+    m.eqn = LoopEqn('bilinear', outer_index=i, body=body, model=m)
+
+    spf, y0 = m.create_instance()
+    mdl = made_numerical(spf, y0, sparse=True)
+    sol = nr_method(mdl, y0)
+    np.testing.assert_allclose(sol.y['x'], x_target, atol=1e-8)
+
+
+def test_loop_eqn_bilinear_newton_j2_sparse():
+    """Phase J2 Newton solve with a SPARSE 2-D Param ``A``. Exercises
+    the same DiagTerm + RowScale classification but drives the
+    downstream ``mutable_mat_analyzer`` into emitting its
+    ``SolCF.csc_matvec`` fast-path precompute for ``Diag(A @ x)``
+    (runs once per Newton call in the ``J_`` wrapper, not in
+    ``inner_J``).
+    """
+    from scipy.sparse import csc_array as _csc
+
+    nb = 3
+    A_dense = np.array([
+        [2.0, 0.0, 1.0],
+        [0.0, 3.0, 0.0],
+        [1.0, 0.0, 4.0],
+    ])
+    x_target = np.array([1.5, 2.5, 0.5])
+    b_value = x_target * (A_dense @ x_target)
+
+    m = Model()
+    m.x = Var('x', x_target + np.array([0.1, -0.2, 0.05]))
+    m.A = Param('A', _csc(A_dense), dim=2, sparse=True)
+    m.b = Param('b', b_value)
+
+    i = Idx('i', nb)
+    j = Idx('j', nb)
+    body = Sum(m.A[i, j] * m.x[i] * m.x[j], j) - m.b[i]
+    m.eqn = LoopEqn('bilinear', outer_index=i, body=body, model=m)
+
+    spf, y0 = m.create_instance()
+    mdl = made_numerical(spf, y0, sparse=True)
+    sol = nr_method(mdl, y0)
+    np.testing.assert_allclose(sol.y['x'], x_target, atol=1e-8)
+
+
 def test_canonicalize_kronecker_bilinear_factor_out_and_collapse():
     """Bilinear body produces a Sum with TWO KroneckerDelta terms:
 
