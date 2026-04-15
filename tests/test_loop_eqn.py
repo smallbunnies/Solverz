@@ -21,8 +21,8 @@ import sympy as sp
 from scipy.sparse import csc_array
 
 from Solverz import (
-    Eqn, Idx, LoopEqn, Mat_Mul, Model, Param, Sum, Var,
-    made_numerical, module_printer, nr_method,
+    Abs, Eqn, Idx, LoopEqn, Mat_Mul, Model, Param, Sign, Sum, Var,
+    cos, heaviside, made_numerical, module_printer, nr_method, sin,
 )
 
 
@@ -972,6 +972,274 @@ def test_loop_eqn_sum_with_explicit_n():
     np.testing.assert_allclose(sol.y['x'],
                                np.array([1.0, 2.0, 3.0]),
                                atol=1e-8)
+
+
+def test_loop_eqn_function_dispatch_f_side():
+    """Blanket Class C check — every function in ``_FUNCTION_NUMPY_MAP``
+    used in a LoopEqn body lowers to the expected ``np.*`` /
+    ``SolCF.*`` call and produces the numerically correct F value.
+
+    Picks a handful of unary funcs (``Abs``, ``Sign``, ``heaviside``,
+    ``exp``, ``sin``, ``cos``) composed in a single body. F-side only —
+    some of these are non-differentiable (``Sign`` / ``heaviside``), so
+    Jacobian handling is not exercised here.
+    """
+    from Solverz import exp as sz_exp
+
+    n = 4
+    x_init = np.array([1.0, -2.0, 0.5, -0.1])
+    m = Model()
+    m.x = Var('x', x_init)
+    m.coef = Param('coef', np.array([0.3, 0.4, 0.5, 0.6]))
+
+    i = Idx('i', n)
+    # Composite body: |x| + sign(x) * coef + heaviside(x) + exp(coef)
+    #               + sin(x) - cos(coef)
+    body = (
+        Abs(m.x[i])
+        + Sign(m.x[i]) * m.coef[i]
+        + heaviside(m.x[i])
+        + sz_exp(m.coef[i])
+        + sin(m.x[i])
+        - cos(m.coef[i])
+    )
+    eqn = LoopEqn('dispatch_eqn', outer_index=i, body=body, model=m)
+
+    # Generated source should contain every mapped call.
+    src = eqn.NUM_EQN._loopeqn_source
+    assert 'np.abs' in src
+    assert 'np.sign' in src
+    assert 'SolCF.Heaviside' in src
+    assert 'np.exp' in src
+    assert 'np.sin' in src
+    assert 'np.cos' in src
+
+    # Reference F: hand-computed element-wise using numpy.
+    # SolCF.Heaviside convention: H(0) = 1, H(x<0) = 0, H(x>0) = 1.
+    def sz_heaviside(x):
+        return np.where(x >= 0, 1.0, 0.0)
+    coef_v = m.coef.v
+    expected = (
+        np.abs(x_init)
+        + np.sign(x_init) * coef_v
+        + sz_heaviside(x_init)
+        + np.exp(coef_v)
+        + np.sin(x_init)
+        - np.cos(coef_v)
+    )
+    arg_names = sorted(eqn.SYMBOLS.keys())  # ['coef', 'x']
+    args = [m.coef.v if n == 'coef' else x_init for n in arg_names]
+    F = eqn.NUM_EQN(*args)
+    np.testing.assert_allclose(F, expected, atol=1e-12)
+
+
+def test_loop_eqn_indirect_index_subset_loop():
+    """Subset-of-nodes LoopEqn via an int Param index map.
+
+    Pattern: the user wants one equation per source node (not per
+    total node). They build an ``int`` Param ``source_idx`` listing
+    the source-node indices and write the body using
+    ``m.Ts[m.source_idx[i]]`` so the outer index ``i`` walks only the
+    source subset.
+
+    This is the enabling primitive for splitting a node-type-
+    conditional equation (like the heat-network supply temperature
+    mixing, ``heat_network.py:93-120``) into multiple per-type
+    LoopEqns — one for source nodes, one for load nodes, one for
+    intermediate nodes — each iterating only its own subset. Requires
+    the recursive index rewrite in ``_rewrite_solverz_body`` so the
+    inner ``IdxPara('source_idx', i)`` flows through as an
+    ``IndexedBase`` access.
+    """
+    from Solverz import LoopEqn
+
+    n_total = 5
+    source_idx_v = np.array([0, 3], dtype=int)   # two source nodes
+    Ts_init = np.array([305., 315., 320., 335., 340.])
+    Tsource_v = np.array([300., 310., 320., 330., 340.])
+
+    m = Model()
+    m.Ts = Var('Ts', Ts_init)
+    m.Tsource = Param('Tsource', Tsource_v)
+    m.source_idx = Param('source_idx', source_idx_v, dim=1)
+
+    # Subset LoopEqn: enforces Ts[source_idx[i]] == Tsource[source_idx[i]]
+    i = Idx('i', len(source_idx_v))
+    body = m.Ts[m.source_idx[i]] - m.Tsource[m.source_idx[i]]
+    eqn = LoopEqn('Ts_source', outer_index=i, body=body, model=m)
+
+    # Generated source should reference the nested index walk.
+    src = eqn.NUM_EQN._loopeqn_source
+    assert 'Ts[source_idx[i]]' in src
+    assert 'Tsource[source_idx[i]]' in src
+
+    arg_names = sorted(eqn.SYMBOLS.keys())  # ['Ts', 'Tsource', 'source_idx']
+    arg_values = {'Ts': Ts_init, 'Tsource': Tsource_v,
+                  'source_idx': source_idx_v}
+    args = [arg_values[n] for n in arg_names]
+    F = eqn.NUM_EQN(*args)
+    # Expected: [305-300, 335-330] = [5, 5]
+    np.testing.assert_allclose(F, Ts_init[source_idx_v]
+                               - Tsource_v[source_idx_v],
+                               atol=1e-12)
+
+
+def test_loop_eqn_sum_with_sign_and_pow_f_side():
+    """Mirror of the heat ``loop_pressure`` expression (heat_network.py
+    lines 88-90): ``Sum(K[j] * m[j]**2 * Sign(m[j]) * pinloop[j])``.
+
+    The heat loop-pressure equation is actually a SCALAR equation
+    (single residual, not one-per-pipe), so LoopEqn doesn't reduce the
+    sub-function count for this particular pattern. But it's still a
+    useful check that:
+
+    - ``Sign`` dispatch works inside a Sum body.
+    - ``Pow`` (``m[j] ** 2``) composes with ``Sign`` through the
+      translator.
+    - A LoopEqn with ``n_outer = 1`` (single-row) behaves like a
+      standard scalar Eqn.
+    """
+    n_pipe = 3
+    m_flow = np.array([6.0, -4.0, 2.0])
+    K_val = np.array([0.01, 0.02, 0.015])
+    pinloop_val = np.array([1.0, 1.0, 1.0])
+
+    m = Model()
+    m.m = Var('m', m_flow)
+    m.K = Param('K', K_val)
+    m.pinloop = Param('pinloop', pinloop_val)
+
+    # Outer index is unused inside the body (n_outer = 1 — the whole
+    # equation is a single scalar). We still need an Idx for the
+    # LoopEqn API.
+    i = Idx('i', 1)
+    j = Idx('j', n_pipe)
+    body = Sum(
+        m.K[j] * m.m[j] ** 2 * Sign(m.m[j]) * m.pinloop[j],
+        j,
+    )
+    eqn = LoopEqn('loop_pressure', outer_index=i, body=body, model=m)
+
+    src = eqn.NUM_EQN._loopeqn_source
+    assert 'np.sign' in src
+    assert '** 2.0' in src
+
+    expected = (K_val * m_flow ** 2 * np.sign(m_flow) * pinloop_val).sum()
+    arg_names = sorted(eqn.SYMBOLS.keys())  # ['K', 'm', 'pinloop']
+    arg_values = {'K': K_val, 'm': m_flow, 'pinloop': pinloop_val}
+    args = [arg_values[n] for n in arg_names]
+    F = eqn.NUM_EQN(*args)
+    assert F.shape == (1,)
+    np.testing.assert_allclose(F[0], expected, atol=1e-12)
+
+
+def test_loop_eqn_polar_pf_trig_f_side():
+    """F-side port of the EPS dyn=False polar power-flow pattern
+    (``SolMuseum/ae/eps_network.py:57-75``). Each bus enforces
+
+        P[i] = sum_j Vm[i] Vm[j] (G[i,j] cos(Va[i]-Va[j])
+                                  + B[i,j] sin(Va[i]-Va[j]))
+        Q[i] = sum_j Vm[i] Vm[j] (G[i,j] sin(Va[i]-Va[j])
+                                  - B[i,j] cos(Va[i]-Va[j]))
+
+    **Scope: F-side only.** Verifies ``cos`` / ``sin`` (Solverz's
+    ``UniVarFunc`` subclasses) pass through ``_translate_loop_body_njit``
+    to ``np.cos`` / ``np.sin`` and the generated callable numerically
+    matches numpy's analytical computation. J-side translation of
+    bilinear ``Var * Var`` products under trig is a known gap (see
+    issue #128) — Newton solve on this pattern is out of scope for
+    the current prototype and requires extending
+    ``_translate_loop_jac`` to handle 1-D Var references / mixed
+    KroneckerDelta terms, which is tracked separately.
+    """
+    nb = 3
+    G_dense = np.array([
+        [ 4.5, -1.0, -3.0],
+        [-1.0,  3.5, -2.0],
+        [-3.0, -2.0,  5.5],
+    ])
+    B_dense = np.array([
+        [ 0.7, -0.2, -0.3],
+        [-0.2,  0.6, -0.2],
+        [-0.3, -0.2,  0.6],
+    ])
+    Vm_init = np.array([1.0, 0.98, 0.97])
+    Va_init = np.array([0.0, -0.015, -0.030])
+    P_offset = np.array([0.5, -0.2, 0.3])
+    Q_offset = np.array([0.1, -0.1, 0.05])
+
+    m = Model()
+    m.Vm = Var('Vm', Vm_init)
+    m.Va = Var('Va', Va_init)
+    m.G = Param('G', G_dense, dim=2, sparse=False)
+    m.B = Param('B', B_dense, dim=2, sparse=False)
+    m.P_inj = Param('P_inj', P_offset)
+    m.Q_inj = Param('Q_inj', Q_offset)
+
+    i = Idx('i', nb)
+    j = Idx('j', nb)
+    body_P = Sum(
+        m.Vm[i] * m.Vm[j] * (
+            m.G[i, j] * cos(m.Va[i] - m.Va[j])
+            + m.B[i, j] * sin(m.Va[i] - m.Va[j])
+        ),
+        j,
+    ) - m.P_inj[i]
+    body_Q = Sum(
+        m.Vm[i] * m.Vm[j] * (
+            m.G[i, j] * sin(m.Va[i] - m.Va[j])
+            - m.B[i, j] * cos(m.Va[i] - m.Va[j])
+        ),
+        j,
+    ) - m.Q_inj[i]
+
+    # Build the LoopEqn objects directly without attaching to the
+    # Model — the model assembly path will call derive_derivative
+    # which currently can't handle the bilinear trig Jacobian.
+    eqn_P = LoopEqn('P_eqn', outer_index=i, body=body_P, model=m)
+    eqn_Q = LoopEqn('Q_eqn', outer_index=i, body=body_Q, model=m)
+
+    # Generated source must reference np.cos / np.sin.
+    src_P = eqn_P.NUM_EQN._loopeqn_source
+    assert 'np.cos' in src_P
+    assert 'np.sin' in src_P
+    src_Q = eqn_Q.NUM_EQN._loopeqn_source
+    assert 'np.cos' in src_Q
+    assert 'np.sin' in src_Q
+
+    # Call NUM_EQN directly with the Var/Param values and compare
+    # against the hand-computed reference.
+    expected_P = np.zeros(nb)
+    expected_Q = np.zeros(nb)
+    for ii in range(nb):
+        for jj in range(nb):
+            expected_P[ii] += (Vm_init[ii] * Vm_init[jj]
+                               * (G_dense[ii, jj]
+                                  * np.cos(Va_init[ii] - Va_init[jj])
+                                  + B_dense[ii, jj]
+                                  * np.sin(Va_init[ii] - Va_init[jj])))
+            expected_Q[ii] += (Vm_init[ii] * Vm_init[jj]
+                               * (G_dense[ii, jj]
+                                  * np.sin(Va_init[ii] - Va_init[jj])
+                                  - B_dense[ii, jj]
+                                  * np.cos(Va_init[ii] - Va_init[jj])))
+    expected_P -= P_offset
+    expected_Q -= Q_offset
+
+    # Args are in lex-sorted SYMBOLS order: B, G, P_inj, Va, Vm
+    # (for P_eqn) or B, G, Q_inj, Va, Vm (for Q_eqn).
+    arg_names = sorted(eqn_P.SYMBOLS.keys())
+    arg_values = {
+        'B': B_dense, 'G': G_dense,
+        'P_inj': P_offset, 'Q_inj': Q_offset,
+        'Va': Va_init, 'Vm': Vm_init,
+    }
+    args_P = [arg_values[n] for n in sorted(eqn_P.SYMBOLS.keys())]
+    args_Q = [arg_values[n] for n in sorted(eqn_Q.SYMBOLS.keys())]
+    F_P = eqn_P.NUM_EQN(*args_P)
+    F_Q = eqn_Q.NUM_EQN(*args_Q)
+    np.testing.assert_allclose(F_P, expected_P, atol=1e-12)
+    np.testing.assert_allclose(F_Q, expected_Q, atol=1e-12)
 
 
 def test_loop_eqn_native_rejects_missing_model_attr():

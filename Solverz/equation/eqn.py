@@ -270,9 +270,16 @@ def _rewrite_solverz_body(body, model):
             name = expr.name0
             _resolve(name)  # populate var_map and validate
             # ``IdxSymBasic.index`` is either a single sympy Expr / Idx
-            # (1-D access) or a tuple (2-D access). Pass through to
-            # IndexedBase the same way sympy does native indexing.
-            return sp.IndexedBase(name)[expr.index]
+            # (1-D access) or a tuple (2-D access). Recurse so any
+            # inner Solverz ``IdxVar`` / ``IdxPara`` used as part of
+            # the index (e.g. ``m.ux[m.node_idx[i]]`` for a subset-of-
+            # nodes LoopEqn) also gets rewritten to ``IndexedBase``.
+            raw_idx = expr.index
+            if isinstance(raw_idx, tuple):
+                new_idx = tuple(walk(x) for x in raw_idx)
+            else:
+                new_idx = walk(raw_idx)
+            return sp.IndexedBase(name)[new_idx]
 
         if expr.is_Atom:
             return expr
@@ -291,7 +298,12 @@ def _rewrite_solverz_body(body, model):
             name = expr.base.name
             if hasattr(model, name) and name not in var_map:
                 _resolve(name)
-            return expr
+            # Recurse into the indices too — the user might build a
+            # native-sympy outer with a Solverz-indexed inner (weird
+            # but legal) and we want the same uniform rewrite.
+            new_indices = tuple(walk(i) for i in expr.indices)
+            return expr.base[new_indices if len(new_indices) > 1
+                             else new_indices[0]]
 
         # Generic tree walk for Add / Mul / Pow / Function / ...
         new_args = [walk(arg) for arg in expr.args]
@@ -701,7 +713,15 @@ class LoopEqn(Eqn):
         lines.append(f"{indent}return out")
         source = '\n'.join(lines) + '\n'
 
-        ns: Dict[str, object] = {'np': np}
+        # ``SolCF`` is the Solverz custom-function namespace
+        # (``Solverz.num_api.custom_function``) used by Solverz's
+        # ``_numpycode`` methods for non-numpy primitives, e.g.
+        # ``SolCF.Heaviside`` — the numba-friendly heaviside helper.
+        # The inline path here must expose it by the same name so a
+        # LoopEqn body that references ``heaviside(...)`` resolves
+        # at eval time.
+        from Solverz.num_api import custom_function as _SolCF
+        ns: Dict[str, object] = {'np': np, 'SolCF': _SolCF}
         # Inject pre-computed CSR arrays as module-level globals so the
         # generated ``for _sz_kk ... in range(_sz_csr_<M>_indptr[i], ...)``
         # loop resolves them at call time. No need to plumb them through
@@ -1272,10 +1292,51 @@ def _translate_loop_body_njit(expr, state) -> str:
         return str(float(expr))
     if isinstance(expr, (int, float)):
         return str(expr)
+    # Sympy / Solverz function nodes — trig, exp / log, abs, sign,
+    # heaviside, arctan2, etc. Matches the numpy backends Solverz's
+    # own ``_numpycode`` methods emit (see
+    # ``Solverz/sym_algebra/functions.py``), so the LoopEqn-generated
+    # code uses the same symbols numba already imports at module level.
+    if isinstance(expr, sp.Function):
+        fname = expr.func.__name__
+        mapped = _FUNCTION_NUMPY_MAP.get(fname)
+        if mapped is not None:
+            args_code = [_translate_loop_body_njit(a, state)
+                         for a in expr.args]
+            return f"{mapped}({', '.join(args_code)})"
     raise NotImplementedError(
         f"LoopEqn njit body translator does not yet handle "
         f"{type(expr).__name__}: {expr!r}"
     )
+
+
+# Map sympy / Solverz ``Function`` node ``.func.__name__`` → the
+# numpy (or ``SolCF``) call the LoopEqn translator emits. Names are
+# chosen to match what Solverz's existing ``_numpycode`` methods in
+# ``Solverz/sym_algebra/functions.py`` already emit so generated
+# modules / the inline exec namespace both have the callable in scope.
+_FUNCTION_NUMPY_MAP = {
+    # sympy standard
+    'sin': 'np.sin',
+    'cos': 'np.cos',
+    'tan': 'np.tan',
+    'asin': 'np.arcsin',
+    'acos': 'np.arccos',
+    'atan': 'np.arctan',
+    'exp': 'np.exp',
+    'log': 'np.log',
+    'sqrt': 'np.sqrt',
+    # sympy Abs; Solverz re-exports under the same class name.
+    'Abs': 'np.abs',
+    # Solverz-specific names (``Solverz.sym_algebra.functions``).
+    'ln': 'np.log',
+    'Sign': 'np.sign',
+    'atan2': 'np.arctan2',
+    # Heaviside needs Solverz's numba-friendly custom helper, not
+    # ``np.heaviside`` (which takes an explicit second argument).
+    'heaviside': 'SolCF.Heaviside',
+    'Heaviside': 'SolCF.Heaviside',
+}
 
 
 class Ode(Eqn):
