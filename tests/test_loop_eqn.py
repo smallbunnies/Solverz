@@ -1,0 +1,1039 @@
+"""Phase 0 smoke tests for ``LoopEqn`` — declare an equation as a
+parameterised scalar template that prints to a Python ``for``-loop in
+the generated ``inner_F`` / ``inner_J`` code.
+
+The substrate for the body of a ``LoopEqn`` is **sympy's native
+``IndexedBase`` + ``Idx`` + ``Sum``**, NOT Solverz's own
+``IdxVar``/``IdxPara`` (those are opaque to sympy ``subs`` /
+``Sum.doit()``, see ``PHASE0_FINDINGS.md`` Iteration 0).
+The user provides a ``var_map`` linking each ``IndexedBase`` name to a
+real Solverz ``Var`` / ``Param``. Solverz's printer translates the
+``IndexedBase`` references back to concrete Var/Param accesses at
+code-gen time, and replaces ``Sum`` nodes with Python ``for``-loops.
+"""
+
+import os
+import sys
+import tempfile
+
+import numpy as np
+import sympy as sp
+from scipy.sparse import csc_array
+
+from Solverz import (
+    Eqn, Idx, LoopEqn, Mat_Mul, Model, Param, Sum, Var,
+    made_numerical, module_printer, nr_method,
+)
+
+
+def test_loop_eqn_eps_minimal():
+    """Phase 0 minimum smoke test.
+
+    A 3-bus EPS-style current-balance model expressed as a single
+    ``LoopEqn``. The math: for each bus ``i``, enforce
+
+        ix[i] - sum_j (G[i, j] * ux[j] - B[i, j] * uy[j]) = 0
+        iy[i] - sum_j (G[i, j] * uy[j] + B[i, j] * ux[j]) = 0
+
+    where ``G`` and ``B`` are the real and imaginary parts of the bus
+    admittance matrix.  We pin ``ix`` and ``iy`` to known values and
+    expect the Newton solve to recover the corresponding ``ux`` / ``uy``.
+
+    The two equations are declared as **two separate** ``LoopEqn``s so
+    each emits one ``inner_F`` sub-function with a for-loop body, NOT
+    ``2 * nb`` scalar Eqns.
+
+    Stock Solverz 0.8.3 does not have ``LoopEqn`` — this import will
+    fail. That ImportError is the first observation in
+    ``PHASE0_FINDINGS.md``, and it drives Hypothesis A in step 0.3.
+    """
+    # The import is the first thing that fails on stock Solverz —
+    # putting it inside the function so test discovery still picks up
+    # the test file even when LoopEqn is not defined yet.
+    from Solverz import LoopEqn  # type: ignore[attr-defined]
+
+    nb = 3
+    # G and B are the real / imag parts of a 3-bus admittance matrix
+    # WITH non-trivial diagonal shunts — without the shunts, both
+    # matrices have zero row sums (the structural ``Y @ 1 = 0``
+    # property of a bus-admittance matrix that has no ground branches),
+    # which makes the resulting Newton Jacobian rank-deficient.
+    G_dense = np.array([
+        [ 4.5, -1.0, -3.0],
+        [-1.0,  3.5, -2.0],
+        [-3.0, -2.0,  5.5],
+    ])
+    B_dense = np.array([
+        [ 0.7, -0.2, -0.3],
+        [-0.2,  0.6, -0.2],
+        [-0.3, -0.2,  0.6],
+    ])
+
+    # A known voltage profile we want the Newton solve to recover.
+    ux_target = np.array([1.0,  0.95, 0.92])
+    uy_target = np.array([0.0, -0.05, -0.02])
+    # The corresponding current injections that the equations enforce.
+    ix_pin = G_dense @ ux_target - B_dense @ uy_target
+    iy_pin = G_dense @ uy_target + B_dense @ ux_target
+
+    m = Model()
+    m.ux = Var('ux', np.ones(nb))           # flat-start initial guess
+    m.uy = Var('uy', np.zeros(nb))
+    # Use DENSE matrix params for the Phase 0 prototype — sparse
+    # CSC printing is a separate concern that can be addressed in 0.4.x.
+    m.G = Param('G', G_dense, dim=2, sparse=False)
+    m.B = Param('B', B_dense, dim=2, sparse=False)
+    m.ix_pin = Param('ix_pin', ix_pin)
+    m.iy_pin = Param('iy_pin', iy_pin)
+
+    # === Build the LoopEqn body using sympy native primitives ===
+    i, j = sp.Idx('i'), sp.Idx('j')
+    ux_sym = sp.IndexedBase('ux')
+    uy_sym = sp.IndexedBase('uy')
+    G_sym = sp.IndexedBase('G')
+    B_sym = sp.IndexedBase('B')
+    ix_pin_sym = sp.IndexedBase('ix_pin')
+    iy_pin_sym = sp.IndexedBase('iy_pin')
+
+    # Body for the real-part current balance row i:
+    #   ix_pin[i] - sum_j (G[i, j] * ux[j] - B[i, j] * uy[j])
+    body_re = ix_pin_sym[i] - sp.Sum(
+        G_sym[i, j] * ux_sym[j] - B_sym[i, j] * uy_sym[j],
+        (j, 0, nb - 1),
+    )
+
+    body_im = iy_pin_sym[i] - sp.Sum(
+        G_sym[i, j] * uy_sym[j] + B_sym[i, j] * ux_sym[j],
+        (j, 0, nb - 1),
+    )
+
+    var_map = {
+        'ux': m.ux, 'uy': m.uy,
+        'G': m.G, 'B': m.B,
+        'ix_pin': m.ix_pin, 'iy_pin': m.iy_pin,
+    }
+
+    m.eqn_re = LoopEqn(
+        'eqn_re',
+        outer_index=i,
+        n_outer=nb,
+        body=body_re,
+        var_map=var_map,
+    )
+    m.eqn_im = LoopEqn(
+        'eqn_im',
+        outer_index=i,
+        n_outer=nb,
+        body=body_im,
+        var_map=var_map,
+    )
+
+    # === Stage 1: create_instance ===
+    spf, y0 = m.create_instance()
+
+    # === Stage 2: made_numerical ===
+    mdl = made_numerical(spf, y0, sparse=True)
+
+    # === Stage 3: F evaluation at flat-start ===
+    F_val = mdl.F(y0, mdl.p)
+    assert F_val.shape == (2 * nb,)
+    # At flat-start ux=1, uy=0:
+    #   F_re[i] = ix_pin[i] - (G @ 1 - B @ 0)[i] = ix_pin[i] - G.sum(axis=1)[i]
+    #   F_im[i] = iy_pin[i] - (G @ 0 + B @ 1)[i] = iy_pin[i] - B.sum(axis=1)[i]
+    expected_F_re = ix_pin - G_dense.sum(axis=1)
+    expected_F_im = iy_pin - B_dense.sum(axis=1)
+    np.testing.assert_allclose(
+        F_val,
+        np.concatenate([expected_F_re, expected_F_im]),
+        atol=1e-12,
+    )
+
+    # === Stage 4: Newton solve ===
+    sol = nr_method(mdl, y0)
+    np.testing.assert_allclose(sol.y['ux'], ux_target, atol=1e-8)
+    np.testing.assert_allclose(sol.y['uy'], uy_target, atol=1e-8)
+
+
+def test_loop_eqn_eps_dyn_with_var_residual():
+    """Phase 0.4.1: outer-index Var residual term (identity Jacobian).
+
+    The actual SolMuseum ``eps_network.mdl(dyn=True)`` model
+    (``SolMuseum/ae/eps_network.py:88-97``) writes the rectangular
+    current-balance row as
+
+        ``ix[i] - sum_j (G[i,j] * ux[j] - B[i,j] * uy[j]) = 0``
+
+    where **``ix`` is a Var**, NOT a parameter. Differentiating
+    ``ix[i]`` w.r.t. ``ix[k]`` produces ``KroneckerDelta(i, k)`` — i.e.
+    the per-(eqn-row, var-col) Jacobian block is the identity matrix.
+
+    Phase 0 minimum doesn't handle this (only handles the simpler
+    ``±IndexedBase[outer, k]`` → ``±Para(dim=2)`` pattern). This test
+    drives the next translator extension.
+
+    Setup: keep ``ix_pin`` and ``iy_pin`` as Params for the bus-side
+    forcing, but introduce ``ix`` and ``iy`` as Vars whose residual is
+    ``ix[i] - (the right-hand side)``. Add two extra "anchor" Eqns
+    that enforce ``ix == ix_pin`` and ``iy == iy_pin`` so the system is
+    square (4*nb equations in 4*nb variables).
+    """
+    from Solverz import LoopEqn
+
+    nb = 3
+    G_dense = np.array([
+        [ 4.5, -1.0, -3.0],
+        [-1.0,  3.5, -2.0],
+        [-3.0, -2.0,  5.5],
+    ])
+    B_dense = np.array([
+        [ 0.7, -0.2, -0.3],
+        [-0.2,  0.6, -0.2],
+        [-0.3, -0.2,  0.6],
+    ])
+
+    ux_target = np.array([1.0, 0.95, 0.92])
+    uy_target = np.array([0.0, -0.05, -0.02])
+    ix_pin = G_dense @ ux_target - B_dense @ uy_target
+    iy_pin = G_dense @ uy_target + B_dense @ ux_target
+
+    m = Model()
+    m.ux = Var('ux', np.ones(nb))
+    m.uy = Var('uy', np.zeros(nb))
+    m.ix = Var('ix', np.zeros(nb))   # NEW — Var, not Param
+    m.iy = Var('iy', np.zeros(nb))   # NEW — Var, not Param
+    m.G = Param('G', G_dense, dim=2, sparse=False)
+    m.B = Param('B', B_dense, dim=2, sparse=False)
+    m.ix_pin = Param('ix_pin', ix_pin)
+    m.iy_pin = Param('iy_pin', iy_pin)
+
+    i, j = sp.Idx('i'), sp.Idx('j')
+    ux_sym = sp.IndexedBase('ux')
+    uy_sym = sp.IndexedBase('uy')
+    ix_sym = sp.IndexedBase('ix')
+    iy_sym = sp.IndexedBase('iy')
+    G_sym = sp.IndexedBase('G')
+    B_sym = sp.IndexedBase('B')
+
+    body_re = ix_sym[i] - sp.Sum(
+        G_sym[i, j] * ux_sym[j] - B_sym[i, j] * uy_sym[j],
+        (j, 0, nb - 1),
+    )
+    body_im = iy_sym[i] - sp.Sum(
+        G_sym[i, j] * uy_sym[j] + B_sym[i, j] * ux_sym[j],
+        (j, 0, nb - 1),
+    )
+
+    var_map = {
+        'ux': m.ux, 'uy': m.uy,
+        'ix': m.ix, 'iy': m.iy,
+        'G': m.G, 'B': m.B,
+    }
+
+    m.eqn_re = LoopEqn('eqn_re', outer_index=i, n_outer=nb,
+                       body=body_re, var_map=var_map)
+    m.eqn_im = LoopEqn('eqn_im', outer_index=i, n_outer=nb,
+                       body=body_im, var_map=var_map)
+
+    # Anchor eqns to make the system square: ix == ix_pin, iy == iy_pin.
+    m.anchor_ix = Eqn('anchor_ix', m.ix - m.ix_pin)
+    m.anchor_iy = Eqn('anchor_iy', m.iy - m.iy_pin)
+
+    spf, y0 = m.create_instance()
+    mdl = made_numerical(spf, y0, sparse=True)
+
+    # F-side smoke: residual at flat-start.
+    F_val = mdl.F(y0, mdl.p)
+    assert F_val.shape == (4 * nb,)
+
+    # Newton solve.
+    sol = nr_method(mdl, y0)
+    np.testing.assert_allclose(sol.y['ux'], ux_target, atol=1e-8)
+    np.testing.assert_allclose(sol.y['uy'], uy_target, atol=1e-8)
+    np.testing.assert_allclose(sol.y['ix'], ix_pin, atol=1e-8)
+    np.testing.assert_allclose(sol.y['iy'], iy_pin, atol=1e-8)
+
+
+def test_loop_eqn_mass_continuity():
+    """Phase 0.4.2: 1-D Var inside Sum at inner dummy + 2-D incidence Param.
+
+    Models the heat / gas network mass-continuity equation:
+
+        ``f_inj[node] + sum_p (V_in[node, p] - V_out[node, p]) * m[p] = 0``
+
+    where:
+
+    - ``f_inj[node]`` is a 1-D Param (net injection per node) — Phase 0
+      already handles this via the ``IndexedBase('M')[outer]`` 1-D
+      Param branch (used in the EPS smoke test).
+    - ``m[p]`` is a 1-D Var (pipe mass-flow) accessed at the inner
+      sum dummy — this is the NEW pattern.
+    - ``V_in[node, p]`` and ``V_out[node, p]`` are 2-D incidence Params
+      (1 wherever pipe ``p`` enters / leaves node).
+
+    The Jacobian:
+
+    - ``∂F[node]/∂m[k] = V_in[node, k] - V_out[node, k]``
+      → translates to ``Para('V_in', dim=2) - Para('V_out', dim=2)``,
+      which JacBlock should classify as a (mutable, but
+      free-symbol-only-on-Paras) matrix block. Phase 0 might still
+      exercise the constant-matrix path because the result is ``Para
+      + (-Para)``, which sympy may simplify.
+
+    Topology (4 nodes, 3 pipes; linear chain):
+
+        f_inj=+6 ─[p0]─→ ─[p1]─→ ─[p2]─→ f_inj=-6
+          node 0    node 1    node 2    node 3
+
+    All three nodes other than the sink carry flow 6 (mass conserved).
+    The 4-node mass continuity has rank 3 (rows sum to 0), so we use
+    ``n_outer = 3`` to skip the redundant 4th row. Square system: 3
+    pipe vars, 3 LoopEqn rows.
+    """
+    from Solverz import LoopEqn
+
+    n_node_eqn = 3   # n_outer for the LoopEqn — skip the redundant 4th
+    n_pipe = 3
+    V_in_full = np.array([
+        [0.0, 0.0, 0.0],   # node 0: no inflow
+        [1.0, 0.0, 0.0],   # node 1: pipe 0 in
+        [0.0, 1.0, 0.0],   # node 2: pipe 1 in
+    ])
+    V_out_full = np.array([
+        [1.0, 0.0, 0.0],   # node 0: pipe 0 out
+        [0.0, 1.0, 0.0],   # node 1: pipe 1 out
+        [0.0, 0.0, 1.0],   # node 2: pipe 2 out
+    ])
+    f_inj_full = np.array([6.0, 0.0, 0.0])
+
+    m = Model()
+    m.m_pipe = Var('m_pipe', np.zeros(n_pipe))     # flat-start
+    m.V_in = Param('V_in', V_in_full, dim=2, sparse=False)
+    m.V_out = Param('V_out', V_out_full, dim=2, sparse=False)
+    m.f_inj = Param('f_inj', f_inj_full)
+
+    i, p = sp.Idx('i'), sp.Idx('p')
+    f_inj_sym = sp.IndexedBase('f_inj')
+    V_in_sym = sp.IndexedBase('V_in')
+    V_out_sym = sp.IndexedBase('V_out')
+    m_pipe_sym = sp.IndexedBase('m_pipe')
+
+    body_mass = f_inj_sym[i] + sp.Sum(
+        (V_in_sym[i, p] - V_out_sym[i, p]) * m_pipe_sym[p],
+        (p, 0, n_pipe - 1),
+    )
+    var_map_mass = {
+        'm_pipe': m.m_pipe,
+        'V_in': m.V_in,
+        'V_out': m.V_out,
+        'f_inj': m.f_inj,
+    }
+    m.mass_eqn = LoopEqn(
+        'mass_eqn',
+        outer_index=i,
+        n_outer=n_node_eqn,
+        body=body_mass,
+        var_map=var_map_mass,
+    )
+
+    spf, y0 = m.create_instance()
+    mdl = made_numerical(spf, y0, sparse=True)
+
+    sol = nr_method(mdl, y0)
+    m_target = np.array([6.0, 6.0, 6.0])
+    np.testing.assert_allclose(sol.y['m_pipe'], m_target, atol=1e-8)
+
+
+def _build_eps_minimal_model(nb=3):
+    """Shared model factory for the Phase 0 minimum + JIT path tests."""
+    from Solverz import LoopEqn
+
+    G_dense = np.array([
+        [ 4.5, -1.0, -3.0],
+        [-1.0,  3.5, -2.0],
+        [-3.0, -2.0,  5.5],
+    ])
+    B_dense = np.array([
+        [ 0.7, -0.2, -0.3],
+        [-0.2,  0.6, -0.2],
+        [-0.3, -0.2,  0.6],
+    ])
+    ux_target = np.array([1.0, 0.95, 0.92])
+    uy_target = np.array([0.0, -0.05, -0.02])
+    ix_pin_v = G_dense @ ux_target - B_dense @ uy_target
+    iy_pin_v = G_dense @ uy_target + B_dense @ ux_target
+
+    m = Model()
+    m.ux = Var('ux', np.ones(nb))
+    m.uy = Var('uy', np.zeros(nb))
+    m.G = Param('G', G_dense, dim=2, sparse=False)
+    m.B = Param('B', B_dense, dim=2, sparse=False)
+    m.ix_pin = Param('ix_pin', ix_pin_v)
+    m.iy_pin = Param('iy_pin', iy_pin_v)
+
+    i, j = sp.Idx('i'), sp.Idx('j')
+    ux_sym = sp.IndexedBase('ux')
+    uy_sym = sp.IndexedBase('uy')
+    G_sym = sp.IndexedBase('G')
+    B_sym = sp.IndexedBase('B')
+    ix_pin_sym = sp.IndexedBase('ix_pin')
+    iy_pin_sym = sp.IndexedBase('iy_pin')
+    body_re = ix_pin_sym[i] - sp.Sum(
+        G_sym[i, j] * ux_sym[j] - B_sym[i, j] * uy_sym[j],
+        (j, 0, nb - 1),
+    )
+    body_im = iy_pin_sym[i] - sp.Sum(
+        G_sym[i, j] * uy_sym[j] + B_sym[i, j] * ux_sym[j],
+        (j, 0, nb - 1),
+    )
+    var_map = {
+        'ux': m.ux, 'uy': m.uy,
+        'G': m.G, 'B': m.B,
+        'ix_pin': m.ix_pin, 'iy_pin': m.iy_pin,
+    }
+    m.eqn_re = LoopEqn('eqn_re', outer_index=i, n_outer=nb,
+                       body=body_re, var_map=var_map)
+    m.eqn_im = LoopEqn('eqn_im', outer_index=i, n_outer=nb,
+                       body=body_im, var_map=var_map)
+
+    return m, ux_target, uy_target
+
+
+def test_loop_eqn_eps_minimal_jit_module():
+    """Phase 0.4.3: end-to-end ``module_printer(jit=True)`` path.
+
+    The whole point of LoopEqn is to reduce numba LLVM compile time on
+    the IES benchmark. This requires the JIT path to actually work:
+
+    1. ``module_printer(jit=True).render()`` must succeed (no
+       ``PrintMethodNotImplementedError`` from sympy's ``pycode`` on
+       ``Sum`` over ``Idx``) — handled by emitting a hand-built source
+       string for each LoopEqn's ``inner_F<N>`` instead of going
+       through the AST + pycode path.
+
+    2. The generated ``@njit(cache=True)``-decorated ``inner_F<N>``
+       must contain explicit nested ``for`` loops (NOT Python
+       ``sum(...)`` generators, which numba rejects).
+
+    3. The compiled module must produce the same numerical result as
+       the inline ``made_numerical`` path: Newton solve converges to
+       the analytical answer.
+
+    The eps minimum case has a constant Jacobian (all derivatives are
+    bare Params), so ``inner_J`` reduces to ``return _data_`` with the
+    full COO data precomputed at module-build time. This is the
+    best-case scenario for the JIT path — no runtime Jacobian
+    computation, just a constant-data lookup.
+    """
+    nb = 3
+    m, ux_target, uy_target = _build_eps_minimal_model(nb=nb)
+    spf, y0 = m.create_instance()
+
+    with tempfile.TemporaryDirectory() as d:
+        printer = module_printer(spf, y0, 'phase04_jit_eps',
+                                 directory=d, jit=True)
+        printer.render()
+
+        sys.path.insert(0, d)
+        try:
+            import phase04_jit_eps
+            mdl = phase04_jit_eps.mdl
+            y0_loaded = phase04_jit_eps.y
+
+            sol = nr_method(mdl, y0_loaded)
+            np.testing.assert_allclose(sol.y['ux'], ux_target,
+                                       atol=1e-8)
+            np.testing.assert_allclose(sol.y['uy'], uy_target,
+                                       atol=1e-8)
+
+            # Sanity check: the inner_F<N> source must contain an
+            # explicit ``for`` loop over the outer index AND the inner
+            # sum dummy. If it falls back to a generator expression,
+            # numba would reject it long before we get here, but be
+            # explicit about what we expect.
+            module_path = os.path.join(d, 'phase04_jit_eps',
+                                       'num_func.py')
+            with open(module_path) as f:
+                src = f.read()
+            assert 'def inner_F0' in src
+            assert 'for i in range(3):' in src
+            assert 'for j in range(0, 3):' in src
+            assert '_sz_loop_acc_0' in src
+            # No generator expression
+            assert 'sum(' not in src
+        finally:
+            sys.path.remove(d)
+            for mod_name in list(sys.modules):
+                if mod_name.startswith('phase04_jit_eps'):
+                    del sys.modules[mod_name]
+
+
+def test_loop_eqn_sparse_walker_inline():
+    """Phase 1 sparse-walker smoke test (inline path).
+
+    Reuses the 3-bus EPS minimum geometry but declares ``G`` and ``B``
+    as sparse 2-D ``Param``s. Each current-balance row is a separate
+    ``LoopEqn`` whose Sum body contains exactly ONE sparse walker
+    (``G`` for the real part, ``B`` for the imag part, split across
+    FOUR LoopEqns). The translator should emit CSR-walking code (not
+    a dense ``for j in range(0, 3)`` loop), and the generated function
+    should close over the CSR arrays via the ``exec`` namespace.
+
+    The expected numerics match the dense test exactly because the
+    test matrices have no structural zeros being lost.
+    """
+    from Solverz import LoopEqn
+
+    nb = 3
+    G_dense = np.array([
+        [ 4.5, -1.0, -3.0],
+        [-1.0,  3.5, -2.0],
+        [-3.0, -2.0,  5.5],
+    ])
+    B_dense = np.array([
+        [ 0.7, -0.2, -0.3],
+        [-0.2,  0.6, -0.2],
+        [-0.3, -0.2,  0.6],
+    ])
+
+    ux_target = np.array([1.0,  0.95, 0.92])
+    uy_target = np.array([0.0, -0.05, -0.02])
+    ix_pin = G_dense @ ux_target - B_dense @ uy_target
+    iy_pin = G_dense @ uy_target + B_dense @ ux_target
+
+    m = Model()
+    m.ux = Var('ux', np.ones(nb))
+    m.uy = Var('uy', np.zeros(nb))
+    # Sparse 2-D Params — stored as csc_array in Solverz's default
+    # convention. LoopEqn detects these and switches to CSR walking.
+    m.G = Param('G', csc_array(G_dense), dim=2, sparse=True)
+    m.B = Param('B', csc_array(B_dense), dim=2, sparse=True)
+    m.ix_pin = Param('ix_pin', ix_pin)
+    m.iy_pin = Param('iy_pin', iy_pin)
+
+    i, j = sp.Idx('i'), sp.Idx('j')
+    ux_sym = sp.IndexedBase('ux')
+    uy_sym = sp.IndexedBase('uy')
+    G_sym = sp.IndexedBase('G')
+    B_sym = sp.IndexedBase('B')
+    ix_pin_sym = sp.IndexedBase('ix_pin')
+    iy_pin_sym = sp.IndexedBase('iy_pin')
+
+    # Phase 1 sparse walker supports ONE sparse walker per Sum. Split
+    # the real-part eqn into two Sums (one per walker) and combine via
+    # arithmetic — this is the "Case A" the plan locks us to until
+    # shared-skeleton Case B lands.
+    body_re = (
+        ix_pin_sym[i]
+        - sp.Sum(G_sym[i, j] * ux_sym[j], (j, 0, nb - 1))
+        + sp.Sum(B_sym[i, j] * uy_sym[j], (j, 0, nb - 1))
+    )
+    body_im = (
+        iy_pin_sym[i]
+        - sp.Sum(G_sym[i, j] * uy_sym[j], (j, 0, nb - 1))
+        - sp.Sum(B_sym[i, j] * ux_sym[j], (j, 0, nb - 1))
+    )
+
+    var_map = {
+        'ux': m.ux, 'uy': m.uy,
+        'G': m.G, 'B': m.B,
+        'ix_pin': m.ix_pin, 'iy_pin': m.iy_pin,
+    }
+
+    m.eqn_re = LoopEqn('eqn_re', outer_index=i, n_outer=nb,
+                       body=body_re, var_map=var_map)
+    m.eqn_im = LoopEqn('eqn_im', outer_index=i, n_outer=nb,
+                       body=body_im, var_map=var_map)
+
+    # Pre-init checks: the translator should have registered CSR
+    # caches for both walkers, keyed by IndexedBase name.
+    assert set(m.eqn_re._sparse_csr.keys()) == {'G', 'B'}
+    assert set(m.eqn_im._sparse_csr.keys()) == {'G', 'B'}
+
+    # Generated source for the inline path must contain CSR walk
+    # (``_sz_csr_<M>_indptr`` and ``_sz_csr_<M>_indices``) and must
+    # NOT contain a dense ``for j in range(0, 3):`` loop.
+    src = m.eqn_re.NUM_EQN._loopeqn_source
+    assert '_sz_csr_G_indptr' in src
+    assert '_sz_csr_B_indptr' in src
+    assert '_sz_csr_G_indices' in src
+    assert '_sz_csr_G_data' in src
+    # The dense form would produce "for j in range(0, 3):"; CSR form
+    # binds ``j`` via an assignment "j = _sz_csr_<M>_indices[_sz_kk_N]".
+    assert 'for j in range(0, 3):' not in src
+    assert 'j = _sz_csr_G_indices' in src or 'j = _sz_csr_B_indices' in src
+
+    spf, y0 = m.create_instance()
+    mdl = made_numerical(spf, y0, sparse=True)
+
+    # F-side evaluation at flat-start should match the dense expected.
+    F_val = mdl.F(y0, mdl.p)
+    assert F_val.shape == (2 * nb,)
+    expected_F_re = ix_pin - G_dense.sum(axis=1)   # flat ux = 1, uy = 0
+    expected_F_im = iy_pin - B_dense.sum(axis=1)
+    np.testing.assert_allclose(
+        F_val,
+        np.concatenate([expected_F_re, expected_F_im]),
+        atol=1e-12,
+    )
+
+    # Newton solve recovers the target voltages.
+    sol = nr_method(mdl, y0)
+    np.testing.assert_allclose(sol.y['ux'], ux_target, atol=1e-8)
+    np.testing.assert_allclose(sol.y['uy'], uy_target, atol=1e-8)
+
+
+def test_loop_eqn_sparse_walker_jit_module():
+    """Phase 1 sparse walker + ``module_printer(jit=True)`` end-to-end.
+
+    Renders the 3-bus EPS geometry with SPARSE ``G`` and ``B`` through
+    the JIT module printer, imports the generated module, and solves
+    the Newton system. Asserts:
+
+    1. The rendered ``inner_F<N>`` source contains CSR-walking code
+       (``_sz_csr_G_indptr[i]``, ``_sz_csr_G_indices[...]``) and NOT
+       a dense ``for j in range(0, 3)`` loop.
+    2. The generated module references the CSR arrays at module level
+       (``_sz_csr_G_data = setting["_sz_csr_G_data"]``).
+    3. Newton converges to the analytical answer — proving the
+       module-level constants are correctly loaded, numba accepts
+       the @njit-decorated inner_F<N>, and CSR walking produces
+       numerically identical results to dense walking.
+    """
+    from Solverz import LoopEqn
+
+    nb = 3
+    G_dense = np.array([
+        [ 4.5, -1.0, -3.0],
+        [-1.0,  3.5, -2.0],
+        [-3.0, -2.0,  5.5],
+    ])
+    B_dense = np.array([
+        [ 0.7, -0.2, -0.3],
+        [-0.2,  0.6, -0.2],
+        [-0.3, -0.2,  0.6],
+    ])
+
+    ux_target = np.array([1.0,  0.95, 0.92])
+    uy_target = np.array([0.0, -0.05, -0.02])
+    ix_pin = G_dense @ ux_target - B_dense @ uy_target
+    iy_pin = G_dense @ uy_target + B_dense @ ux_target
+
+    m = Model()
+    m.ux = Var('ux', np.ones(nb))
+    m.uy = Var('uy', np.zeros(nb))
+    m.G = Param('G', csc_array(G_dense), dim=2, sparse=True)
+    m.B = Param('B', csc_array(B_dense), dim=2, sparse=True)
+    m.ix_pin = Param('ix_pin', ix_pin)
+    m.iy_pin = Param('iy_pin', iy_pin)
+
+    i, j = sp.Idx('i'), sp.Idx('j')
+    ux_sym = sp.IndexedBase('ux')
+    uy_sym = sp.IndexedBase('uy')
+    G_sym = sp.IndexedBase('G')
+    B_sym = sp.IndexedBase('B')
+    ix_pin_sym = sp.IndexedBase('ix_pin')
+    iy_pin_sym = sp.IndexedBase('iy_pin')
+
+    # One sparse walker per Sum (Case A). Split G/B across two Sums
+    # per equation so each Sum contains exactly one sparse Param.
+    body_re = (
+        ix_pin_sym[i]
+        - sp.Sum(G_sym[i, j] * ux_sym[j], (j, 0, nb - 1))
+        + sp.Sum(B_sym[i, j] * uy_sym[j], (j, 0, nb - 1))
+    )
+    body_im = (
+        iy_pin_sym[i]
+        - sp.Sum(G_sym[i, j] * uy_sym[j], (j, 0, nb - 1))
+        - sp.Sum(B_sym[i, j] * ux_sym[j], (j, 0, nb - 1))
+    )
+
+    var_map = {
+        'ux': m.ux, 'uy': m.uy,
+        'G': m.G, 'B': m.B,
+        'ix_pin': m.ix_pin, 'iy_pin': m.iy_pin,
+    }
+    m.eqn_re = LoopEqn('eqn_re', outer_index=i, n_outer=nb,
+                       body=body_re, var_map=var_map)
+    m.eqn_im = LoopEqn('eqn_im', outer_index=i, n_outer=nb,
+                       body=body_im, var_map=var_map)
+
+    spf, y0 = m.create_instance()
+
+    with tempfile.TemporaryDirectory() as d:
+        printer = module_printer(spf, y0, 'phase1_jit_sparse',
+                                 directory=d, jit=True)
+        printer.render()
+
+        sys.path.insert(0, d)
+        try:
+            import phase1_jit_sparse
+            mdl = phase1_jit_sparse.mdl
+            y0_loaded = phase1_jit_sparse.y
+
+            sol = nr_method(mdl, y0_loaded)
+            np.testing.assert_allclose(sol.y['ux'], ux_target,
+                                       atol=1e-8)
+            np.testing.assert_allclose(sol.y['uy'], uy_target,
+                                       atol=1e-8)
+
+            module_path = os.path.join(d, 'phase1_jit_sparse',
+                                       'num_func.py')
+            with open(module_path) as f:
+                src = f.read()
+
+            # Module-level constant loads emitted before any function.
+            assert '_sz_csr_G_data = setting["_sz_csr_G_data"]' in src
+            assert '_sz_csr_G_indices = setting["_sz_csr_G_indices"]' in src
+            assert '_sz_csr_G_indptr = setting["_sz_csr_G_indptr"]' in src
+            assert '_sz_csr_B_data = setting["_sz_csr_B_data"]' in src
+
+            # inner_F<N> bodies contain CSR walks, not dense range loops.
+            assert 'def inner_F0' in src
+            assert '_sz_csr_G_indptr[i]' in src
+            assert '_sz_csr_G_indices[_sz_kk_' in src
+            assert '_sz_csr_G_data[_sz_kk_' in src
+            # No dense inner loop over the full column range.
+            assert 'for j in range(0, 3):' not in src
+            # No sparse 2-D Param names should appear in an inner_F<N>
+            # signature — they must not cross into the @njit body as
+            # arguments (they'd be csc_array, which numba can't type).
+            # (Use a conservative substring check: "def inner_F0(B"
+            # would mean B showed up as first arg.)
+            assert 'def inner_F0(B' not in src
+            assert 'def inner_F1(B' not in src
+            assert 'def inner_F0(G' not in src
+        finally:
+            sys.path.remove(d)
+            for mod_name in list(sys.modules):
+                if mod_name.startswith('phase1_jit_sparse'):
+                    del sys.modules[mod_name]
+
+
+def test_loop_eqn_native_solverz_syntax_inline():
+    """New preferred API: write the body using ``m.G[i, j]`` /
+    ``m.ux[j]`` directly, and pass ``model=m``. LoopEqn walks the
+    body once at construction, rewrites every Solverz ``IdxVar`` /
+    ``IdxPara`` to its ``sympy.IndexedBase`` equivalent, and auto-
+    builds ``var_map`` by looking up each name on the model.
+
+    Verifies numerical equivalence with the legacy ``var_map`` API
+    (``test_loop_eqn_sparse_walker_inline`` uses the same geometry).
+    """
+    from Solverz import LoopEqn
+
+    nb = 3
+    G_dense = np.array([
+        [ 4.5, -1.0, -3.0],
+        [-1.0,  3.5, -2.0],
+        [-3.0, -2.0,  5.5],
+    ])
+    B_dense = np.array([
+        [ 0.7, -0.2, -0.3],
+        [-0.2,  0.6, -0.2],
+        [-0.3, -0.2,  0.6],
+    ])
+
+    ux_target = np.array([1.0, 0.95, 0.92])
+    uy_target = np.array([0.0, -0.05, -0.02])
+    ix_pin = G_dense @ ux_target - B_dense @ uy_target
+    iy_pin = G_dense @ uy_target + B_dense @ ux_target
+
+    m = Model()
+    m.ux = Var('ux', np.ones(nb))
+    m.uy = Var('uy', np.zeros(nb))
+    m.G = Param('G', csc_array(G_dense), dim=2, sparse=True)
+    m.B = Param('B', csc_array(B_dense), dim=2, sparse=True)
+    m.ix_pin = Param('ix_pin', ix_pin)
+    m.iy_pin = Param('iy_pin', iy_pin)
+
+    # Native syntax: use m.<name>[index] directly in the body. No
+    # parallel sympy IndexedBase declarations, no var_map dict.
+    i, j = sp.Idx('i'), sp.Idx('j')
+    body_re = (
+        m.ix_pin[i]
+        - sp.Sum(m.G[i, j] * m.ux[j], (j, 0, nb - 1))
+        + sp.Sum(m.B[i, j] * m.uy[j], (j, 0, nb - 1))
+    )
+    body_im = (
+        m.iy_pin[i]
+        - sp.Sum(m.G[i, j] * m.uy[j], (j, 0, nb - 1))
+        - sp.Sum(m.B[i, j] * m.ux[j], (j, 0, nb - 1))
+    )
+
+    m.eqn_re = LoopEqn('eqn_re', outer_index=i, n_outer=nb,
+                       body=body_re, model=m)
+    m.eqn_im = LoopEqn('eqn_im', outer_index=i, n_outer=nb,
+                       body=body_im, model=m)
+
+    # Internally the body has been rewritten to sympy IndexedBase
+    # form; var_map is auto-populated.
+    assert set(m.eqn_re.var_map.keys()) == {
+        'ux', 'uy', 'G', 'B', 'ix_pin'}
+    assert m.eqn_re.var_map['G'] is m.G
+    assert m.eqn_re.var_map['ux'] is m.ux
+    assert set(m.eqn_re._sparse_csr.keys()) == {'G', 'B'}
+
+    # The rewritten body no longer contains Solverz IdxVar/IdxPara.
+    from Solverz.sym_algebra.symbols import IdxVar, IdxPara
+    for atom in m.eqn_re.body.atoms():
+        assert not isinstance(atom, (IdxVar, IdxPara))
+
+    spf, y0 = m.create_instance()
+    mdl = made_numerical(spf, y0, sparse=True)
+
+    F_val = mdl.F(y0, mdl.p)
+    expected_F_re = ix_pin - G_dense.sum(axis=1)
+    expected_F_im = iy_pin - B_dense.sum(axis=1)
+    np.testing.assert_allclose(
+        F_val,
+        np.concatenate([expected_F_re, expected_F_im]),
+        atol=1e-12,
+    )
+
+    sol = nr_method(mdl, y0)
+    np.testing.assert_allclose(sol.y['ux'], ux_target, atol=1e-8)
+    np.testing.assert_allclose(sol.y['uy'], uy_target, atol=1e-8)
+
+
+def test_loop_eqn_native_solverz_syntax_jit_module():
+    """Native syntax end-to-end through the JIT module path.
+
+    Same setup as the native inline test; this one runs the full
+    ``module_printer(jit=True)`` → compiled @njit → Newton pipeline
+    to confirm the auto-derived var_map flows through unchanged.
+    """
+    from Solverz import LoopEqn
+
+    nb = 3
+    G_dense = np.array([
+        [ 4.5, -1.0, -3.0],
+        [-1.0,  3.5, -2.0],
+        [-3.0, -2.0,  5.5],
+    ])
+    B_dense = np.array([
+        [ 0.7, -0.2, -0.3],
+        [-0.2,  0.6, -0.2],
+        [-0.3, -0.2,  0.6],
+    ])
+    ux_target = np.array([1.0, 0.95, 0.92])
+    uy_target = np.array([0.0, -0.05, -0.02])
+    ix_pin = G_dense @ ux_target - B_dense @ uy_target
+    iy_pin = G_dense @ uy_target + B_dense @ ux_target
+
+    m = Model()
+    m.ux = Var('ux', np.ones(nb))
+    m.uy = Var('uy', np.zeros(nb))
+    m.G = Param('G', csc_array(G_dense), dim=2, sparse=True)
+    m.B = Param('B', csc_array(B_dense), dim=2, sparse=True)
+    m.ix_pin = Param('ix_pin', ix_pin)
+    m.iy_pin = Param('iy_pin', iy_pin)
+
+    i, j = sp.Idx('i'), sp.Idx('j')
+    body_re = (
+        m.ix_pin[i]
+        - sp.Sum(m.G[i, j] * m.ux[j], (j, 0, nb - 1))
+        + sp.Sum(m.B[i, j] * m.uy[j], (j, 0, nb - 1))
+    )
+    body_im = (
+        m.iy_pin[i]
+        - sp.Sum(m.G[i, j] * m.uy[j], (j, 0, nb - 1))
+        - sp.Sum(m.B[i, j] * m.ux[j], (j, 0, nb - 1))
+    )
+    m.eqn_re = LoopEqn('eqn_re', outer_index=i, n_outer=nb,
+                       body=body_re, model=m)
+    m.eqn_im = LoopEqn('eqn_im', outer_index=i, n_outer=nb,
+                       body=body_im, model=m)
+
+    spf, y0 = m.create_instance()
+
+    with tempfile.TemporaryDirectory() as d:
+        printer = module_printer(spf, y0, 'native_jit_sparse',
+                                 directory=d, jit=True)
+        printer.render()
+
+        sys.path.insert(0, d)
+        try:
+            import native_jit_sparse
+            mdl = native_jit_sparse.mdl
+            y0_loaded = native_jit_sparse.y
+
+            sol = nr_method(mdl, y0_loaded)
+            np.testing.assert_allclose(sol.y['ux'], ux_target,
+                                       atol=1e-8)
+            np.testing.assert_allclose(sol.y['uy'], uy_target,
+                                       atol=1e-8)
+
+            module_path = os.path.join(d, 'native_jit_sparse',
+                                       'num_func.py')
+            with open(module_path) as f:
+                src = f.read()
+            assert '_sz_csr_G_indptr[i]' in src
+            assert '_sz_csr_B_indptr[i]' in src
+        finally:
+            sys.path.remove(d)
+            for mod_name in list(sys.modules):
+                if mod_name.startswith('native_jit_sparse'):
+                    del sys.modules[mod_name]
+
+
+def test_loop_eqn_ultra_concise_api():
+    """Maximally concise API: no ``import sympy``, no
+    ``sp.Idx('i')``, no ``sp.Sum(expr, (j, 0, n-1))``, no explicit
+    ``n_outer``.
+
+    The user writes a body using Solverz's re-exported
+    :func:`Solverz.Idx` / :func:`Solverz.Sum` helpers and
+    constructs the ``LoopEqn`` with just an outer ``Idx`` and a
+    body expression. Bounds flow through automatically via
+    ``Idx('i', n)`` → ``Sum`` range → ``LoopEqn.n_outer``.
+    """
+    nb = 3
+    G_dense = np.array([
+        [ 4.5, -1.0, -3.0],
+        [-1.0,  3.5, -2.0],
+        [-3.0, -2.0,  5.5],
+    ])
+    B_dense = np.array([
+        [ 0.7, -0.2, -0.3],
+        [-0.2,  0.6, -0.2],
+        [-0.3, -0.2,  0.6],
+    ])
+    ux_target = np.array([1.0, 0.95, 0.92])
+    uy_target = np.array([0.0, -0.05, -0.02])
+    ix_pin = G_dense @ ux_target - B_dense @ uy_target
+    iy_pin = G_dense @ uy_target + B_dense @ ux_target
+
+    m = Model()
+    m.ux = Var('ux', np.ones(nb))
+    m.uy = Var('uy', np.zeros(nb))
+    m.G = Param('G', csc_array(G_dense), dim=2, sparse=True)
+    m.B = Param('B', csc_array(B_dense), dim=2, sparse=True)
+    m.ix_pin = Param('ix_pin', ix_pin)
+    m.iy_pin = Param('iy_pin', iy_pin)
+
+    # Bounded indices — range flows automatically.
+    i = Idx('i', nb)
+    j = Idx('j', nb)
+
+    body_re = (
+        m.ix_pin[i]
+        - Sum(m.G[i, j] * m.ux[j], j)
+        + Sum(m.B[i, j] * m.uy[j], j)
+    )
+    body_im = (
+        m.iy_pin[i]
+        - Sum(m.G[i, j] * m.uy[j], j)
+        - Sum(m.B[i, j] * m.ux[j], j)
+    )
+
+    # No n_outer — LoopEqn auto-infers from i.upper - i.lower + 1.
+    m.eqn_re = LoopEqn('eqn_re', outer_index=i, body=body_re, model=m)
+    m.eqn_im = LoopEqn('eqn_im', outer_index=i, body=body_im, model=m)
+
+    assert m.eqn_re.n_outer == nb
+    assert set(m.eqn_re.var_map.keys()) == {
+        'ux', 'uy', 'G', 'B', 'ix_pin'}
+    assert set(m.eqn_re._sparse_csr.keys()) == {'G', 'B'}
+
+    spf, y0 = m.create_instance()
+    mdl = made_numerical(spf, y0, sparse=True)
+    sol = nr_method(mdl, y0)
+    np.testing.assert_allclose(sol.y['ux'], ux_target, atol=1e-8)
+    np.testing.assert_allclose(sol.y['uy'], uy_target, atol=1e-8)
+
+
+def test_loop_eqn_sum_with_explicit_n():
+    """``Sum(expr, j, n)`` form still works with unbounded ``Idx`` —
+    user explicitly supplies ``n`` at the Sum call site and
+    ``n_outer`` at the LoopEqn call site.
+    """
+    nb = 3
+    G_dense = np.array([
+        [ 4.5, -1.0, -3.0],
+        [-1.0,  3.5, -2.0],
+        [-3.0, -2.0,  5.5],
+    ])
+    rhs = G_dense @ np.array([1.0, 2.0, 3.0])
+
+    m = Model()
+    m.x = Var('x', np.zeros(nb))
+    m.G = Param('G', csc_array(G_dense), dim=2, sparse=True)
+    m.rhs = Param('rhs', rhs)
+
+    # Unbounded Idx — user supplies explicit n / n_outer.
+    i = Idx('i')
+    j = Idx('j')
+    body = m.rhs[i] - Sum(m.G[i, j] * m.x[j], j, nb)
+    m.eqn = LoopEqn('eqn', outer_index=i, n_outer=nb, body=body, model=m)
+
+    spf, y0 = m.create_instance()
+    mdl = made_numerical(spf, y0, sparse=True)
+    sol = nr_method(mdl, y0)
+    np.testing.assert_allclose(sol.y['x'],
+                               np.array([1.0, 2.0, 3.0]),
+                               atol=1e-8)
+
+
+def test_loop_eqn_native_rejects_missing_model_attr():
+    """If the body references a symbol the model doesn't know about,
+    LoopEqn should raise a clear error at construction time pointing
+    at the missing attribute.
+    """
+    from Solverz import LoopEqn
+
+    m = Model()
+    m.ux = Var('ux', np.ones(3))
+    # m.G NOT defined
+    import pytest
+    i, j = sp.Idx('i'), sp.Idx('j')
+
+    # Legal IdxVar reference that the model doesn't know about.
+    # Create a standalone Var not attached to m.
+    stray = Var('stray_coef', np.ones(3))
+    body = sp.Sum(stray[j] * m.ux[j], (j, 0, 2))
+
+    with pytest.raises(ValueError, match=r"stray_coef"):
+        m.bad_eqn = LoopEqn('bad_eqn', outer_index=i, n_outer=3,
+                            body=body, model=m)
+
+
+def test_loop_eqn_sparse_walker_rejects_multi_sparse_sum():
+    """Phase 1 constraint: a single ``Sum`` may contain at most ONE
+    sparse 2-D ``Param`` walker. If a user tries to put ``G`` and
+    ``B`` in the same Sum, we raise ``NotImplementedError`` with a
+    message pointing at the "Case B / shared skeleton" deferral.
+    """
+    from Solverz import LoopEqn
+
+    nb = 3
+    G_dense = np.eye(nb)
+    B_dense = 0.5 * np.eye(nb)
+
+    m = Model()
+    m.ux = Var('ux', np.ones(nb))
+    m.uy = Var('uy', np.zeros(nb))
+    m.G = Param('G', csc_array(G_dense), dim=2, sparse=True)
+    m.B = Param('B', csc_array(B_dense), dim=2, sparse=True)
+    m.ix_pin = Param('ix_pin', np.zeros(nb))
+
+    i, j = sp.Idx('i'), sp.Idx('j')
+    ux_sym = sp.IndexedBase('ux')
+    uy_sym = sp.IndexedBase('uy')
+    G_sym = sp.IndexedBase('G')
+    B_sym = sp.IndexedBase('B')
+    ix_pin_sym = sp.IndexedBase('ix_pin')
+
+    # Both G and B in the same Sum body — should fail.
+    bad_body = ix_pin_sym[i] - sp.Sum(
+        G_sym[i, j] * ux_sym[j] - B_sym[i, j] * uy_sym[j],
+        (j, 0, nb - 1),
+    )
+
+    import pytest
+    with pytest.raises(NotImplementedError, match="Case B"):
+        m.bad_eqn = LoopEqn(
+            'bad_eqn', outer_index=i, n_outer=nb,
+            body=bad_body,
+            var_map={'ux': m.ux, 'uy': m.uy, 'G': m.G, 'B': m.B,
+                     'ix_pin': m.ix_pin},
+        )

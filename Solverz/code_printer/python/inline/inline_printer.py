@@ -175,6 +175,15 @@ def made_numerical(eqs: SymEquations,
         code['HVP'] = code_HVP
     custom_func = dict()
     custom_func.update(parse_trigger_func(eqs.PARAM))
+    # Register custom callables for ``LoopEqn`` bodies — sympy's
+    # ``NumPyPrinter`` cannot translate ``Sum`` over ``Idx``, so the
+    # F-side printer rewrites those equations as
+    # ``_F_[addr] = _sz_loop_<name>(...)``. The actual callable is
+    # ``LoopEqn.NUM_EQN``, built by walking the body to a Python
+    # ``for``-loop in ``Solverz.equation.eqn._build_num_eqn``.
+    for eqn_name, eqn in eqs.EQNs.items():
+        if isinstance(eqn, LoopEqn):
+            custom_func[f'_sz_loop_{eqn_name}'] = eqn.NUM_EQN
     F = Solverzlambdify(code_F, 'F_', modules=[custom_func]+modules)
     J = Solverzlambdify(code_J, 'J_', modules=[custom_func]+modules)
     if make_hvp:

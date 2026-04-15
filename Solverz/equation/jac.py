@@ -6,9 +6,48 @@ import warnings
 from scipy.sparse import csc_array
 
 from sympy import Expr, Function, Integer
-from Solverz.sym_algebra.symbols import iVar, IdxVar, Para
+from Solverz.sym_algebra.symbols import iVar, IdxVar, Para, iAliasVar, IdxAliasVar
 from Solverz.utilities.type_checker import is_vector, is_scalar, is_integer, is_number, PyNumber, is_zero
 from Solverz.sym_algebra.functions import Diag, Ones
+
+
+def is_constant_matrix_deri(deri_expr: Expr) -> bool:
+    """Return True iff a matrix-valued ``DeriExpr`` is constant
+    between Newton iterations.
+
+    A Jacobian block is constant if its symbolic expression does NOT
+    depend on any state variable (``iVar`` / ``IdxVar`` / ``iAliasVar``
+    / ``IdxAliasVar``). When this is the case the block's data can be
+    computed once at module-build time, baked into ``setting["data"]``,
+    and loaded as ``_data_`` at runtime — no per-iteration re-evaluation
+    needed. Both ``inner_J`` and the ``J_`` wrapper become trivial for
+    such blocks.
+
+    Recognised constant cases:
+
+    1. Bare ``Para`` or ``-Para``  — the original predicate, e.g. the
+       direct ``∂(A @ x) / ∂x = A`` block.
+    2. Any sympy arithmetic over ``Para``s — e.g. ``V_in - V_out`` from
+       a ``LoopEqn`` mass-continuity body, where ``V_in`` and ``V_out``
+       are 2-D incidence Params.
+    3. Pure constants — e.g. ``_LoopJacEye(n)`` (the LoopEqn identity
+       primitive) which has no free symbols at all. Its value is the
+       fixed ``np.eye(n)`` matrix.
+
+    Anything that has at least one ``iVar`` / ``IdxVar`` /
+    ``iAliasVar`` / ``IdxAliasVar`` in its free symbols is treated as
+    mutable. ``iAliasVar`` (FDAE time-step alias) is included because
+    although it is constant *within* a single Newton solve, it changes
+    between time steps and the Jacobian must be re-evaluated.
+    """
+    if isinstance(deri_expr, Para):
+        return True
+    if isinstance(-deri_expr, Para):
+        return True
+    for s in deri_expr.free_symbols:
+        if isinstance(s, (iVar, IdxVar, iAliasVar, IdxAliasVar)):
+            return False
+    return True
 
 SolVar = Union[iVar, IdxVar]
 
@@ -162,11 +201,16 @@ class JacBlock:
         self.DeriType = DeriType
 
         # Determine if the matrix derivative depends on variables (mutable) or is constant.
-        # Constant: DeriExpr is Para (e.g., A from ∂(A@x)/∂x = A) — data never changes.
-        # Mutable: DeriExpr is a general expression (e.g., diag(e)@G) — must re-evaluate each step.
+        # Constant: DeriExpr has no Var/IdxVar/iAliasVar/IdxAliasVar in its free symbols
+        #           — data never changes between Newton iterations and can be inlined
+        #           into _data_ once at module-build time. Recognised cases include
+        #           bare Para / -Para, Para arithmetic (e.g. V_in - V_out from a
+        #           LoopEqn mass-continuity body), and pure constants like
+        #           _LoopJacEye(n) which has no free symbols.
+        # Mutable: DeriExpr depends on at least one state variable (e.g. diag(e) @ G
+        #          from a Mat_Mul-with-Var Jacobian) — must re-evaluate each step.
         if DeriType == 'matrix':
-            self.is_mutable_matrix = not (isinstance(self.DeriExpr, Para)
-                                          or isinstance(-self.DeriExpr, Para))
+            self.is_mutable_matrix = not is_constant_matrix_deri(self.DeriExpr)
         else:
             self.is_mutable_matrix = False
 

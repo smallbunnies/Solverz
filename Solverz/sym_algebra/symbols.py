@@ -48,6 +48,13 @@ def SymbolExtractor(index) -> Dict:
             temp.update(SymbolExtractor(index[i]))
     elif isinstance(index, Expr):
         for var_ in list(index.free_symbols):
+            # Atomic ``Expr`` subclasses (e.g. ``sympy.Idx``, bare
+            # ``Symbol`` not representing a Solverz object) have
+            # ``free_symbols == {self}`` and would cause
+            # ``SymbolExtractor`` to recurse on itself forever. Only
+            # recurse into genuinely nested free symbols.
+            if var_ == index:
+                continue
             temp.update(SymbolExtractor(var_))
     elif isinstance(index, slice):
         if index.start is not None:

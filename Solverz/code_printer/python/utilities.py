@@ -13,7 +13,7 @@ from sympy.utilities.lambdify import _import, _module_present, _get_namespace
 from scipy.sparse import sparray, csc_array
 from numbers import Number
 
-from Solverz.equation.eqn import Eqn
+from Solverz.equation.eqn import Eqn, LoopEqn
 from Solverz.equation.equations import Equations as SymEquations, FDAE as SymFDAE, DAE as SymDAE, AE as SymAE
 from Solverz.equation.jac import JacBlock, Jac
 from Solverz.equation.hvp import Hvp
@@ -260,12 +260,39 @@ def print_eqn_assignment(EQNs: Dict[str, Eqn],
                         raise ValueError(
                             f"Numba printer does not accept idx or list index {var.index}")
             _F_ = iVar('_F_', internal_use=True)
+            # ``LoopEqn`` with sparse walkers prints its ``inner_F<N>``
+            # with the sparse Params EXCLUDED from the signature (their
+            # CSR arrays ride in as module-level constants). The call
+            # site must match the pruned signature exactly — otherwise
+            # the inner function receives a positional csc_array that
+            # numba cannot handle. For non-LoopEqn equations and dense
+            # LoopEqns, this is a no-op (``njit_arg_names`` falls back
+            # to all SYMBOLS).
+            if isinstance(eqn, LoopEqn):
+                call_args = [eqn.SYMBOLS[nm]
+                             for nm in eqn.njit_arg_names()]
+            else:
+                call_args = list(eqn.SYMBOLS.values())
             eqn_declaration.append(Assignment(_F_[eqn_address],
-                                              FunctionCall(f'inner_F{int(count)}', list(eqn.SYMBOLS.values()))))
+                                              FunctionCall(f'inner_F{int(count)}', call_args)))
 
             count = count + 1
         else:
-            eqn_declaration.append(Assignment(_F_[eqn_address], eqn.RHS))
+            if isinstance(eqn, LoopEqn):
+                # ``LoopEqn`` bodies use sympy ``Sum`` over ``Idx`` which
+                # the standard ``NumPyPrinter`` cannot translate (raises
+                # ``PrintMethodNotImplementedError`` on ``Idx``). Route
+                # through a registered custom callable instead — the
+                # lambdify modules dict is augmented with
+                # ``_sz_loop_<eqn_name>`` → ``eqn.NUM_EQN`` over in
+                # ``made_numerical``.
+                eqn_declaration.append(Assignment(
+                    _F_[eqn_address],
+                    FunctionCall(f'_sz_loop_{eqn_name}',
+                                 list(eqn.SYMBOLS.values()))
+                ))
+            else:
+                eqn_declaration.append(Assignment(_F_[eqn_address], eqn.RHS))
     return eqn_declaration
 
 

@@ -130,6 +130,24 @@ def render_modules(eqs: SymEquations,
     # Mutable matrix block functions — dedicated @njit scatter-add loops.
     code_dict["mut_mat_block_funcs"] = J.get('mut_mat_block_funcs', [])
     mut_mat_mappings = J.get('mut_mat_mappings', {})
+
+    # LoopEqn CSR walker arrays — pre-computed ``.tocsr()`` views of
+    # any sparse 2-D Param referenced as ``M[outer, dummy]`` inside a
+    # ``Sum`` body. These arrays ride as module-level constants via
+    # the same ``mut_mat_mappings`` → ``eqn_parameter`` → pickle →
+    # ``setting["<key>"] = ...`` pipeline used by mutable matrix
+    # Jacobian blocks, so the @njit ``inner_F<N>`` that references
+    # them sees plain numpy arrays rather than scipy.sparse objects
+    # at numba compile time.
+    from Solverz.equation.eqn import LoopEqn as _LoopEqnCls
+    for _eqn in eqs.EQNs.values():
+        if not isinstance(_eqn, _LoopEqnCls):
+            continue
+        for _walker_name, _csr in _eqn._sparse_csr.items():
+            mut_mat_mappings[f'_sz_csr_{_walker_name}_data'] = _csr['data']
+            mut_mat_mappings[f'_sz_csr_{_walker_name}_indices'] = _csr['indices']
+            mut_mat_mappings[f'_sz_csr_{_walker_name}_indptr'] = _csr['indptr']
+
     code_dict["mut_mat_mapping_keys"] = sorted(mut_mat_mappings.keys())
 
     if make_hvp:

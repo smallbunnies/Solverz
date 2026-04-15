@@ -19,7 +19,7 @@ from Solverz.variable.variables import Vars
 from Solverz.utilities.address import Address, combine_Address
 from Solverz.utilities.type_checker import is_integer
 from Solverz.num_api.Array import Array
-from Solverz.equation.jac import Jac, JacBlock
+from Solverz.equation.jac import Jac, JacBlock, is_constant_matrix_deri
 from Solverz.utilities.miscellaneous import rearrange_list
 
 
@@ -186,29 +186,31 @@ class Equations:
             DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
 
             # Mutable-matrix-block detection. This predicate MUST match
-            # ``JacBlock.is_mutable_matrix`` in ``jac.py:167-169`` exactly
-            # — FormJac picks Value0 here and JacBlock picks the
-            # downstream codegen path from the *same* flag, so any
-            # divergence between the two locations would produce blocks
-            # whose Value0 sparsity pattern disagreed with the kernel the
-            # code generator then emitted (e.g. a flat-start ``Diag(x)``
-            # Value0 would collapse to empty while the scatter-add loop
-            # expected a full diagonal).
+            # ``JacBlock.is_mutable_matrix`` exactly — FormJac picks
+            # Value0 here and JacBlock picks the downstream codegen path
+            # from the *same* flag, so any divergence between the two
+            # locations would produce blocks whose Value0 sparsity
+            # pattern disagreed with the kernel the code generator then
+            # emitted (e.g. a flat-start ``Diag(x)`` Value0 would
+            # collapse to empty while the scatter-add loop expected a
+            # full diagonal). Both locations call
+            # :func:`is_constant_matrix_deri` from ``jac.py`` to keep
+            # the predicate single-sourced.
             #
-            # Criterion (same as JacBlock): the derivative is
-            # matrix-valued AND its symbolic form is not a plain
-            # ``Para`` / ``-Para``. We probe "matrix-valued" from the
-            # already-evaluated ``fy[3]`` (either a ``csc_array`` from
-            # a sparse expression or an ndarray with ``ndim == 2`` from
-            # a dense one).
+            # Criterion: the derivative is matrix-valued AND its
+            # symbolic form depends on at least one state variable. We
+            # probe "matrix-valued" from the already-evaluated
+            # ``fy[3]`` (either a ``csc_array`` from a sparse
+            # expression or an ndarray with ``ndim == 2`` from a dense
+            # one).
             fy_value = fy[3]
             fy_is_matrix = (
                 isinstance(fy_value, csc_array)
                 or (isinstance(fy_value, np.ndarray) and fy_value.ndim == 2)
             )
-            deri_is_para = (isinstance(DeriExpr, Para)
-                            or isinstance(-DeriExpr, Para))
-            is_mutable_matrix_block = fy_is_matrix and not deri_is_para
+            is_mutable_matrix_block = (
+                fy_is_matrix and not is_constant_matrix_deri(DeriExpr)
+            )
             # For such blocks we MUST use sps.diags (not np.diagflat) so
             # that Value0's sparsity pattern captures ALL structural
             # non-zeros (union of each term's pattern), independently of

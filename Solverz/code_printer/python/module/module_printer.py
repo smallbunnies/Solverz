@@ -765,6 +765,15 @@ def print_eqn_assignment_with_precompute(EQNs, EqnAddr, precompute_info):
     from the info dict (which has sparse matrices removed and placeholders
     appended for Mat_Mul equations). For non-Mat_Mul equations, args fall
     back to eqn.SYMBOLS.values() — exactly the original behavior.
+
+    ``LoopEqn`` with sparse walkers is a second special case: its
+    sparse 2-D Params are NOT in ``inner_F``'s local scope (they're
+    loaded in the ``F_`` wrapper's scope but excluded from
+    ``param_list`` by ``print_param(..., include_sparse_in_list=False)``),
+    so the call site must omit them from the argument list. The
+    ``inner_F<N>`` sub-function's signature (emitted by
+    ``print_sub_inner_F``) matches this pruned list exactly by using
+    :meth:`LoopEqn.njit_arg_names`.
     """
     eqn_declaration = []
     _F_ = iVar('_F_', internal_use=True)
@@ -775,6 +784,10 @@ def print_eqn_assignment_with_precompute(EQNs, EqnAddr, precompute_info):
         eqn = EQNs[eqn_name]
         if eqn.mixed_matrix_vector:
             sub_args = [symbols(a.name, real=True) for a in eqn_info['args']]
+        elif isinstance(eqn, LoopEqn):
+            # Exclude sparse walker Params (they're module-level CSR
+            # constants, not call arguments).
+            sub_args = [eqn.SYMBOLS[nm] for nm in eqn.njit_arg_names()]
         else:
             # Preserve original behavior for non-matrix equations
             sub_args = list(eqn.SYMBOLS.values())
@@ -815,6 +828,29 @@ def print_sub_inner_F(EQNs: Dict[str, Eqn]):
     global_mm_counter = [0]
     count = 0
     for eqn_name, eqn in EQNs.items():
+        # LoopEqn path: pycode cannot translate ``Sum`` over ``Idx``,
+        # so we emit a hand-built source string with explicit nested
+        # ``for`` loops (Numba-friendly) instead of going through the
+        # AST + pycode pipeline. Args are the same lex-sorted SYMBOLS
+        # the dispatcher emits via ``print_eqn_assignment``.
+        if isinstance(eqn, LoopEqn):
+            # Use njit_arg_names so sparse walker Params are excluded
+            # from the sub-function's signature. Their CSR arrays are
+            # pulled from module-level constants injected via
+            # ``mut_mat_mappings`` by ``render_modules``.
+            arg_names = eqn.njit_arg_names()
+            args = [symbols(v, real=True) for v in arg_names]
+            code_blocks.append(eqn.print_njit_source(f'inner_F{count}'))
+            precompute_info.append({
+                'eqn_name': eqn_name,
+                'new_rhs': eqn.RHS,
+                'matmuls': [],
+                'args': args,
+                'matrix_symbols_removed': set(eqn._sparse_csr.keys()),
+            })
+            count += 1
+            continue
+
         # Fast path: non-Mat_Mul equation — original behavior, no changes.
         if not eqn.mixed_matrix_vector:
             args = [symbols(v, real=True) for v in eqn.SYMBOLS.keys()]
