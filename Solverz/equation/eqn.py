@@ -276,6 +276,21 @@ class LoopEqnDiff(EqnDiff):
         # bare-indexed sparse Param accesses outside Sums, resolves
         # them cleanly.
         ns: Dict[str, object] = {'np': np, 'SolCF': _SolCF}
+        # Discover num_api plugins via the ``solverz.num_api`` entry
+        # point group (same path as ``Solverz.num_api.module_parser``
+        # uses for the JIT module's ``dependency.py``). Adds e.g.
+        # ``SolMF`` so LoopEqnDiff kernels referencing
+        # ``SolMF.pde.kt1_ode`` from SolMuseum PDE helpers resolve
+        # at exec time.
+        try:
+            from importlib.metadata import entry_points as _entry_points
+            for _ep in _entry_points(group='solverz.num_api'):
+                try:
+                    ns[_ep.name] = _ep.load()
+                except Exception:
+                    pass
+        except Exception:
+            pass
         for nm, sol_obj in var_map.items():
             if not isinstance(sol_obj, ParamBase):
                 continue
@@ -562,16 +577,15 @@ def _rewrite_solverz_body(body, model):
                     return sp.IndexedBase(name)[0]
             return expr
 
-        if expr.is_Atom:
-            return expr
-
-        if isinstance(expr, sp.Sum):
-            # Recurse into the summand; leave the (dummy, lo, hi) tuple
-            # alone. sympy's Sum constructor accepts the walked body
-            # plus the original limits.
-            walked_body = walk(expr.args[0])
-            return sp.Sum(walked_body, *expr.args[1:])
-
+        # NOTE: sympy marks ``Indexed`` nodes as ``is_Atom == True``
+        # even though they have sub-expressions (the base and the
+        # index expression). Check ``isinstance(expr, sp.Indexed)``
+        # BEFORE the ``is_Atom`` short-circuit so native
+        # ``sp.IndexedBase('Tsp_all')[off + k]`` references in a
+        # LoopEqn body still get their base name registered in
+        # ``var_map`` — otherwise the generated kernel omits
+        # ``Tsp_all`` from its argument list and the call fails
+        # with ``NameError: 'Tsp_all' is not defined`` at runtime.
         if isinstance(expr, sp.Indexed):
             # Already a native sympy IndexedBase access; the user may
             # have mixed native and Solverz styles. Register the base
@@ -585,6 +599,16 @@ def _rewrite_solverz_body(body, model):
             new_indices = tuple(walk(i) for i in expr.indices)
             return expr.base[new_indices if len(new_indices) > 1
                              else new_indices[0]]
+
+        if expr.is_Atom:
+            return expr
+
+        if isinstance(expr, sp.Sum):
+            # Recurse into the summand; leave the (dummy, lo, hi) tuple
+            # alone. sympy's Sum constructor accepts the walked body
+            # plus the original limits.
+            walked_body = walk(expr.args[0])
+            return sp.Sum(walked_body, *expr.args[1:])
 
         # Generic tree walk for Add / Mul / Pow / Function / ...
         new_args = [walk(arg) for arg in expr.args]
@@ -1080,8 +1104,25 @@ class LoopEqn(Eqn):
         # The inline path here must expose it by the same name so a
         # LoopEqn body that references ``heaviside(...)`` resolves
         # at eval time.
+        #
+        # Downstream num_api plugins registered via the
+        # ``solverz.num_api`` entry-point group (e.g. SolMuseum
+        # publishing ``SolMF``) are also injected so LoopEqn bodies
+        # can reference ``SolPde`` subclasses like
+        # ``SolMF.pde.kt1_ode`` via the SolPde ``_numpycode``
+        # fallback in ``_translate_loop_body_njit``. Identical
+        # discovery path as ``Solverz/num_api/module_parser.py``.
         from Solverz.num_api import custom_function as _SolCF
         ns: Dict[str, object] = {'np': np, 'SolCF': _SolCF}
+        try:
+            from importlib.metadata import entry_points as _entry_points
+            for _ep in _entry_points(group='solverz.num_api'):
+                try:
+                    ns[_ep.name] = _ep.load()
+                except Exception:
+                    pass
+        except Exception:
+            pass
         # Inject pre-computed CSR arrays as module-level globals so the
         # generated ``for _sz_kk ... in range(_sz_csr_<M>_indptr[i], ...)``
         # loop resolves them at call time. No need to plumb them through
@@ -1670,9 +1711,18 @@ def _translate_loop_body_njit(expr, state) -> str:
         # (module path). For J-side kernels both operand names are
         # loop variables in scope (``outer_name`` and the diff
         # index name), so the comparison resolves at runtime.
+        #
+        # Integer (``1`` / ``0``) instead of float (``1.0`` /
+        # ``0.0``) so callers can build *integer-valued* index
+        # expressions like ``Tsp_all[off + k - 1 + 2 *
+        # KroneckerDelta(k, 0)]`` to clamp out-of-range stencil
+        # accesses at boundary cells without introducing a float
+        # index that numpy refuses. Downstream arithmetic with the
+        # float bodies of ``sp.Sum`` / ``sp.Mul`` still promotes to
+        # float as needed via Python's own int→float coercion.
         a_code = _translate_loop_body_njit(expr.args[0], state)
         b_code = _translate_loop_body_njit(expr.args[1], state)
-        return f"(1.0 if {a_code} == {b_code} else 0.0)"
+        return f"(1 if {a_code} == {b_code} else 0)"
     if isinstance(expr, sp.Indexed):
         base_name = expr.base.name
         ctx = state.get('sparse_walker_ctx')
@@ -1735,6 +1785,24 @@ def _translate_loop_body_njit(expr, state) -> str:
             args_code = [_translate_loop_body_njit(a, state)
                          for a in expr.args]
             return f"{mapped}({', '.join(args_code)})"
+        # Fallback for Solverz / SolMuseum function nodes that carry
+        # their own ``_numpycode`` method (e.g. ``SolPde`` subclasses
+        # like ``kt1_ode``, ``kt2_ode``, ``minmod``, ``switch_minmod``
+        # from SolMuseum — every instance emits
+        # ``SolMF.pde.<classname>(<args>)``). Delegate to that method
+        # via a minimal printer whose ``_print`` just recurses back
+        # into this body translator so each argument is rewritten
+        # with the current ``state`` (Indexed ``[outer, inner]``
+        # walker context, ``_sz_loop_dk`` diff index handling, etc.).
+        if hasattr(expr, '_numpycode'):
+            class _MinimalPrinter:
+                def _print(self, arg, **_kwargs):
+                    return _translate_loop_body_njit(arg, state)
+
+            try:
+                return expr._numpycode(_MinimalPrinter())
+            except Exception:
+                pass  # fall through to the NotImplementedError below
     raise NotImplementedError(
         f"LoopEqn njit body translator does not yet handle "
         f"{type(expr).__name__}: {expr!r}"
@@ -1786,6 +1854,87 @@ class Ode(Eqn):
                  f,
                  diff_var: Union[iVar, IdxVar, Var]):
         super().__init__(name, f)
+        diff_var = sSym2Sym(diff_var)
+        self.diff_var = diff_var
+        self.LHS = Derivative(diff_var, t)
+
+
+class LoopOde(LoopEqn, Ode):
+    r"""
+    A LoopEqn whose residual is the time derivative of a contiguous
+    state-Var slice, i.e. an Ode with a scalar-template body.
+
+    .. math::
+
+         \frac{\mathrm{d}y[i]}{\mathrm{d}t} = f(i,\, y,\, \text{params})
+         \quad\text{for}\ i = 0, \ldots, n_{\text{outer}} - 1
+
+    where ``y`` (``diff_var``) is a length-``n_outer`` Var slice and
+    the body ``f`` is a scalar sympy expression parameterised by the
+    LoopEqn ``outer_index``.
+
+    Compared to :class:`LoopEqn`, ``LoopOde``:
+
+    1. Overrides ``LHS`` to ``sp.Derivative(diff_var, t)`` so the
+       rest of Solverz's DAE assembly (``eqn_dict`` partitioning
+       into ``f_list`` vs ``g_list``, mass-matrix construction,
+       ``eval_lhs``) sees it as an ``Ode`` and routes it to the
+       differential-equation side of the state vector.
+    2. Participates in the ``LoopEqn`` module-printer dispatch via
+       the existing ``isinstance(eqn, LoopEqn)`` branch, so it
+       emits exactly ONE ``inner_F<N>`` sub-function with a
+       Python ``for`` loop instead of one per state-cell (or per
+       per-pipe ``Ode`` as the legacy heat-PDE pattern does). The
+       residual vector returned by that sub-function is written to
+       ``_F_[diff_var_state_slice]`` through the standard
+       ``print_eqn_assignment_with_precompute`` path.
+
+    Multi-inheritance from ``LoopEqn`` *and* ``Ode`` (``Eqn`` is the
+    shared base) gives ``isinstance`` checks on both the
+    ``LoopEqn``-specific module-printer path and the
+    ``Ode``-specific DAE-split path the right answer. MRO puts
+    ``LoopEqn`` before ``Ode``, so ``LoopEqn.__init__`` is what
+    runs first; we then manually overwrite ``LHS`` and attach
+    ``diff_var``.
+
+    Parameters
+    ----------
+    name : str
+        Equation name (same as LoopEqn).
+    outer_index : sympy.Idx
+        Scalar-template outer loop index.
+    body : sympy.Expr
+        Scalar body expression (same semantics as LoopEqn).
+    diff_var : iVar / IdxVar / Var
+        The state-Var slice being differentiated in time. Its
+        runtime length must match ``n_outer``.
+    model, var_map, n_outer : same as LoopEqn.
+    """
+
+    def __init__(self,
+                 name: str,
+                 outer_index: sp.Idx,
+                 body,
+                 diff_var: Union[iVar, IdxVar, Var],
+                 n_outer: int = None,
+                 model=None,
+                 var_map=None):
+        # Defer to LoopEqn.__init__ for all the body rewriting,
+        # var_map inference, sparse-walker collection, SYMBOLS
+        # assembly, and NUM_EQN building. After it returns, ``self``
+        # is a fully-functional LoopEqn with ``self.LHS == S.Zero``.
+        LoopEqn.__init__(self,
+                         name=name,
+                         outer_index=outer_index,
+                         body=body,
+                         n_outer=n_outer,
+                         model=model,
+                         var_map=var_map)
+        # Overwrite ``LHS`` with the time-derivative expression so
+        # Solverz treats ``self`` like any other ``Ode`` during DAE
+        # partitioning. ``diff_var`` is stashed for ``eval_lhs`` and
+        # the mass-matrix builder to pull out the right state-Var
+        # slice length.
         diff_var = sSym2Sym(diff_var)
         self.diff_var = diff_var
         self.LHS = Derivative(diff_var, t)
