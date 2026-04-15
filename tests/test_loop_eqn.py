@@ -1372,6 +1372,148 @@ def test_loop_eqn_pow_body_newton_j3_jit_module():
                     del _sys.modules[mod_name]
 
 
+def test_loop_eqn_sparsity_is_symbolic_not_numerical():
+    """The structural sparsity analysis (``compute_loop_jac_sparsity``)
+    must be SYMBOLIC — derived from the canonical diff expression's
+    tree structure, not from evaluating the kernel at y0. Otherwise
+    a Var starting at zero could trick the analyzer into pruning
+    diagonal positions whose derivative value is ``4·x·δ`` and
+    happens to be zero at that specific point.
+
+    This test starts ``x = [0, 2, 0]`` for body ``2·x[i]² - rhs[i]``.
+    At ``x=0`` positions the diagonal derivative ``4·x`` is
+    numerically zero. Verifies:
+
+    - ``ed._sparsity_row / _col`` contain all 3 diagonal
+      positions regardless of ``x`` being 0 at (0,0) and (2,2).
+    - After ``FormJac``, the JacBlock's ``CooRow`` / ``CooCol`` /
+      ``SpEleSize`` still describe the 3-entry diagonal.
+    - ``Value0`` is filled via the FormJac perturbation (random
+      non-zero Var values) — so none of the diagonal entries
+      accidentally collapse to zero in scipy's csc construction,
+      but even if they did the structural position would still
+      be recorded.
+    """
+    from Solverz.equation.eqn import LoopEqnDiff
+
+    n = 3
+    m = Model()
+    # Deliberately zero at rows 0 and 2 so the diagonal derivative
+    # 4·x[i]·δ(k,i) is numerically zero at those positions.
+    m.x = Var('x', np.array([0.0, 2.0, 0.0]))
+    m.rhs = Param('rhs', np.array([-1.0, 4.0, -9.0]))
+    i = Idx('i', n)
+    body = 2 * m.x[i] ** 2 - m.rhs[i]
+    m.eqn = LoopEqn('qq', outer_index=i, body=body, model=m)
+
+    spf, y0 = m.create_instance()
+    (ed,) = [d for d in m.eqn.derivatives.values()
+             if isinstance(d, LoopEqnDiff)]
+
+    # Structural sparsity is the full diagonal — independent of
+    # the Var values ``x = [0, 2, 0]``.
+    np.testing.assert_array_equal(ed._sparsity_row, [0, 1, 2])
+    np.testing.assert_array_equal(ed._sparsity_col, [0, 1, 2])
+    assert ed._nnz == 3
+
+    # After FormJac, the JacBlock inherits the structural
+    # sparsity. The perturbed Value0 has all-non-zero diagonal
+    # entries because FormJac perturbs Vars to [1, 2).
+    spf.FormJac(y0)
+    found = False
+    for jbs in spf.jac.blocks_sorted.values():
+        for var, jb in jbs.items():
+            if hasattr(jb, '_loop_eqn_diff'):
+                found = True
+                np.testing.assert_array_equal(jb.CooRow, [0, 1, 2])
+                np.testing.assert_array_equal(jb.CooCol, [0, 1, 2])
+                assert jb.SpEleSize == 3
+    assert found, "expected at least one LoopEqnDiff-sourced JacBlock"
+
+
+def test_loop_eqn_trig_diag_newton_j3_j4():
+    """Phase J3 fallback + Phase J4 sparse kernel end-to-end on a
+    body whose per-row diagonal derivative is a nonlinear trig
+    expression.
+
+    Bodies:
+
+        F1[i] = Va[i] * cos(Va[i]) + Vm[i] - r1[i]
+        F2[i] = Vm[i] * sin(Vm[i])            - r2[i]
+
+    Two LoopEqns, 3 rows each → 6 residuals in (Va, Vm) ∈ ℝ³×ℝ³.
+    No gauge freedom (no angle-differences, no scaling
+    invariance), so the 3-bus square system is well-conditioned.
+
+    Interesting derivatives:
+
+    - ``∂F1[i] / ∂Va[k] = (cos(Va[i]) - Va[i]*sin(Va[i])) * δ(k, i)``
+      — diagonal block with a nonlinear trig scalar per row.
+      Falls through Phase J2's classifier (``other_factors`` in
+      the term's anatomy) → LoopEqnDiff fallback → sparse kernel
+      with 3 entries, ``for _sz_idx in range(3)``.
+    - ``∂F1[i] / ∂Vm[k] = δ(k, i)``
+      — the Phase J1 constant identity path.
+    - ``∂F2[i] / ∂Vm[k] = (sin(Vm[i]) + Vm[i]*cos(Vm[i])) * δ(k, i)``
+      — another Phase J3 fallback diagonal block with trig.
+    - ``∂F2[i] / ∂Va[k] = 0`` — pruned by ``is_zero`` before the
+      classifier ever runs.
+
+    Newton converges from a nearby warm start to the analytic
+    target by construction.
+    """
+    from Solverz.equation.eqn import LoopEqnDiff
+
+    n = 3
+    Va_target = np.array([0.5, 1.0, 1.5])
+    Vm_target = np.array([0.8, 1.2, 1.6])
+    r1 = Va_target * np.cos(Va_target) + Vm_target
+    r2 = Vm_target * np.sin(Vm_target)
+
+    m = Model()
+    m.Va = Var('Va', Va_target + np.array([0.1, -0.05, 0.07]))
+    m.Vm = Var('Vm', Vm_target + np.array([-0.02, 0.04, -0.03]))
+    m.r1 = Param('r1', r1)
+    m.r2 = Param('r2', r2)
+
+    i = Idx('i', n)
+    body1 = m.Va[i] * cos(m.Va[i]) + m.Vm[i] - m.r1[i]
+    body2 = m.Vm[i] * sin(m.Vm[i]) - m.r2[i]
+    m.eqn1 = LoopEqn('eqn1', outer_index=i, body=body1, model=m)
+    m.eqn2 = LoopEqn('eqn2', outer_index=i, body=body2, model=m)
+
+    spf, y0 = m.create_instance()
+
+    # Sanity: at least one derivative in each equation fell into
+    # the Phase J3 LoopEqnDiff fallback (the trig diagonal terms).
+    loop_diffs = []
+    for eqn in (m.eqn1, m.eqn2):
+        for ed in eqn.derivatives.values():
+            if isinstance(ed, LoopEqnDiff):
+                loop_diffs.append(ed)
+    assert len(loop_diffs) >= 2
+
+    # Each fallback block should be 3 entries (the diagonal), not
+    # 9 (full dense) — proof that ``compute_loop_jac_sparsity``
+    # correctly recognised ``δ(outer, diff) * <scalar>`` as a
+    # diagonal-only contribution even when ``<scalar>`` is a
+    # nonlinear trig expression.
+    for ed in loop_diffs:
+        assert ed._nnz == 3, (
+            f"Expected 3 nnz for a diagonal block, got {ed._nnz}"
+        )
+        # The sparse kernel source should iterate exactly 3
+        # positions.
+        assert 'np.empty(3)' in ed.kernel_source
+        assert 'for _sz_idx in range(3):' in ed.kernel_source
+
+    mdl = made_numerical(spf, y0, sparse=True)
+    sol = nr_method(mdl, y0)
+    # NR default tolerance is 1e-6; allow 1e-5 margin here.
+    np.testing.assert_allclose(sol.y['Va'], Va_target, atol=1e-5)
+    np.testing.assert_allclose(sol.y['Vm'], Vm_target, atol=1e-5)
+
+
 def test_loop_eqn_polar_pf_trig_f_side():
     """F-side port of the EPS dyn=False polar power-flow pattern
     (``SolMuseum/ae/eps_network.py:57-75``). Each bus enforces
