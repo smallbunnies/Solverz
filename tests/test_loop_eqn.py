@@ -1344,6 +1344,118 @@ def test_loop_eqn_native_rejects_missing_model_attr():
                             body=body, model=m)
 
 
+def test_canonicalize_kronecker_linear_sum():
+    """``canonicalize_kronecker`` must collapse
+    ``Sum(δ(k, j) * G[i, j], (j, 0, n-1))`` to ``G[i, k]`` — the
+    basic linear-Sum diff pattern.
+    """
+    from Solverz.equation.loop_jac import canonicalize_kronecker
+    import sympy as sp
+    from sympy.functions.special.tensor_functions import KroneckerDelta
+
+    i = sp.Idx('i', 5)
+    j = sp.Idx('j', 5)
+    k = sp.Idx('_sz_loop_dk')
+    G = sp.IndexedBase('G')
+
+    raw = sp.Sum(KroneckerDelta(k, j) * G[i, j], (j, 0, 4))
+    canonical = canonicalize_kronecker(raw, i, k)
+    assert canonical == G[i, k]
+
+
+def test_canonicalize_kronecker_bare_delta():
+    """A bare ``KroneckerDelta(k, outer)`` passes through unchanged —
+    no Sum around it, nothing to collapse.
+    """
+    from Solverz.equation.loop_jac import canonicalize_kronecker
+    import sympy as sp
+    from sympy.functions.special.tensor_functions import KroneckerDelta
+
+    i = sp.Idx('i', 5)
+    k = sp.Idx('_sz_loop_dk')
+
+    raw = KroneckerDelta(k, i)
+    canonical = canonicalize_kronecker(raw, i, k)
+    assert canonical == KroneckerDelta(k, i)
+
+
+def test_canonicalize_kronecker_negated_sum():
+    """Negation on a Sum: ``-Sum(δ(k,j) * (V_in[i,j] - V_out[i,j]),
+    (j, 0, n-1))`` → ``-(V_in[i,k] - V_out[i,k])``. Exercises:
+
+    - Sum over Add linearity splitting into two Sums
+    - dummy-matched δ collapse in each sub-Sum
+    - Leading ``-1`` propagation through the expression tree
+    """
+    from Solverz.equation.loop_jac import canonicalize_kronecker
+    import sympy as sp
+    from sympy.functions.special.tensor_functions import KroneckerDelta
+
+    i = sp.Idx('i', 5)
+    j = sp.Idx('j', 5)
+    k = sp.Idx('_sz_loop_dk')
+    V_in = sp.IndexedBase('V_in')
+    V_out = sp.IndexedBase('V_out')
+
+    raw = -sp.Sum((V_in[i, j] - V_out[i, j]) * KroneckerDelta(k, j),
+                  (j, 0, 4))
+    canonical = canonicalize_kronecker(raw, i, k)
+    expected = -(V_in[i, k] - V_out[i, k])
+    assert sp.simplify(canonical - expected) == 0
+
+
+def test_canonicalize_kronecker_bilinear_factor_out_and_collapse():
+    """Bilinear body produces a Sum with TWO KroneckerDelta terms:
+
+        Sum(δ(k, i) * G[i, j] * Vm[j]
+            + δ(k, j) * G[i, j] * Vm[i], (j, 0, n-1))
+
+    - The ``δ(k, i)`` term: ``i`` is outer, NOT the sum dummy — the
+      delta is factored out, leaving the Sum as a template.
+    - The ``δ(k, j)`` term: ``j`` is the dummy — collapse via
+      substitution, drop the Sum.
+
+    Expected canonical form:
+
+        δ(k, i) * Sum(G[i, j] * Vm[j], (j, 0, n-1)) + G[i, k] * Vm[i]
+
+    This is the key pattern for bilinear ``Var * Var`` bodies (polar
+    PF), and the ability to keep the first Sum as a template is
+    exactly why we avoid ``.doit()``.
+    """
+    from Solverz.equation.loop_jac import canonicalize_kronecker
+    import sympy as sp
+    from sympy.functions.special.tensor_functions import KroneckerDelta
+
+    i = sp.Idx('i', 5)
+    j = sp.Idx('j', 5)
+    k = sp.Idx('_sz_loop_dk')
+    G = sp.IndexedBase('G')
+    Vm = sp.IndexedBase('Vm')
+
+    raw = sp.Sum(
+        KroneckerDelta(k, i) * G[i, j] * Vm[j]
+        + KroneckerDelta(k, j) * G[i, j] * Vm[i],
+        (j, 0, 4),
+    )
+    canonical = canonicalize_kronecker(raw, i, k)
+
+    # The canonicalizer's output is exactly:
+    #   δ(k,i) * Sum(G[i,j] * Vm[j], (j,0,4)) + G[i,k] * Vm[i]
+    expected = (KroneckerDelta(k, i)
+                * sp.Sum(G[i, j] * Vm[j], (j, 0, 4))
+                + G[i, k] * Vm[i])
+    # Use sp.simplify to normalise ordering (commutative factors).
+    assert sp.simplify(canonical - expected) == 0
+
+    # Critical property: the inner ``Sum(G[i,j] * Vm[j], j)`` MUST
+    # still be present as a template — it is NOT unrolled into 5
+    # explicit terms. This is the whole point of not calling
+    # ``.doit()``. Verify by checking the canonical expression still
+    # contains a ``Sum`` node.
+    assert canonical.has(sp.Sum)
+
+
 def test_loop_eqn_sparse_walker_rejects_multi_sparse_sum():
     """Phase 1 constraint: a single ``Sum`` may contain at most ONE
     sparse 2-D ``Param`` walker. If a user tries to put ``G`` and

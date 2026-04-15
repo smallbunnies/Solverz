@@ -828,37 +828,47 @@ class LoopEqn(Eqn):
         return '\n'.join(lines) + '\n'
 
     def derive_derivative(self):
-        """Compute per-Var Jacobian blocks symbolically.
+        """Compute per-Var Jacobian blocks symbolically via the
+        Phase J1 canonicalize → classify pipeline.
 
         For each ``var_map`` entry that is a Solverz :class:`Var`
         (Params are skipped — they're constants from the model's POV),
         we differentiate the body w.r.t. ``IndexedBase[k]`` for a fresh
-        outer-loop-style index ``k``. Sympy turns the Sum-over-Idx into
-        a ``KroneckerDelta`` sum, which ``.doit()`` collapses to a
-        ``Piecewise`` whose first branch is the per-element coefficient
-        — exactly the per-(outer_index, k) Jacobian entry. We strip the
-        bounds wrapper (``k`` is always in range by construction),
-        translate the resulting sympy expression back to a Solverz
-        :class:`Expr` involving :class:`Para`, and wrap the result in
-        a regular :class:`EqnDiff`. The standard ``JacBlock`` machinery
-        then classifies it as a constant-matrix block (when ``DeriExpr``
-        is ``Para`` or ``-Para``) and the existing
-        ``print_J_block`` path inlines the data — no custom J-side
-        printer needed for this simplest pattern.
+        index ``k``. The raw sympy result is then:
 
-        Currently handled patterns (Phase 0 minimum):
+        1. **Canonicalized** (:func:`canonicalize_kronecker`): Sum
+           linearity + manual ``KroneckerDelta`` collapse, **never**
+           calling ``Sum.doit()``. Collapsing is needed because the
+           raw diff result is a ``Sum`` with a ``KroneckerDelta``
+           factor inside, and ``.doit()`` fails in two ways:
+           - for ``δ(k, j)`` with ``j`` the sum dummy, it does the
+             right thing (collapse), but
+           - for ``δ(k, i)`` with ``i`` the *outer* index (not the
+             dummy), it unrolls the bounded Sum into ``n`` explicit
+             terms, destroying the template form we want to preserve.
+           The canonicalizer splits summand-by-summand and handles
+           both cases correctly.
+        2. **Classified** (:func:`loop_jac_to_solverz_expr`):
+           translate the canonical form back to a Solverz expression
+           that the standard ``JacBlock`` path understands. Phase J1
+           recognises only constant shapes:
 
-        - ``±IndexedBase('M')[outer_index, k]`` with ``M`` a 2-D
-          ``Param``. Translates to ``±Para('M', dim=2)``.
+           - ``KroneckerDelta(outer, k)`` → ``_LoopJacEye(n_outer)``
+             (identity block, e.g. ``∂(ix[i])/∂ix[k]``).
+           - ``Indexed(Param, outer, k)`` or ``Indexed(Param, k, outer)``
+             for a 2-D ``Param`` → ``Para(name, dim=2)``.
+           - ``Add`` / ``Mul`` of the above — ``V_in - V_out``,
+             ``-G``, ``-V_in + V_out``, …
 
-        Anything else raises ``NotImplementedError`` from
-        :func:`_translate_loop_jac`. Phase 0.4 will extend this to
-        cover the patterns SolMuseum's network modules actually need.
+           Anything else raises ``NotImplementedError`` and is
+           reserved for Phase J2 (``DiagTerm`` / ``RowScaleTerm`` /
+           ``ColScaleTerm`` / ``BilinearEntry``).
         """
-        # ``Param(ParamBase, sSymBasic)`` inherits from sSymBasic too,
-        # so we can't filter Vars with ``isinstance(_, sSymBasic)`` —
-        # use the concrete ``Var`` class.
         from Solverz.variable.ssymbol import Var
+        from Solverz.equation.loop_jac import (
+            canonicalize_kronecker,
+            loop_jac_to_solverz_expr,
+        )
 
         # Fresh derivative index. Use a name unlikely to collide with
         # any Idx the user put in their body.
@@ -872,24 +882,21 @@ class LoopEqn(Eqn):
             target_base = sp.IndexedBase(indexed_base_name)
             target_slot = target_base[k]
 
-            # Symbolically differentiate, then collapse the resulting
-            # KroneckerDelta-Sum, then push any leading sign into the
-            # Piecewise branches so the walker sees a uniform shape.
-            deriv = sp.diff(self.body, target_slot).doit()
-            deriv = sp.piecewise_fold(deriv)
-
-            if is_zero(deriv):
+            # Raw sympy diff — deliberately NO ``.doit()``.
+            raw_deriv = sp.diff(self.body, target_slot)
+            if is_zero(raw_deriv):
                 continue
 
-            # Translate the (sympy IndexedBase) result back to a
-            # (Solverz Para) expression that the standard EqnDiff
-            # machinery can lambdify and that JacBlock can classify
-            # as a constant-matrix block.
-            sz_expr = _translate_loop_jac(deriv,
-                                          self.outer_index,
-                                          k,
-                                          self.n_outer,
-                                          self.var_map)
+            canonical = canonicalize_kronecker(
+                raw_deriv, self.outer_index, k
+            )
+            if is_zero(canonical):
+                continue
+
+            sz_expr = loop_jac_to_solverz_expr(
+                canonical, self.outer_index, k,
+                self.n_outer, self.var_map,
+            )
 
             ed = EqnDiff(
                 name=f'Diff {self.name} w.r.t. {var_iVar.name}',
@@ -902,20 +909,20 @@ class LoopEqn(Eqn):
 class _LoopJacEye(Function):
     """Sympy ``Function`` node that prints to ``np.eye(n)``.
 
-    Emitted by :func:`_translate_loop_jac` whenever a LoopEqn
-    derivative simplifies to ``KroneckerDelta(outer_index, k)``, which
-    happens when a ``Var`` appears as an outer-indexed term in the body
-    (e.g. ``ix[i] - sum_j (G[i, j] * ux[j])`` from the SolMuseum
+    Emitted by :func:`Solverz.equation.loop_jac.loop_jac_to_solverz_expr`
+    whenever a LoopEqn derivative simplifies to
+    ``KroneckerDelta(outer_index, k)``, which happens when a ``Var``
+    appears as an outer-indexed term in the body (e.g.
+    ``ix[i] - sum_j (G[i, j] * ux[j])`` from the SolMuseum
     ``eps_network.mdl(dyn=True)`` rectangular current balance — the
     block ``∂F[i]/∂ix[k] = δ_{i,k}`` is the identity matrix).
 
     Has no free symbols, so the standard ``Eqn.lambdify`` /
     ``Eqn.NUM_EQN`` machinery wraps it as ``lambda: np.eye(n)``.
-    ``JacBlock`` then sees a 2-D matrix Value0; because ``DeriExpr``
-    is a ``Function`` (not a ``Para``) it routes through the mutable-
-    matrix path. The mutable-matrix kernel re-evaluates
-    ``np.eye(n)`` on every Newton step, but the cost is negligible
-    (n is small and the result is cached after the first call).
+    ``JacBlock``'s ``is_constant_matrix_deri`` check classifies it as
+    a constant-matrix block (zero free symbols), so ``inner_J``
+    reduces to ``return _data_`` with the identity baked in at
+    module-build time.
     """
 
     @classmethod
@@ -933,123 +940,6 @@ class _LoopJacEye(Function):
 
     def _lambdacode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)
-
-
-def _translate_loop_jac(expr, outer_idx, k, n_outer, var_map):
-    """Translate the result of ``sp.diff(loop_body, IndexedBase[k]).doit()``
-    back to a Solverz :class:`Expr`.
-
-    The input has one of two rough shapes:
-
-    1. ``Piecewise((<expr involving IndexedBase[outer, k]>,
-                    (0 ≤ k) & (k ≤ n - 1)),
-                   (0, True))``
-
-       — produced when the body has ``Sum_j (… IndexedBase[…, j] …)``
-       and we differentiate w.r.t. ``IndexedBase[k]``. ``.doit()``
-       collapses the Sum via ``KroneckerDelta``, leaving a Piecewise
-       wrapping the per-(outer, k) coefficient. We strip the bounds
-       wrapper (``k`` is always in range by construction).
-
-    2. ``KroneckerDelta(outer, k)`` (or wrapped in a sign Mul)
-
-       — produced when the body has a bare ``IndexedBase[outer]``
-       residual term referring to a Var. ``ix[i].diff(ix[k])`` is
-       just the Kronecker delta, with no Sum involved. We translate
-       this to ``_LoopJacEye(n_outer)`` which prints to ``np.eye(n)``.
-
-    Walking strategy
-    ----------------
-    - ``Piecewise``  → take the first non-zero branch (recursively).
-    - ``KroneckerDelta(a, b)`` with ``{a, b} == {outer_idx, k}``
-      → ``_LoopJacEye(n_outer)``.
-    - ``Indexed(IndexedBase('M'), outer, k)`` with ``M`` a 2-D Param
-      → ``Para('M', dim=2)``.
-    - Numbers pass through; ``Add`` / ``Mul`` / generic ``Function``
-      walk children and reconstruct.
-    - Bare ``Idx`` or unknown ``Symbol`` raises ``NotImplementedError``
-      so the next missing case surfaces loudly.
-
-    Phase 0 only handles the patterns above. Mixed Var-Var products,
-    1-D Var/Param accesses, non-rectangular Sums, etc., will be added
-    incrementally as Phase 0.4 sub-tests need them.
-    """
-    from Solverz.variable.ssymbol import sSymBasic
-    from Solverz.equation.param import ParamBase
-
-    outer_name = outer_idx.name
-    k_name = k.name
-
-    def walk(e):
-        if isinstance(e, sp.Piecewise):
-            # Take the first non-zero branch — by construction we
-            # know ``k`` is always in range, so the bounds branch is
-            # the live one.
-            for branch_expr, _cond in e.args:
-                if not is_zero(branch_expr):
-                    return walk(branch_expr)
-            return sp.S.Zero
-        if isinstance(e, KroneckerDelta):
-            arg_names = {str(a) for a in e.args}
-            if arg_names == {outer_name, k_name}:
-                # δ_{i,k} over the outer-index x diff-index span is the
-                # n_outer × n_outer identity matrix.
-                return _LoopJacEye(sp.Integer(n_outer))
-            raise NotImplementedError(
-                f"LoopEqn jacobian translator: KroneckerDelta with "
-                f"args {e.args} — only ``KroneckerDelta(outer_idx, "
-                f"k)`` is currently supported"
-            )
-        if isinstance(e, sp.Indexed):
-            base_name = e.base.name
-            if base_name not in var_map:
-                raise NotImplementedError(
-                    f"LoopEqn jacobian translator: IndexedBase "
-                    f"{base_name!r} has no var_map entry"
-                )
-            sol_obj = var_map[base_name]
-            indices = e.indices
-            if isinstance(sol_obj, ParamBase) and sol_obj.dim == 2:
-                if len(indices) != 2:
-                    raise NotImplementedError(
-                        f"LoopEqn jacobian translator only handles "
-                        f"2-D Param accessed with exactly two "
-                        f"indices, got {e}"
-                    )
-                # Drop the (outer, k) indices — the resulting Solverz
-                # Para is the full matrix and JacBlock's vector+matrix
-                # path handles the per-(row, col) addressing.
-                return Para(sol_obj.name, dim=2)
-            raise NotImplementedError(
-                f"LoopEqn jacobian translator does not yet handle "
-                f"IndexedBase {base_name!r} of "
-                f"{type(sol_obj).__name__} dim="
-                f"{getattr(sol_obj, 'dim', None)}"
-            )
-        if isinstance(e, (sp.Integer, sp.Float, sp.Rational, sp.Number)):
-            return e
-        if isinstance(e, sp.Idx):
-            # Bare Idx symbols should never reach the translator —
-            # they're only valid inside an ``Indexed`` slot or as a
-            # ``KroneckerDelta`` arg, both handled above.
-            raise NotImplementedError(
-                f"LoopEqn jacobian translator: bare Idx {e!r} "
-                f"in derivative expression"
-            )
-        if hasattr(e, 'args') and len(e.args) > 0 and not e.is_Atom:
-            new_args = [walk(a) for a in e.args]
-            return e.func(*new_args)
-        if isinstance(e, sp.Symbol):
-            raise NotImplementedError(
-                f"LoopEqn jacobian translator: unexpected bare "
-                f"Symbol {e!r}"
-            )
-        raise NotImplementedError(
-            f"LoopEqn jacobian translator does not yet handle "
-            f"{type(e).__name__}: {e!r}"
-        )
-
-    return walk(expr)
 
 
 def _translate_loop_body(expr) -> str:
