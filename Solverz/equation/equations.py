@@ -212,27 +212,18 @@ class Equations:
                         perturbed_args.append(rng.random(arg.shape) + 1.0)
                     else:
                         perturbed_args.append(arg)
-                # Run the dense kernel to get the perturbed block.
-                dense_val = fy[2].NUM_EQN(*perturbed_args)
-                dense_val = np.asarray(dense_val)
+                # Call the sparse kernel — returns a 1-D ``(nnz,)``
+                # ndarray in the same (column-major) order as
+                # ``(_sparsity_row, _sparsity_col)``.
+                sparse_data = np.asarray(
+                    fy[2].NUM_EQN(*perturbed_args), dtype=float
+                )
 
-                # Build Value0 as a sparse ``csc_array`` restricted
-                # to the **structural** sparsity pattern
-                # pre-computed on the LoopEqnDiff at construction
-                # time (diagonal for ``δ(outer,diff)`` terms,
-                # Param ``.tocoo()`` for ``Indexed(Param, outer,
-                # diff)`` terms, dense fallback otherwise). This
-                # guarantees the block's sparsity in the global
-                # Jacobian reflects the TRUE structure instead of
-                # ``csc_array(dense)`` which would mark every
-                # grid entry as non-zero.
                 row_arr = fy[2]._sparsity_row
                 col_arr = fy[2]._sparsity_col
                 if row_arr.size > 0:
-                    data_arr = dense_val[row_arr, col_arr]
                     Value0 = csc_array(
-                        (np.asarray(data_arr, dtype=float),
-                         (row_arr, col_arr)),
+                        (sparse_data, (row_arr, col_arr)),
                         shape=(fy[2].n_outer, fy[2].n_diff),
                     )
                 else:

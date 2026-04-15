@@ -218,29 +218,26 @@ def print_J(eqs_type: str,
                     iVar('data', internal_use=True)[mb['addr_slice']],
                     FunctionCall(mb['fn_name'], call_args)))
             elif mb.get('mode') == 'loop_eqn':
-                # LoopEqn-native path. Call the @njit kernel
-                # (which returns a dense ``(n_outer, n_diff)``
-                # ndarray) and fancy-index into the block's
-                # structural ``(row, col)`` positions. The row /
-                # col arrays arrive as module-level constants
-                # loaded from ``setting[...]`` via
-                # ``mut_mat_mappings``.
-                from Solverz.equation.eqn import _LoopJacBlockScatter
+                # LoopEqn-native path (Phase J4). The @njit kernel
+                # is SPARSE — it takes the Var/Param args plus the
+                # block's row / col index arrays and returns a
+                # 1-D ``(nnz,)`` ndarray in the same column-major
+                # order as ``(row_arr, col_arr)``. The J_ wrapper
+                # passes the module-level row/col constants
+                # (loaded from ``setting[...]`` via
+                # ``mut_mat_mappings``) as the last two args and
+                # writes the result directly to ``data[addr_slice]``
+                # with no fancy indexing.
                 kernel_args = [symbols(nm, real=True)
                                for nm in mb['kernel_symbols']]
-                block_local = iVar(
-                    f'_sz_loop_jac_block_{mb["block_idx"]}',
-                    internal_use=True,
-                )
-                body.append(Assignment(
-                    block_local,
-                    FunctionCall(mb['kernel_fn_name'], kernel_args),
-                ))
                 row_sym = symbols(mb['row_key'], real=True)
                 col_sym = symbols(mb['col_key'], real=True)
                 body.append(Assignment(
                     iVar('data', internal_use=True)[mb['addr_slice']],
-                    _LoopJacBlockScatter(block_local, row_sym, col_sym),
+                    FunctionCall(
+                        mb['kernel_fn_name'],
+                        kernel_args + [row_sym, col_sym],
+                    ),
                 ))
             else:
                 # Fallback: scipy sparse fancy indexing

@@ -228,18 +228,45 @@ class LoopEqnDiff(EqnDiff):
             .replace('.', '_')
             .replace(' ', '_')
         )
+        # Compute the structural sparsity pattern BEFORE building
+        # the kernel — the kernel needs to know ``nnz`` as a
+        # compile-time literal for its ``range(nnz)`` loop.
+        sparsity_row, sparsity_col = compute_loop_jac_sparsity(
+            canonical, outer_idx, diff_idx, var_map, n_outer, n_diff,
+        )
+        self._sparsity_row = sparsity_row
+        self._sparsity_col = sparsity_col
+        self._nnz = int(sparsity_row.size)
+
         kernel_name = f'_sz_loop_jac_kernel_{sanitized}'
         self.kernel_source = build_loop_jac_kernel_source(
             kernel_name, canonical, outer_idx, diff_idx,
-            n_outer, n_diff, sorted_symbols, var_map,
+            self._nnz, sorted_symbols, var_map,
         )
 
         # exec the source into a namespace with the numpy + SolCF
         # helpers our body translator emits.
         ns: Dict[str, object] = {'np': np, 'SolCF': _SolCF}
         exec(self.kernel_source, ns)
-        kernel_func = ns[kernel_name]
-        kernel_func._kernel_source = self.kernel_source  # for debug
+        raw_kernel_func = ns[kernel_name]
+        raw_kernel_func._kernel_source = self.kernel_source  # debug
+
+        # Wrap the kernel to inject the sparsity arrays automatically
+        # so ``eval_diffs(*args)`` at FormJac / Newton time doesn't
+        # have to thread the extra ``row_arr`` / ``col_arr`` params
+        # through ``obtain_eqn_args``. Inline path: closure. JIT
+        # module path: the module printer re-generates the wrapper
+        # Assignment to pass the module-level row/col constants
+        # explicitly in the ``J_`` wrapper.
+        _row_arr = self._sparsity_row
+        _col_arr = self._sparsity_col
+
+        def _kernel_wrapper(*args, _raw=raw_kernel_func,
+                             _r=_row_arr, _c=_col_arr):
+            return _raw(*args, _r, _c)
+
+        _kernel_wrapper._kernel_source = self.kernel_source
+        kernel_func = _kernel_wrapper
 
         # Build SYMBOLS dict matching the kernel's arg list order.
         # Each entry maps name → Solverz sympy symbol (iVar / Para).
@@ -302,23 +329,6 @@ class LoopEqnDiff(EqnDiff):
         self.n_diff = n_diff
         self._loop_var_map = dict(var_map)
         self._kernel_func_name = kernel_name
-
-        # Structural sparsity of the block. Walked from the
-        # canonical expression at construction time:
-        #
-        # - ``δ(outer, diff) * anything`` → diagonal positions
-        # - ``Indexed(Param, outer, diff)`` or the transposed form
-        #   → Param's stored nnz pattern (``param.v.tocoo()``)
-        # - other shapes → dense full ``n_outer × n_diff`` block
-        #
-        # These arrays are the ONLY positions where the block is
-        # structurally non-zero. ``FormJac`` uses them to build a
-        # sparse ``Value0`` (instead of ``csc_array(dense)`` which
-        # would mark every grid position as nnz), so the global
-        # Jacobian sparsity pattern reflects the true structure.
-        self._sparsity_row, self._sparsity_col = compute_loop_jac_sparsity(
-            canonical, outer_idx, diff_idx, var_map, n_outer, n_diff,
-        )
 
 
 def Idx(name: str, n: int = None):

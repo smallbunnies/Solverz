@@ -714,19 +714,31 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
             has_dense_fallback = True
             break
 
-    if has_dense_fallback:
-        rows = np.repeat(np.arange(n_outer, dtype=np.int64), n_diff)
-        cols = np.tile(np.arange(n_diff, dtype=np.int64), n_outer)
+    def _dense_fallback():
+        # Column-major dense pattern to match ``csc_array.tocoo()``
+        # internal ordering (columns first, then rows within each
+        # column). The downstream JacBlock extracts CooRow / CooCol
+        # from ``Value0.tocoo()``, which scipy returns in this
+        # same order; keeping the kernel output in the same order
+        # lets the J_ wrapper write ``data[addr_slice] = kernel(...)``
+        # with no fancy-indexing reorder.
+        cols = np.repeat(np.arange(n_diff, dtype=np.int64), n_outer)
+        rows = np.tile(np.arange(n_outer, dtype=np.int64), n_diff)
         return rows, cols
+
+    if has_dense_fallback:
+        return _dense_fallback()
 
     if not all_positions:
         # Defensive: no terms produced structural positions. Fall
         # back to dense to guarantee correctness.
-        rows = np.repeat(np.arange(n_outer, dtype=np.int64), n_diff)
-        cols = np.tile(np.arange(n_diff, dtype=np.int64), n_outer)
-        return rows, cols
+        return _dense_fallback()
 
-    sorted_positions = sorted(all_positions)
+    # Sort by (col, row) — column-major, matching csc_array's
+    # internal storage so ``csc_array((data, (row, col)), shape)
+    # .tocoo()`` returns the indices in the same order we pass
+    # to the kernel builder.
+    sorted_positions = sorted(all_positions, key=lambda p: (p[1], p[0]))
     row_arr = np.array([p[0] for p in sorted_positions], dtype=np.int64)
     col_arr = np.array([p[1] for p in sorted_positions], dtype=np.int64)
     return row_arr, col_arr
@@ -736,26 +748,32 @@ def build_loop_jac_kernel_source(func_name: str,
                                    canonical: sp.Expr,
                                    outer_idx: sp.Idx,
                                    diff_idx: sp.Idx,
-                                   n_outer: int,
-                                   n_diff: int,
+                                   nnz: int,
                                    symbols_list,
-                                   var_map: Dict[str, object]) -> str:
-    """Generate Python source for a LoopEqn Jacobian block kernel.
+                                   var_map: Dict[str, object],
+                                   row_arr_param: str = '_sz_row_arr',
+                                   col_arr_param: str = '_sz_col_arr') -> str:
+    """Generate Python source for a **sparse** LoopEqn Jacobian
+    block kernel.
 
-    The kernel is a nested ``for i in range(n_outer): for k in range(
-    n_diff):`` loop that evaluates the canonicalized diff expression
-    at each ``(i, k)`` position and writes the result to a flat
-    ``data`` array in row-major order. The result has length
-    ``n_outer * n_diff`` and represents a DENSE block — sparsity
-    pruning is deferred to a later phase.
+    The kernel is a single ``for _sz_idx in range(nnz):`` loop that
+    reads the current ``(i, k)`` position from pre-computed row /
+    column index arrays, evaluates the canonicalized diff expression
+    at that position, and writes the result to a flat
+    ``data[_sz_idx]``. The output is a 1-D ``ndarray`` of length
+    ``nnz`` whose layout matches the order the caller supplied in
+    ``row_arr_param`` / ``col_arr_param``. Callers (``LoopEqnDiff``
+    and the JIT ``print_J`` wrapper) are responsible for providing
+    the row / col arrays in column-major (csc) order so the
+    downstream ``Value0.tocoo()`` extraction aligns with the
+    kernel's output.
 
-    Reuses :func:`Solverz.equation.eqn._translate_loop_body_njit` to
-    translate the canonical sympy expression (which may contain
-    ``KroneckerDelta``, ``Sum``, ``Indexed``, function calls etc.)
-    to Python code. Any inner ``Sum`` becomes an explicit inner
-    for-loop with an accumulator (the same mechanism the F-side
-    translator uses for body-level Sums). ``KroneckerDelta`` between
-    the outer and diff indices lowers to a Python conditional.
+    Per-element ``(i, k)`` values are translated through
+    :func:`Solverz.equation.eqn._translate_loop_body_njit`, which
+    handles ``sympy.Indexed``, ``sympy.Sum`` (inner for-loop with
+    accumulator), ``KroneckerDelta`` (lowered to a Python
+    conditional), and the Phase J2 function map
+    (``sin``/``cos``/``Abs``/``Sign``/``heaviside``/etc).
 
     Parameters
     ----------
@@ -763,25 +781,30 @@ def build_loop_jac_kernel_source(func_name: str,
         Name of the generated function, e.g. ``"_loop_jac_kernel_0"``.
     canonical : sympy.Expr
         Canonicalized Jacobian expression (output of
-        :func:`canonicalize_kronecker`). May contain
-        ``KroneckerDelta`` factors (the J3.0 translator branch
-        handles them).
+        :func:`canonicalize_kronecker`).
     outer_idx : sympy.Idx
-        The LoopEqn's outer index — becomes the outer for-loop
-        variable in the generated kernel.
+        The LoopEqn's outer index — its name is used inside the
+        body translator as the row variable (bound to
+        ``row_arr_param[_sz_idx]`` at each iteration).
     diff_idx : sympy.Idx
-        The fresh diff index (e.g. ``_sz_loop_dk``) — becomes the
-        inner for-loop variable.
-    n_outer, n_diff : int
-        Loop ranges.
+        The fresh diff index — bound to ``col_arr_param[_sz_idx]``
+        at each iteration.
+    nnz : int
+        Number of structurally non-zero positions in the block
+        (length of the row / col arrays). Emitted as a literal in
+        the ``range(nnz)`` loop.
     symbols_list : list of str
-        Sorted Var/Param names that flow in as function arguments.
-        Matches what the F-side ``_build_num_eqn`` uses so the
-        caller can share its arg-preparation logic.
+        Sorted Var/Param names that flow in as function arguments
+        BEFORE the row / col arrays. The full signature is
+        ``(<symbols>, <row_arr_param>, <col_arr_param>)``.
     var_map : dict
-        IndexedBase name → Solverz Var/Param (only passed through to
-        ``_translate_loop_body_njit`` for the sparse-walker context;
-        not consumed here directly).
+        IndexedBase name → Solverz Var/Param (passed through to
+        ``_translate_loop_body_njit`` for the sparse-walker
+        context).
+    row_arr_param, col_arr_param : str
+        Parameter names for the row / col index arrays inside the
+        generated function. The caller can pick unique names to
+        avoid collision in the module-level scope.
 
     Returns
     -------
@@ -806,23 +829,19 @@ def build_loop_jac_kernel_source(func_name: str,
     body_expr = _translate_loop_body_njit(canonical, state)
 
     indent = '    '
-    body_indent = indent * 3
+    body_indent = indent * 2
+
+    arg_list = list(symbols_list) + [row_arr_param, col_arr_param]
     lines = [
-        f"def {func_name}({', '.join(symbols_list)}):",
-        # Allocate as a 2-D ndarray so ``FormJac`` sees a
-        # matrix-valued derivative (``fy[3].ndim == 2``). The
-        # downstream JacBlock path stores it as a ``csc_array`` for
-        # sparsity analysis; at runtime the ``J_`` wrapper flattens
-        # the block's contribution to the global ``_data_`` array.
-        f"{indent}data = np.empty(({n_outer}, {n_diff}))",
-        f"{indent}for {outer_name} in range({n_outer}):",
-        f"{indent * 2}for {diff_name} in range({n_diff}):",
+        f"def {func_name}({', '.join(arg_list)}):",
+        f"{indent}data = np.empty({nnz})",
+        f"{indent}for _sz_idx in range({nnz}):",
+        f"{body_indent}{outer_name} = {row_arr_param}[_sz_idx]",
+        f"{body_indent}{diff_name} = {col_arr_param}[_sz_idx]",
     ]
     for stmt in state['prelude']:
         lines.append(f"{body_indent}{stmt}")
-    lines.append(
-        f"{body_indent}data[{outer_name}, {diff_name}] = {body_expr}"
-    )
+    lines.append(f"{body_indent}data[_sz_idx] = {body_expr}")
     lines.append(f"{indent}return data")
     return '\n'.join(lines) + '\n'
 

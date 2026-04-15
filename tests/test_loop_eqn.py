@@ -1343,14 +1343,20 @@ def test_loop_eqn_pow_body_newton_j3_jit_module():
         module_path = _os.path.join(d, 'phase_j3_pow', 'num_func.py')
         with open(module_path) as f:
             src = f.read()
-        # The kernel source should be emitted as a @njit def.
+        # The sparse kernel is emitted as a @njit def with a flat
+        # ``for _sz_idx in range(nnz):`` loop. nnz = 3 because the
+        # pow body's Jacobian is the 3-element diagonal — the
+        # kernel iterates exactly 3 positions, NOT 9 (dense).
         assert '_sz_loop_jac_kernel_0' in src
+        assert 'np.empty(3)' in src
+        assert 'for _sz_idx in range(3):' in src
         # Row / col arrays loaded from setting at module level.
         assert '_sz_loop_jac_row_0 = setting["_sz_loop_jac_row_0"]' in src
         assert '_sz_loop_jac_col_0 = setting["_sz_loop_jac_col_0"]' in src
-        # The J_ wrapper should do the kernel call + fancy-index.
-        assert '_sz_loop_jac_kernel_0(' in src
-        assert '_sz_loop_jac_block_0' in src
+        # The J_ wrapper writes directly to data[addr_slice] with
+        # no fancy indexing — the kernel's output is already in
+        # csc column-major order matching Value0.tocoo().
+        assert '_sz_loop_jac_kernel_0(Vm, _sz_loop_jac_row_0, _sz_loop_jac_col_0)' in src
 
         _sys.path.insert(0, d)
         try:
