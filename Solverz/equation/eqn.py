@@ -511,6 +511,12 @@ def _rewrite_solverz_body(body, model):
         return sol_obj
 
     def walk(expr):
+        # Solverz ``IdxVar`` / ``IdxPara`` may hand us a plain Python
+        # ``int`` / ``float`` as the index (e.g. ``m.Ts_slack[0]``).
+        # Coerce those to sympy scalars up-front so the rest of the
+        # walker can uniformly assume sympy ``Basic`` objects.
+        if isinstance(expr, (int, float)):
+            return sp.sympify(expr)
         if isinstance(expr, (IdxVar, IdxPara)):
             name = expr.name0
             _resolve(name)  # populate var_map and validate
