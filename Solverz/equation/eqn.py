@@ -208,13 +208,32 @@ class LoopEqnDiff(EqnDiff):
         # appear for scalar Params. ``atoms(sp.IndexedBase)`` misses
         # bases buried inside ``Sum`` bodies — walk via ``Indexed``
         # nodes instead to reach them.
+        #
+        # Sparse 2-D Params are excluded from the kernel signature:
+        # their contents flow in through module-level CSR arrays
+        # (``_sz_csr_<name>_{data,indices,indptr}``) that the
+        # generated kernel references directly, and numba cannot
+        # type ``csc_array`` as a function argument. Walker Sums
+        # and point-lookup helpers both pull from the CSR arrays,
+        # so no kernel arg is needed for the sparse Param itself.
         sym_names: set = set()
         for idx_node in canonical.atoms(sp.Indexed):
             base_name = idx_node.base.name
-            if base_name in var_map:
-                sym_names.add(base_name)
+            if base_name not in var_map:
+                continue
+            sol_obj = var_map[base_name]
+            if (isinstance(sol_obj, ParamBase)
+                    and getattr(sol_obj, 'sparse', False)
+                    and sol_obj.dim == 2):
+                continue
+            sym_names.add(base_name)
         for s in canonical.free_symbols:
             if isinstance(s, (iVar, Para)) and s.name in var_map:
+                sol_obj = var_map[s.name]
+                if (isinstance(sol_obj, ParamBase)
+                        and getattr(sol_obj, 'sparse', False)
+                        and sol_obj.dim == 2):
+                    continue
                 sym_names.add(s.name)
         sorted_symbols = sorted(sym_names)
 
@@ -239,14 +258,42 @@ class LoopEqnDiff(EqnDiff):
         self._nnz = int(sparsity_row.size)
 
         kernel_name = f'_sz_loop_jac_kernel_{sanitized}'
-        self.kernel_source = build_loop_jac_kernel_source(
+        self.kernel_source, self.helper_sources = build_loop_jac_kernel_source(
             kernel_name, canonical, outer_idx, diff_idx,
             self._nnz, sorted_symbols, var_map,
         )
 
         # exec the source into a namespace with the numpy + SolCF
-        # helpers our body translator emits.
+        # helpers our body translator emits. When the canonical
+        # expression references sparse 2-D Params through a walker
+        # pattern (direct or indirect outer), the translator emits
+        # ``_sz_csr_<walker>_{data,indices,indptr}`` lookups that
+        # must resolve at exec time — inject the CSR arrays for any
+        # referenced sparse 2-D Param. Point-lookup helpers (plain
+        # Python defs from ``build_loop_jac_kernel_source``) are
+        # exec'd into the same namespace so the kernel body, which
+        # may call ``_sz_csr_<walker>_point(row, col)`` for
+        # bare-indexed sparse Param accesses outside Sums, resolves
+        # them cleanly.
         ns: Dict[str, object] = {'np': np, 'SolCF': _SolCF}
+        for nm, sol_obj in var_map.items():
+            if not isinstance(sol_obj, ParamBase):
+                continue
+            if not (getattr(sol_obj, 'sparse', False)
+                    and sol_obj.dim == 2):
+                continue
+            csc_val = sol_obj.v
+            if not hasattr(csc_val, 'tocsr'):
+                continue
+            csr = csc_val.tocsr()
+            ns[f'_sz_csr_{nm}_data'] = np.ascontiguousarray(
+                csr.data, dtype=float)
+            ns[f'_sz_csr_{nm}_indices'] = np.ascontiguousarray(
+                csr.indices, dtype=np.int64)
+            ns[f'_sz_csr_{nm}_indptr'] = np.ascontiguousarray(
+                csr.indptr, dtype=np.int64)
+        for helper_src in self.helper_sources:
+            exec(helper_src, ns)
         exec(self.kernel_source, ns)
         raw_kernel_func = ns[kernel_name]
         raw_kernel_func._kernel_source = self.kernel_source  # debug
@@ -768,6 +815,71 @@ class LoopEqn(Eqn):
 
         self.derivatives: Dict[str, EqnDiff] = dict()
 
+    def _classify_walker_row(
+        self, walker_name: str, row_idx: sp.Expr, outer_name: str
+    ) -> sp.Expr:
+        """Validate the row-index expression of a sparse walker and
+        return a canonical ``row_expr`` to store on the walker info.
+
+        Two forms are accepted:
+
+        1. **Direct outer** — ``row_idx`` is the LoopEqn's outer
+           ``sp.Idx`` (``row_expr == row_idx``). Row of the CSR walk is
+           the loop counter itself.
+        2. **Indirect outer** — ``row_idx`` is an ``Indexed`` whose
+           base is a 1-D integer ``Param`` and whose sole index is the
+           LoopEqn outer index. Row is looked up as ``P[outer]`` at
+           the start of each outer iteration.
+
+        Any other shape raises ``NotImplementedError``.
+        """
+        from Solverz.equation.param import ParamBase
+
+        if isinstance(row_idx, sp.Idx) and str(row_idx) == outer_name:
+            return row_idx
+
+        if isinstance(row_idx, sp.Indexed):
+            base = row_idx.base.name
+            if base not in self.var_map:
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: sparse walker row index "
+                    f"{row_idx} references unknown Param {base!r} — "
+                    f"indirect outer walkers need the row-map Param "
+                    f"to be registered in the model."
+                )
+            map_param = self.var_map[base]
+            if not isinstance(map_param, ParamBase):
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: sparse walker row index "
+                    f"{row_idx} must be indexed through a ``Param``, "
+                    f"got {type(map_param).__name__}."
+                )
+            if map_param.dim != 1:
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: sparse walker row-map "
+                    f"Param {base!r} must have dim=1, got dim={map_param.dim}."
+                )
+            if len(row_idx.indices) != 1:
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: sparse walker row-map "
+                    f"access must be {base}[outer_idx]; got {row_idx}."
+                )
+            if (not isinstance(row_idx.indices[0], sp.Idx)
+                    or str(row_idx.indices[0]) != outer_name):
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: sparse walker row-map "
+                    f"{base!r} must be indexed exactly by the outer "
+                    f"index {outer_name!r}; got {row_idx}."
+                )
+            return row_idx
+
+        raise NotImplementedError(
+            f"LoopEqn {self.name!r}: sparse 2-D Param {walker_name!r} "
+            f"row index must be either the outer index {outer_name!r} "
+            f"or ``<int_param>[{outer_name}]`` for indirect-outer "
+            f"walkers; got {row_idx}."
+        )
+
     def _collect_sparse_walkers(self) -> Dict[str, Dict[str, np.ndarray]]:
         """Scan the LoopEqn body for sparse 2-D ``Param``s in
         ``M[outer_index, dummy]`` positions inside a ``Sum``, and
@@ -810,13 +922,21 @@ class LoopEqn(Eqn):
         walkers: Dict[str, Dict[str, np.ndarray]] = {}
 
         # First pass: collect walker assignments from each Sum body.
+        # A walker access is either
+        #   1. direct:   M[outer_index, dummy]     — row == outer
+        #   2. indirect: M[P[outer_index], dummy]  — row == P[outer]
+        # where P is a 1-D int Param mapping the LoopEqn's outer
+        # position onto a "real" row of M. Case 2 shows up when the
+        # LoopEqn only iterates a subset of buses (e.g. PV+PQ in a
+        # polar power flow) but still needs to walk the full
+        # connectivity of the admittance matrix M.
         seen_in_sum: Dict[str, Dict] = {}
         for sum_node in self.body.atoms(sp.Sum):
             dummy, lo, hi = sum_node.args[1]
             dummy_name = dummy.name
             inner = sum_node.args[0]
 
-            sum_sparse_refs = set()
+            sum_sparse_refs: Dict[str, sp.Expr] = {}
             for idx_node in inner.atoms(sp.Indexed):
                 base = idx_node.base.name
                 if base not in sparse_names:
@@ -828,18 +948,19 @@ class LoopEqn(Eqn):
                         f"{base!r} accessed with {len(indices)} "
                         f"indices — expected exactly 2"
                     )
-                if (str(indices[0]) != outer_name
-                        or str(indices[1]) != dummy_name):
+                row_idx = indices[0]
+                col_idx = indices[1]
+                if str(col_idx) != dummy_name:
                     raise NotImplementedError(
                         f"LoopEqn {self.name!r}: sparse 2-D Param "
-                        f"{base!r} in the body of ``Sum`` over "
-                        f"{dummy_name!r} must be accessed as "
-                        f"[{outer_name}, {dummy_name}] to qualify as "
-                        f"a CSR walker, got {idx_node}. Non-walker "
-                        f"access to sparse 2-D Params is not yet "
-                        f"supported."
+                        f"{base!r} column index inside the ``Sum`` over "
+                        f"{dummy_name!r} must be the sum dummy itself, "
+                        f"got {col_idx}. Non-walker access to sparse "
+                        f"2-D Params is not yet supported."
                     )
-                sum_sparse_refs.add(base)
+                row_expr = self._classify_walker_row(
+                    base, row_idx, outer_name)
+                sum_sparse_refs[base] = row_expr
 
             if not sum_sparse_refs:
                 continue
@@ -851,7 +972,8 @@ class LoopEqn(Eqn):
                     f"(\"Case B\") is not yet supported. Split into "
                     f"separate ``Sum``s, one per sparse walker."
                 )
-            (walker_name,) = sum_sparse_refs
+            walker_name = next(iter(sum_sparse_refs))
+            row_expr = sum_sparse_refs[walker_name]
             param_obj = self.var_map[walker_name]
             n_cols = param_obj.v.shape[1]
             if int(lo) != 0 or int(hi) != n_cols - 1:
@@ -862,7 +984,10 @@ class LoopEqn(Eqn):
                     f"walker {walker_name!r}. Partial-column sparse "
                     f"walkers are not yet supported."
                 )
-            seen_in_sum[walker_name] = {'param': param_obj}
+            seen_in_sum[walker_name] = {
+                'param': param_obj,
+                'row_expr': row_expr,
+            }
 
         # Second pass: every sparse 2-D Param referenced at all in the
         # body must appear only through the Sum walker pattern. Catch
@@ -897,6 +1022,7 @@ class LoopEqn(Eqn):
                 'data': np.ascontiguousarray(csr.data, dtype=float),
                 'indices': np.ascontiguousarray(csr.indices, dtype=np.int64),
                 'indptr': np.ascontiguousarray(csr.indptr, dtype=np.int64),
+                'row_expr': info['row_expr'],
             }
         return walkers
 
@@ -1326,16 +1452,19 @@ def _translate_loop_body(expr) -> str:
 
 
 def _find_sum_sparse_walker(sum_node, var_map, outer_name):
-    """Return ``(walker_name, walker_param)`` if the ``Sum`` body has
-    exactly one sparse 2-D ``Param`` accessed as
-    ``[outer_name, dummy]``; ``None`` otherwise.
+    """Return ``(walker_name, walker_param, row_expr)`` if the ``Sum``
+    body has exactly one sparse 2-D ``Param`` whose column index is
+    the sum dummy and whose row index is either the outer index or
+    ``P[outer]`` for some 1-D int ``Param`` ``P``; ``None`` otherwise.
 
     Mirrors the logic in :meth:`LoopEqn._collect_sparse_walkers` but
     operates on a single ``Sum`` node for the per-Sum per-call check
     the translator needs. The stricter invariants (no non-walker
-    sparse access anywhere in the body, full-column range) are
-    enforced at ``LoopEqn.__init__`` time, so this helper can trust
-    that any sparse Param it finds is already a valid walker.
+    sparse access anywhere in the body, full-column range, 1-D int
+    Param for indirect row map) are enforced at ``LoopEqn.__init__``
+    time, so this helper can trust that any sparse Param it finds is
+    already a valid walker and just needs to recover the ``row_expr``
+    so the translator can emit the right CSR row lookup.
     """
     from Solverz.equation.param import ParamBase
 
@@ -1351,16 +1480,26 @@ def _find_sum_sparse_walker(sum_node, var_map, outer_name):
         if not (getattr(obj, 'sparse', False) and obj.dim == 2):
             continue
         indices = idx_node.indices
-        if (len(indices) == 2
-                and str(indices[0]) == outer_name
-                and str(indices[1]) == dummy_name):
-            if found is None:
-                found = (base, obj)
-            elif found[0] != base:
-                # __init__ already rejects multi-sparse Sums, but be
-                # defensive here so an unchecked call site gets a
-                # clear error rather than silently picking one.
-                return None
+        if len(indices) != 2 or str(indices[1]) != dummy_name:
+            continue
+        row_idx = indices[0]
+        # Direct outer: row is the outer index itself.
+        if isinstance(row_idx, sp.Idx) and str(row_idx) == outer_name:
+            row_expr = row_idx
+        elif (isinstance(row_idx, sp.Indexed)
+              and len(row_idx.indices) == 1
+              and isinstance(row_idx.indices[0], sp.Idx)
+              and str(row_idx.indices[0]) == outer_name):
+            # Indirect outer: row = <map_param>[outer]. Validation
+            # that map_param is a 1-D int Param already happened in
+            # _collect_sparse_walkers.
+            row_expr = row_idx
+        else:
+            continue
+        if found is None:
+            found = (base, obj, row_expr)
+        elif found[0] != base:
+            return None
     return found
 
 
@@ -1459,10 +1598,11 @@ def _translate_loop_body_njit(expr, state) -> str:
             return acc_name
 
         # Sparse-walker path.
-        walker_name, _walker_param = walker
+        walker_name, _walker_param, row_expr = walker
         kk_name = f"_sz_kk_{acc_idx}"
+        row_name = f"_sz_row_{acc_idx}"
 
-        # Push the sparse walker context so inner ``M[outer, dummy]``
+        # Push the sparse walker context so inner ``M[row_expr, dummy]``
         # references rewrite to ``_sz_csr_<M>_data[kk]``. Restore on
         # exit even though there's no chance of exception here — the
         # next sibling Sum must see a clean context.
@@ -1476,11 +1616,27 @@ def _translate_loop_body_njit(expr, state) -> str:
         finally:
             state['sparse_walker_ctx'] = prev_ctx
 
-        state['prelude'].append(f"{acc_name} = 0.0")
+        # Decide whether the CSR row is the outer index directly
+        # (``row_expr`` is a bare ``sp.Idx`` matching the outer loop
+        # variable) or an indirect lookup via a 1-D int ``Param``
+        # (``row_expr`` is an ``Indexed`` ``map_param[outer_idx]``).
+        # In the indirect case we materialise the row to a local
+        # variable once and then reuse it for both ``indptr`` bounds
+        # — numba's type inference keeps this as an int64 scalar.
+        if isinstance(row_expr, sp.Idx):
+            row_code = row_expr.name
+            state['prelude'].append(f"{acc_name} = 0.0")
+        else:
+            row_code = row_name
+            map_name = row_expr.base.name
+            state['prelude'].append(
+                f"{row_name} = {map_name}[{state['outer_name']}]"
+            )
+            state['prelude'].append(f"{acc_name} = 0.0")
         state['prelude'].append(
             f"for {kk_name} in range("
-            f"_sz_csr_{walker_name}_indptr[{state['outer_name']}], "
-            f"_sz_csr_{walker_name}_indptr[{state['outer_name']} + 1]"
+            f"_sz_csr_{walker_name}_indptr[{row_code}], "
+            f"_sz_csr_{walker_name}_indptr[{row_code} + 1]"
             f"):"
         )
         state['prelude'].append(
@@ -1519,6 +1675,28 @@ def _translate_loop_body_njit(expr, state) -> str:
             # correctness (must be [outer, dummy]) is guaranteed by
             # ``_collect_sparse_walkers`` at __init__ time.
             return f"_sz_csr_{base_name}_data[{ctx['kk_var']}]"
+        # Point access to a sparse 2-D Param *outside* any walker.
+        # Common when the canonical Jacobian collapses a ``δ(j, k)``
+        # inside ``Sum(..., j)`` into the point ``M[row, k]``. Numba
+        # cannot type ``csc_array`` function arguments, so rewrite
+        # this to a module-level ``@njit`` scalar-lookup helper and
+        # record the walker name so the caller (LoopEqnDiff.__init__
+        # or the module_printer) emits the helper definition.
+        var_map = state.get('var_map')
+        if (var_map is not None and len(expr.indices) == 2):
+            from Solverz.equation.param import ParamBase
+            sol_obj = var_map.get(base_name)
+            if (isinstance(sol_obj, ParamBase)
+                    and getattr(sol_obj, 'sparse', False)
+                    and sol_obj.dim == 2):
+                row_code = _translate_loop_body_njit(
+                    expr.indices[0], state)
+                col_code = _translate_loop_body_njit(
+                    expr.indices[1], state)
+                state.setdefault('sparse_point_helpers', set()).add(
+                    base_name)
+                return (f"_sz_csr_{base_name}_point("
+                        f"{row_code}, {col_code})")
         index_strs = [_translate_loop_body_njit(idx, state)
                       for idx in expr.indices]
         return f"{base_name}[{', '.join(index_strs)}]"

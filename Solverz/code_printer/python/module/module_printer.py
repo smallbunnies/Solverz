@@ -218,27 +218,13 @@ def print_J(eqs_type: str,
                     iVar('data', internal_use=True)[mb['addr_slice']],
                     FunctionCall(mb['fn_name'], call_args)))
             elif mb.get('mode') == 'loop_eqn':
-                # LoopEqn-native path (Phase J4). The @njit kernel
-                # is SPARSE — it takes the Var/Param args plus the
-                # block's row / col index arrays and returns a
-                # 1-D ``(nnz,)`` ndarray in the same column-major
-                # order as ``(row_arr, col_arr)``. The J_ wrapper
-                # passes the module-level row/col constants
-                # (loaded from ``setting[...]`` via
-                # ``mut_mat_mappings``) as the last two args and
-                # writes the result directly to ``data[addr_slice]``
-                # with no fancy indexing.
-                kernel_args = [symbols(nm, real=True)
-                               for nm in mb['kernel_symbols']]
-                row_sym = symbols(mb['row_key'], real=True)
-                col_sym = symbols(mb['col_key'], real=True)
-                body.append(Assignment(
-                    iVar('data', internal_use=True)[mb['addr_slice']],
-                    FunctionCall(
-                        mb['kernel_fn_name'],
-                        kernel_args + [row_sym, col_sym],
-                    ),
-                ))
+                # LoopEqn-native path (Phase J4). Kernel calls are
+                # now emitted INSIDE ``inner_J`` itself by
+                # ``print_inner_J`` so the whole assembly lives in
+                # a single ``@njit`` compilation unit. Nothing to
+                # do in the ``J_`` wrapper — the returned ``data``
+                # from ``inner_J`` already holds the block values.
+                pass
             else:
                 # Fallback: scipy sparse fancy indexing
                 body.append(Assignment(
@@ -295,6 +281,18 @@ def print_inner_J(var_addr: Address,
                     ed = jb._loop_eqn_diff
                     block_idx = len(mutable_matrix_blocks)
                     kernel_fn_name = f'_sz_loop_jac_kernel_{block_idx}'
+                    # Emit any scalar CSR point-lookup helpers the
+                    # kernel body references, each as its own
+                    # ``mut_mat_block_funcs`` entry so module_generator
+                    # prepends its own ``@njit(cache=True)``. Dedup
+                    # helpers by name across LoopEqnDiff instances —
+                    # the helper body is value-independent (keyed on
+                    # Param name and module-global CSR arrays), so
+                    # emitting it once per sparse Param is enough.
+                    for helper_src in getattr(ed, 'helper_sources', []):
+                        if helper_src in mut_mat_block_funcs:
+                            continue
+                        mut_mat_block_funcs.append(helper_src)
                     # Rename the kernel function (it was
                     # generated with the sanitized EqnDiff name at
                     # LoopEqnDiff construction time — that name
@@ -398,6 +396,30 @@ def print_inner_J(var_addr: Address,
                 code_sub_inner_J_blocks.append(pycode(fd1, fully_qualified_modules=False))
                 count += 1
             addr_by_ele_0 += jb.SpEleSize
+
+    # Move ``loop_eqn`` block kernel calls INSIDE ``inner_J`` so the
+    # whole assembly happens inside a single ``@njit`` compilation
+    # unit. Each kernel is itself ``@njit``-decorated, so the call
+    # is inlined by numba at JIT time — no Python/numba boundary
+    # crossing per kernel call at runtime. Row / col arrays are
+    # module-level numpy globals (``_sz_loop_jac_row_<N>`` /
+    # ``_sz_loop_jac_col_<N>``), which numba accepts via global
+    # capture when the function is compiled.
+    for mb in mutable_matrix_blocks:
+        if mb.get('mode') != 'loop_eqn':
+            continue
+        kernel_args = [symbols(nm, real=True)
+                       for nm in mb['kernel_symbols']]
+        row_sym = symbols(mb['row_key'], real=True)
+        col_sym = symbols(mb['col_key'], real=True)
+        body.append(Assignment(
+            iVar('_data_', internal_use=True)[mb['addr_slice']],
+            FunctionCall(
+                mb['kernel_fn_name'],
+                kernel_args + [row_sym, col_sym],
+            ),
+        ))
+
     temp = iVar('_data_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)

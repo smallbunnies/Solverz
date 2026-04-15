@@ -36,7 +36,7 @@ module.
 """
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import sympy as sp
@@ -644,6 +644,43 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
     outer_name = _name_of(outer_idx)
     diff_name = _name_of(diff_idx)
 
+    def _classify_axis(expr):
+        """Return ``('outer', None)`` if ``expr`` is the outer Idx,
+        ``('diff', None)`` if ``expr`` is the diff Idx, and
+        ``('indirect_outer', map_name)`` if ``expr`` is
+        ``Indexed(map_param, outer_idx)`` where ``map_param`` is a
+        1-D int ``Param``. Otherwise ``(None, None)`` — the axis is
+        not structurally classifiable and the term will fall through
+        to the dense fallback.
+        """
+        if isinstance(expr, sp.Idx):
+            if _name_of(expr) == outer_name:
+                return 'outer', None
+            if _name_of(expr) == diff_name:
+                return 'diff', None
+            return None, None
+        if isinstance(expr, sp.Indexed):
+            if len(expr.indices) != 1:
+                return None, None
+            inner = expr.indices[0]
+            if not isinstance(inner, sp.Idx) or _name_of(inner) != outer_name:
+                return None, None
+            map_name = expr.base.name
+            map_obj = var_map.get(map_name)
+            if not isinstance(map_obj, ParamBase):
+                return None, None
+            if getattr(map_obj, 'dim', None) != 1:
+                return None, None
+            return 'indirect_outer', map_name
+        return None, None
+
+    def _map_values(map_name):
+        """Return the materialised 1-D int array for an indirect
+        outer row map. Assumes the caller has already validated
+        dim=1 and ParamBase via ``_classify_axis``.
+        """
+        return np.asarray(var_map[map_name].v, dtype=np.int64).reshape(-1)
+
     # Each classified term contributes one or more (row, col)
     # pattern fragments; we accumulate them here and union at
     # the end.
@@ -658,18 +695,39 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
     for term in terms:
         factors = list(term.args) if isinstance(term, sp.Mul) else [term]
 
-        # Look for a top-level KroneckerDelta(outer, diff) factor.
+        # Look for a top-level KroneckerDelta factor whose two
+        # arguments classify as {outer, diff} or
+        # {indirect_outer, diff}. The direct ``δ(outer, diff)``
+        # form yields a plain diagonal; the indirect
+        # ``δ(row_map[outer], diff)`` form yields entries at
+        # ``(i, row_map.v[i])`` — exactly the positions where
+        # ``_sz_loop_dk == row_map.v[i]``.
         has_diag_kron = False
+        has_indirect_diag_kron = False
+        indirect_diag_map: str = ''
         for f in factors:
             if isinstance(f, KroneckerDelta):
-                names = {_name_of(a) for a in f.args}
-                if names == {outer_name, diff_name}:
+                a0 = f.args[0]
+                a1 = f.args[1]
+                kind0, map0 = _classify_axis(a0)
+                kind1, map1 = _classify_axis(a1)
+                kinds = {kind0, kind1}
+                if kinds == {'outer', 'diff'}:
                     has_diag_kron = True
                     break
+                if kinds == {'indirect_outer', 'diff'}:
+                    has_indirect_diag_kron = True
+                    indirect_diag_map = map0 if kind0 == 'indirect_outer' else map1
+                    break
 
-        # Look for Indexed(Param, outer, diff) among ALL the
-        # term's Indexed atoms (may be inside nested sub-expressions).
-        param_hits = []  # list of (row_arr, col_arr) from Param nnz
+        # Look for ``Indexed(Param, axis0, axis1)`` where
+        # ``{axis0_kind, axis1_kind}`` is one of
+        # ``{outer, diff}`` or ``{indirect_outer, diff}``. The
+        # indirect-outer case uses the row-map to select a SUBSET
+        # of the Param's rows and emits entries at
+        # ``(i, col)`` for every col where
+        # ``Param[row_map.v[i], col]`` is structurally nonzero.
+        param_hits = []
         for idx_node in term.atoms(sp.Indexed):
             base_name = idx_node.base.name
             sol = var_map.get(base_name)
@@ -677,38 +735,91 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
                 continue
             if sol.dim != 2 or len(idx_node.indices) != 2:
                 continue
-            ix_names = [_name_of(ix) for ix in idx_node.indices]
-            idx_set = set(ix_names)
-            if idx_set != {outer_name, diff_name}:
-                continue  # not a [outer, diff] access — skip
-            # Extract the stored matrix's nnz pattern
-            val = sol.v
-            if hasattr(val, 'tocoo'):
-                coo = val.tocoo()
-                r = np.asarray(coo.row, dtype=np.int64)
-                c = np.asarray(coo.col, dtype=np.int64)
+            ax0 = idx_node.indices[0]
+            ax1 = idx_node.indices[1]
+            kind0, map0 = _classify_axis(ax0)
+            kind1, map1 = _classify_axis(ax1)
+            if kind0 is None or kind1 is None:
+                continue
+            kinds = {kind0, kind1}
+            if kinds == {'outer', 'diff'}:
+                val = sol.v
+                if hasattr(val, 'tocoo'):
+                    coo = val.tocoo()
+                    r = np.asarray(coo.row, dtype=np.int64)
+                    c = np.asarray(coo.col, dtype=np.int64)
+                else:
+                    arr = np.asarray(val)
+                    r, c = np.nonzero(np.ones_like(arr, dtype=bool))
+                    r = r.astype(np.int64)
+                    c = c.astype(np.int64)
+                # ``[diff, outer]`` transposes row/col.
+                if kind0 == 'diff':
+                    r, c = c, r
+                param_hits.append((r, c))
+            elif kinds == {'indirect_outer', 'diff'}:
+                # Indirect outer: row is ``map_name[outer]`` for
+                # some known row map. Look up the Param's stored
+                # columns for each ``row = map.v[i]`` and emit
+                # ``(i, col)``.
+                if kind0 == 'indirect_outer':
+                    map_name = map0
+                    swapped = False
+                else:
+                    map_name = map1
+                    swapped = True
+                row_map = _map_values(map_name)
+                val = sol.v
+                if hasattr(val, 'tocsr'):
+                    csr = val.tocsr()
+                    sub_rows_i = []
+                    sub_cols = []
+                    for i_outer, real_row in enumerate(row_map):
+                        start = int(csr.indptr[real_row])
+                        stop = int(csr.indptr[real_row + 1])
+                        cols_in_row = csr.indices[start:stop]
+                        for cc in cols_in_row:
+                            sub_rows_i.append(i_outer)
+                            sub_cols.append(int(cc))
+                    r = np.array(sub_rows_i, dtype=np.int64)
+                    c = np.array(sub_cols, dtype=np.int64)
+                else:
+                    # Dense 2-D Param: every column of each selected
+                    # row is a candidate structural nonzero. This is
+                    # still better than the full ``n_outer * n_diff``
+                    # dense fallback because we only include the
+                    # subset rows the outer index actually visits.
+                    arr = np.asarray(val)
+                    n_cols_v = arr.shape[1]
+                    rows_i = np.repeat(
+                        np.arange(len(row_map), dtype=np.int64), n_cols_v)
+                    cols_i = np.tile(
+                        np.arange(n_cols_v, dtype=np.int64), len(row_map))
+                    r, c = rows_i, cols_i
+                if swapped:
+                    r, c = c, r
+                param_hits.append((r, c))
             else:
-                # Dense 2-D Param: every position is structurally nonzero
-                arr = np.asarray(val)
-                r, c = np.nonzero(np.ones_like(arr, dtype=bool))
-                r = r.astype(np.int64)
-                c = c.astype(np.int64)
-            # If the Param is indexed as [diff_name, outer_name]
-            # (transposed), swap row/col.
-            if ix_names[0] == diff_name:
-                r, c = c, r
-            param_hits.append((r, c))
+                continue
 
         if has_diag_kron:
             n = min(n_outer, n_diff)
             diag = np.arange(n, dtype=np.int64)
             all_positions.update(zip(diag.tolist(), diag.tolist()))
 
+        if has_indirect_diag_kron:
+            row_map = _map_values(indirect_diag_map)
+            for i_outer, real_col in enumerate(row_map):
+                if 0 <= int(real_col) < n_diff:
+                    all_positions.add((int(i_outer), int(real_col)))
+
         if param_hits:
             for r, c in param_hits:
                 all_positions.update(zip(r.tolist(), c.tolist()))
 
-        if not has_diag_kron and not param_hits:
+        if (not has_diag_kron
+                and not has_indirect_diag_kron
+                and not param_hits):
             # Term has no structural indicator — fall back to
             # the full dense block.
             has_dense_fallback = True
@@ -825,11 +936,31 @@ def build_loop_jac_kernel_source(func_name: str,
         'var_map': var_map,
         'outer_name': outer_name,
         'sparse_walker_ctx': None,
+        'sparse_point_helpers': set(),
     }
     body_expr = _translate_loop_body_njit(canonical, state)
 
     indent = '    '
     body_indent = indent * 2
+
+    # Collect scalar CSR point-lookup helper sources for every
+    # sparse 2-D Param that showed up in the canonical expression
+    # as a bare ``M[row, col]`` outside a walker. Returning them
+    # *separately* from the kernel source lets downstream callers
+    # (inline ``LoopEqnDiff.__init__`` / module printer) decorate
+    # each function independently (``@njit(cache=True)`` per
+    # ``mut_mat_block_funcs`` entry).
+    helper_sources: List[str] = []
+    for walker_name in sorted(state.get('sparse_point_helpers', set())):
+        helper_sources.append(
+            f"def _sz_csr_{walker_name}_point(row, col):\n"
+            f"{indent}for _sz_pk in range("
+            f"_sz_csr_{walker_name}_indptr[row], "
+            f"_sz_csr_{walker_name}_indptr[row + 1]):\n"
+            f"{indent * 2}if _sz_csr_{walker_name}_indices[_sz_pk] == col:\n"
+            f"{indent * 3}return _sz_csr_{walker_name}_data[_sz_pk]\n"
+            f"{indent}return 0.0\n"
+        )
 
     arg_list = list(symbols_list) + [row_arr_param, col_arr_param]
     lines = [
@@ -843,7 +974,9 @@ def build_loop_jac_kernel_source(func_name: str,
         lines.append(f"{body_indent}{stmt}")
     lines.append(f"{body_indent}data[_sz_idx] = {body_expr}")
     lines.append(f"{indent}return data")
-    return '\n'.join(lines) + '\n'
+    kernel_source = '\n'.join(lines) + '\n'
+
+    return kernel_source, helper_sources
 
 
 def _name_of(x) -> str:
