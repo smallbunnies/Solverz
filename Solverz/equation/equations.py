@@ -395,11 +395,31 @@ class Equations:
         return np.sum(np.array(list(self.esize.values())))
 
     def is_param_defined(self, param: str) -> bool:
+        """Return True iff ``param`` is referenced by any equation's
+        ``SYMBOLS`` set — i.e. the numerical code generator will
+        actually pass its value to some ``NUM_EQN`` call.
 
+        Auto-decomposition fields (``_data``, ``_indices``,
+        ``_indptr``, ``_shape0`` created by ``Model.create_instance``
+        for every sparse 2-D ``Param`` to feed ``Mat_Mul``'s
+        ``csc_matvec`` fast path) are ALSO recognised as defined
+        whenever the *base* Param is used — otherwise a LoopEqn
+        that walks the Param via its own CSR decomposition (and
+        doesn't reference the auto-decomposed flat arrays in any
+        ``Mat_Mul``) would trigger a spurious
+        "Parameter X_data not defined in equations!" warning, and
+        CI runs with ``filterwarnings = error`` would fail. These
+        fields are carried for the Mat_Mul fast path; they're
+        harmlessly unused by other consumers.
+        """
         if param in self.SYMBOLS:
             return True
-        else:
-            return False
+        for suffix in ('_data', '_indices', '_indptr', '_shape0'):
+            if param.endswith(suffix):
+                base = param[:-len(suffix)]
+                if base in self.SYMBOLS:
+                    return True
+        return False
 
     with warnings.catch_warnings():
         warnings.simplefilter("once")

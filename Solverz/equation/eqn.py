@@ -486,9 +486,27 @@ def _rewrite_solverz_body(body, model):
         # register it in ``var_map`` so it flows into ``SYMBOLS`` and
         # the generated function receives it as a positional arg.
         # Without this, the body would reference an undefined local.
+        #
+        # **Scalar Param handling**: Solverz's ``Param(name, 4182.0)``
+        # stores ``.v`` as a shape-(1,) ``numpy.ndarray`` (via
+        # ``Array(scalar_value, dim=1)``). If we emit a bare ``Cp``
+        # reference and the body is ``Cp / 1e6 * np.abs(min[i])``,
+        # the multiplication broadcasts to shape (1,), and then
+        # ``out[i] = <shape (1,) array>`` raises
+        # ``ValueError: setting an array element with a sequence``
+        # under numpy ≥ 1.25 / hard-error under 2.x. Detect
+        # length-1 Params at rewrite time and substitute with
+        # ``IndexedBase(name)[0]`` so the translator emits
+        # ``Cp[0]`` — a numpy scalar. Downstream arithmetic stays
+        # scalar and the assignment works.
         if isinstance(expr, (iVar, Para)):
             name = expr.name
-            _resolve(name)
+            sol_obj = _resolve(name)
+            if (isinstance(sol_obj, ParamBase)
+                    and sol_obj.v is not None):
+                v_arr = np.asarray(sol_obj.v)
+                if v_arr.ndim >= 1 and v_arr.size == 1:
+                    return sp.IndexedBase(name)[0]
             return expr
 
         if expr.is_Atom:
@@ -1288,9 +1306,18 @@ def _translate_loop_body(expr) -> str:
         return expr.name
     if isinstance(expr, sp.Symbol):
         return expr.name
-    if isinstance(expr, (sp.Integer, sp.Float, sp.Rational)):
+    if isinstance(expr, sp.Integer):
+        # Integer literals must stay int in the generated Python
+        # source — numpy 2.x rejects float scalars as array
+        # indices, and ``Cp[0]`` / ``indices[_sz_kk]`` show up in
+        # both the body (scalar Param element access) and the
+        # sparse-walker inner loop.
+        return str(int(expr))
+    if isinstance(expr, (sp.Float, sp.Rational)):
         return str(float(expr))
-    if isinstance(expr, (int, float)):
+    if isinstance(expr, int):
+        return str(expr)
+    if isinstance(expr, float):
         return str(expr)
     raise NotImplementedError(
         f"LoopEqn body translator does not yet handle "
@@ -1499,9 +1526,18 @@ def _translate_loop_body_njit(expr, state) -> str:
         return expr.name
     if isinstance(expr, sp.Symbol):
         return expr.name
-    if isinstance(expr, (sp.Integer, sp.Float, sp.Rational)):
+    if isinstance(expr, sp.Integer):
+        # Integer literals must stay int in the generated Python
+        # source — numpy 2.x rejects float scalars as array
+        # indices, and ``Cp[0]`` / ``indices[_sz_kk]`` show up in
+        # both the body (scalar Param element access) and the
+        # sparse-walker inner loop.
+        return str(int(expr))
+    if isinstance(expr, (sp.Float, sp.Rational)):
         return str(float(expr))
-    if isinstance(expr, (int, float)):
+    if isinstance(expr, int):
+        return str(expr)
+    if isinstance(expr, float):
         return str(expr)
     # Sympy / Solverz function nodes — trig, exp / log, abs, sign,
     # heaviside, arctan2, etc. Matches the numpy backends Solverz's

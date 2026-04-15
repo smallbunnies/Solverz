@@ -1122,7 +1122,14 @@ def test_loop_eqn_heat_power_balance_source_split_f_side():
     m.Tr = Var('Tr', Tr_init)
     m.Tsource = Param('Tsource', Tsource_v)
     m.Cp = Param('Cp', 4182.0)
-    m.source_idx = Param('source_idx', source_idx_v, dim=1)
+    # ``source_idx`` is an *integer index map* — the body uses it
+    # as the second-level index in ``m.phi[m.source_idx[i]]``.
+    # Must pass ``dtype=int`` so Solverz's ``Array`` keeps it as
+    # int64; otherwise Param defaults to float64 and the generated
+    # ``phi[source_idx[i]]`` access hits numpy 2.x's "only integers
+    # are valid indices" error.
+    m.source_idx = Param('source_idx', source_idx_v,
+                         dim=1, dtype=int)
 
     i = Idx('i', len(source_idx_v))
     body = (
@@ -1136,10 +1143,16 @@ def test_loop_eqn_heat_power_balance_source_split_f_side():
     assert set(eqn.var_map.keys()) == {
         'phi', 'min_f', 'Tr', 'Tsource', 'Cp', 'source_idx'}
 
-    # The generated source should emit Cp as a function arg and
-    # contain the indirect lookups + np.abs.
+    # The generated source should emit the indirect lookups + np.abs.
+    # ``Cp`` is a scalar Param stored as a shape-(1,) ndarray — the
+    # ``_rewrite_solverz_body`` walker rewrites bare scalar-Param
+    # references to ``IndexedBase(name)[0]`` so the generator emits
+    # ``Cp[0]`` (a numpy float scalar) instead of the broadcasting
+    # shape-(1,) array, avoiding ``out[i] = array_like`` errors under
+    # numpy ≥ 1.25.
     src = eqn.NUM_EQN._loopeqn_source
     assert 'def _loop_eqn_func(Cp,' in src or ', Cp,' in src
+    assert 'Cp[0]' in src  # scalar-Param fix
     assert 'phi[source_idx[i]]' in src
     assert 'min_f[source_idx[i]]' in src
     assert 'Tsource[source_idx[i]]' in src
@@ -1156,7 +1169,7 @@ def test_loop_eqn_heat_power_balance_source_split_f_side():
     arg_values = {
         'Cp': m.Cp.v, 'Tr': Tr_init, 'Tsource': Tsource_v,
         'min_f': min_init, 'phi': phi_init,
-        'source_idx': source_idx_v,
+        'source_idx': m.source_idx.v,  # use Param's stored int64 view
     }
     args = [arg_values[n] for n in arg_names]
     F = eqn.NUM_EQN(*args)
@@ -1201,7 +1214,10 @@ def test_loop_eqn_sum_with_sign_and_pow_f_side():
 
     src = eqn.NUM_EQN._loopeqn_source
     assert 'np.sign' in src
-    assert '** 2.0' in src
+    # Integer exponent emits as Python int (``2``), not float
+    # (``2.0``) — numpy 2.x fancy-indexing and some numba paths
+    # reject float literals in index / power positions.
+    assert '** 2' in src
 
     expected = (K_val * m_flow ** 2 * np.sign(m_flow) * pinloop_val).sum()
     arg_names = sorted(eqn.SYMBOLS.keys())  # ['K', 'm', 'pinloop']
