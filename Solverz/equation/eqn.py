@@ -235,7 +235,7 @@ def _rewrite_solverz_body(body, model):
         Maps each referenced ``name0`` → Solverz ``Var``/``Param``
         object pulled from ``model``.
     """
-    from Solverz.sym_algebra.symbols import IdxVar, IdxPara
+    from Solverz.sym_algebra.symbols import IdxVar, IdxPara, iVar, Para
     from Solverz.variable.ssymbol import Var
     from Solverz.equation.param import ParamBase
 
@@ -280,6 +280,18 @@ def _rewrite_solverz_body(body, model):
             else:
                 new_idx = walk(raw_idx)
             return sp.IndexedBase(name)[new_idx]
+
+        # Bare Solverz ``iVar`` / ``Para`` (non-indexed) — e.g. a
+        # scalar parameter like ``m.Cp`` referenced without
+        # ``[i]``. The underlying symbol is still a sympy ``Symbol``
+        # subclass, so we leave it in the tree as-is, but we MUST
+        # register it in ``var_map`` so it flows into ``SYMBOLS`` and
+        # the generated function receives it as a positional arg.
+        # Without this, the body would reference an undefined local.
+        if isinstance(expr, (iVar, Para)):
+            name = expr.name
+            _resolve(name)
+            return expr
 
         if expr.is_Atom:
             return expr

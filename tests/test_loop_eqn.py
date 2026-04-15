@@ -1084,6 +1084,85 @@ def test_loop_eqn_indirect_index_subset_loop():
                                atol=1e-12)
 
 
+def test_loop_eqn_heat_power_balance_source_split_f_side():
+    """Node-type-split port of the heat power balance source-node
+    branch (``heat_network.py:180-196``). For a source node ``N``
+    the equation is
+
+        phi[N] = Cp / 1e6 * |min[N]| * (Tsource[N] - Tr[N])
+
+    Demonstrates three primitives composing in one body:
+
+    - ``m.Cp`` as a bare (non-indexed) scalar ``Param`` — registered
+      in ``var_map`` by the walker without an index, flows into the
+      function signature as a normal arg. (Previously a blocker.)
+    - ``Abs(m.min[m.source_idx[i]])`` — Class C function dispatch
+      stacked on top of recursive indirect indexing.
+    - One LoopEqn over the source-node subset via
+      ``m.source_idx[i]``, mirroring how the real heat_network
+      refactor would split the 5-branch node-type case switch into
+      one LoopEqn per node type.
+
+    F-side only — Newton solve on a bilinear body
+    (``|min| * (Tsource - Tr)``) needs a J-side extension that's
+    still deferred (see issue #128).
+    """
+    from Solverz import LoopEqn
+
+    n_total = 5
+    source_idx_v = np.array([0, 2, 4], dtype=int)
+    phi_init = np.array([100., 200., 300., 400., 500.])
+    min_init = np.array([5.0, -3.0, 4.0, -7.0, 2.0])
+    Tsource_v = np.array([350., 355., 360., 365., 370.])
+    Tr_init = np.array([310., 315., 320., 325., 330.])
+
+    m = Model()
+    m.phi = Var('phi', phi_init)
+    m.min_f = Var('min_f', min_init)
+    m.Tr = Var('Tr', Tr_init)
+    m.Tsource = Param('Tsource', Tsource_v)
+    m.Cp = Param('Cp', 4182.0)
+    m.source_idx = Param('source_idx', source_idx_v, dim=1)
+
+    i = Idx('i', len(source_idx_v))
+    body = (
+        m.phi[m.source_idx[i]]
+        - m.Cp / 1e6 * Abs(m.min_f[m.source_idx[i]])
+        * (m.Tsource[m.source_idx[i]] - m.Tr[m.source_idx[i]])
+    )
+    eqn = LoopEqn('phi_source', outer_index=i, body=body, model=m)
+
+    # Every ingredient should have landed in var_map.
+    assert set(eqn.var_map.keys()) == {
+        'phi', 'min_f', 'Tr', 'Tsource', 'Cp', 'source_idx'}
+
+    # The generated source should emit Cp as a function arg and
+    # contain the indirect lookups + np.abs.
+    src = eqn.NUM_EQN._loopeqn_source
+    assert 'def _loop_eqn_func(Cp,' in src or ', Cp,' in src
+    assert 'phi[source_idx[i]]' in src
+    assert 'min_f[source_idx[i]]' in src
+    assert 'Tsource[source_idx[i]]' in src
+    assert 'Tr[source_idx[i]]' in src
+    assert 'np.abs' in src
+
+    # F-side check: hand-compute the 3-element residual.
+    expected = (
+        phi_init[source_idx_v]
+        - 4182e-6 * np.abs(min_init[source_idx_v])
+        * (Tsource_v[source_idx_v] - Tr_init[source_idx_v])
+    )
+    arg_names = sorted(eqn.SYMBOLS.keys())
+    arg_values = {
+        'Cp': m.Cp.v, 'Tr': Tr_init, 'Tsource': Tsource_v,
+        'min_f': min_init, 'phi': phi_init,
+        'source_idx': source_idx_v,
+    }
+    args = [arg_values[n] for n in arg_names]
+    F = eqn.NUM_EQN(*args)
+    np.testing.assert_allclose(F, expected, atol=1e-10)
+
+
 def test_loop_eqn_sum_with_sign_and_pow_f_side():
     """Mirror of the heat ``loop_pressure`` expression (heat_network.py
     lines 88-90): ``Sum(K[j] * m[j]**2 * Sign(m[j]) * pinloop[j])``.
