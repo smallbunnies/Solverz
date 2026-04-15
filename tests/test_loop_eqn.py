@@ -1212,6 +1212,73 @@ def test_loop_eqn_sum_with_sign_and_pow_f_side():
     np.testing.assert_allclose(F[0], expected, atol=1e-12)
 
 
+def test_loop_eqn_pow_body_newton_j3():
+    """Phase J3 end-to-end: a body whose Jacobian forces the
+    LoopEqnDiff fallback path, and Newton solves to the analytic
+    answer.
+
+    Body: ``Vm[i]**2 - rhs[i]``. Differentiating:
+
+        ∂F[i] / ∂Vm[k] = 2 * Vm[i] * δ(k, i)
+
+    which canonicalizes to ``2 * Vm[i] * KroneckerDelta(k, i)`` —
+    a ``(delta + 1-D Var factor)`` shape the Phase J2 classifier
+    does NOT recognise (Phase J2 handles DiagTermWithSum — the
+    inner must be a ``Sum``, not a bare ``Vm[i]``). So the diff
+    falls through to the dense LoopEqnDiff kernel built by
+    ``build_loop_jac_kernel_source``. The kernel emits a nested
+    ``for i: for k:`` with a ``(1.0 if i == k else 0.0)``
+    conditional from the ``KroneckerDelta → _translate_loop_body_njit``
+    branch added in Phase J3.0.
+
+    Verifies:
+    - At least one LoopEqnDiff fallback instance exists after
+      ``create_instance``.
+    - ``FormJac``'s LoopEqnDiff short-circuit picks up Value0
+      from the kernel correctly.
+    - Inline ``made_numerical`` + Newton converges to the
+      analytic ``Vm = sqrt(rhs)`` within ``atol=1e-8``.
+
+    Polar PF (``Sum(Vm[i]*Vm[j]*cos(Va[i]-Va[j]), j)``) is the
+    real target. This test uses a simpler scalar-power body only
+    to exercise the pipeline without dragging in gauge-freedom
+    issues from the 3-bus PF.
+    """
+    from Solverz import LoopEqn
+
+    n = 3
+    Vm_target = np.array([1.0, 2.0, 3.0])
+    rhs_value = Vm_target ** 2   # [1, 4, 9]
+
+    m = Model()
+    # Warm-start near but not at target
+    m.Vm = Var('Vm', np.array([0.8, 2.3, 2.7]))
+    m.rhs = Param('rhs', rhs_value)
+
+    i = Idx('i', n)
+    body = m.Vm[i] ** 2 - m.rhs[i]
+    m.eqn = LoopEqn('sq_eqn', outer_index=i, body=body, model=m)
+
+    spf, y0 = m.create_instance()
+
+    # At least one derivative should be LoopEqnDiff (Phase J2
+    # classifier can't express ``δ(k,i) * 2 * Vm[i]`` as a pure
+    # Solverz Mat_Mul/Diag/Para combination).
+    from Solverz.equation.eqn import LoopEqnDiff
+    loop_diffs = [d for d in m.eqn.derivatives.values()
+                  if isinstance(d, LoopEqnDiff)]
+    assert len(loop_diffs) == 1, (
+        f"Expected 1 LoopEqnDiff fallback, got {len(loop_diffs)}"
+    )
+    # Kernel source should contain the KroneckerDelta conditional.
+    src = loop_diffs[0].kernel_source
+    assert 'if i == _sz_loop_dk' in src or 'if _sz_loop_dk == i' in src
+
+    mdl = made_numerical(spf, y0, sparse=True)
+    sol = nr_method(mdl, y0)
+    np.testing.assert_allclose(sol.y['Vm'], Vm_target, atol=1e-8)
+
+
 def test_loop_eqn_polar_pf_trig_f_side():
     """F-side port of the EPS dyn=False polar power-flow pattern
     (``SolMuseum/ae/eps_network.py:57-75``). Each bus enforces

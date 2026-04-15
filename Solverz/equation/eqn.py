@@ -133,6 +133,174 @@ class EqnDiff(Eqn):
         self.v_type = ''
 
 
+class LoopEqnDiff(EqnDiff):
+    """:class:`EqnDiff` subclass for LoopEqn Jacobian blocks whose
+    canonical diff expression does NOT reduce to a pure Solverz
+    ``Mat_Mul`` / ``Diag`` / ``Para`` arithmetic (Phase J1 / J2
+    classifier fell through).
+
+    Represents the block via a **pre-generated Python kernel
+    function** that evaluates the full dense ``(n_outer, n_diff)``
+    Jacobian block at runtime via a nested double for-loop. The
+    kernel is built by
+    :func:`Solverz.equation.loop_jac.build_loop_jac_kernel_source`
+    and reuses the F-side
+    :func:`_translate_loop_body_njit` translator for the entry
+    expression (so ``KroneckerDelta`` lowers to a Python
+    conditional, inner ``Sum``s become accumulator for-loops,
+    etc.).
+
+    Why a dedicated class
+    ---------------------
+    Parent ``EqnDiff.__init__`` calls ``Eqn.__init__`` which in
+    turn calls ``sympy.lambdify`` on the derivative expression.
+    LoopEqn Phase J3 canonical expressions contain
+    ``KroneckerDelta`` and ``Sum`` over ``sympy.Idx`` nodes that
+    sympy's ``lambdify`` cannot handle. We bypass the parent's
+    lambdify entirely and install a custom ``NUM_EQN``.
+
+    The ``RHS`` marker
+    ------------------
+    ``self.RHS`` is a sympy ``Symbol`` multiplied by the
+    ``diff_var`` iVar. Two properties matter:
+
+    1. ``diff_var`` is an ``iVar`` → appears in ``free_symbols`` →
+       ``is_constant_matrix_deri`` returns False → JacBlock marks
+       the block as *mutable*.
+    2. ``FormJac`` short-circuits the mutable-matrix re-evaluation
+       path for ``LoopEqnDiff`` instances (``isinstance`` check) —
+       it uses the already-computed ``fy[3]`` from the custom
+       ``NUM_EQN`` directly instead of re-lambdifying the marker.
+
+    Phase J3 deliberately keeps the block *dense*. Sparsity
+    pruning (only the non-zero positions across all classified
+    terms) is deferred to a future phase once we have real models
+    that benefit.
+    """
+
+    def __init__(self,
+                 name: str,
+                 diff_var,
+                 canonical,
+                 outer_idx,
+                 diff_idx,
+                 n_outer: int,
+                 n_diff: int,
+                 var_map: Dict[str, object]):
+        from Solverz.equation.loop_jac import build_loop_jac_kernel_source
+        from Solverz.num_api import custom_function as _SolCF
+        from Solverz.variable.ssymbol import sSymBasic
+        from Solverz.equation.param import ParamBase
+
+        # Deliberately skip ``super().__init__`` — the parent
+        # chain (EqnDiff → Eqn) calls ``self.lambdify()`` which
+        # cannot handle the sympy ``KroneckerDelta`` /
+        # ``Sum`` / ``IndexedBase`` content of ``canonical``. We
+        # install a custom NUM_EQN via ``exec`` on a hand-generated
+        # kernel source.
+
+        # Discover the Var/Param symbols referenced in the canonical
+        # expression. IndexedBase references come from ``m.var[...]``
+        # rewrites (covered by ``var_map``); bare iVar/Para nodes can
+        # appear for scalar Params. ``atoms(sp.IndexedBase)`` misses
+        # bases buried inside ``Sum`` bodies — walk via ``Indexed``
+        # nodes instead to reach them.
+        sym_names: set = set()
+        for idx_node in canonical.atoms(sp.Indexed):
+            base_name = idx_node.base.name
+            if base_name in var_map:
+                sym_names.add(base_name)
+        for s in canonical.free_symbols:
+            if isinstance(s, (iVar, Para)) and s.name in var_map:
+                sym_names.add(s.name)
+        sorted_symbols = sorted(sym_names)
+
+        # ``name`` is the human-readable EqnDiff label like
+        # ``"Diff P_eqn w.r.t. Va"`` — not a valid Python
+        # identifier. Sanitize to ``Diff_P_eqn_wrt_Va`` so the
+        # generated ``def`` line parses.
+        sanitized = (
+            name
+            .replace('w.r.t.', 'wrt')
+            .replace('.', '_')
+            .replace(' ', '_')
+        )
+        kernel_name = f'_sz_loop_jac_kernel_{sanitized}'
+        self.kernel_source = build_loop_jac_kernel_source(
+            kernel_name, canonical, outer_idx, diff_idx,
+            n_outer, n_diff, sorted_symbols, var_map,
+        )
+
+        # exec the source into a namespace with the numpy + SolCF
+        # helpers our body translator emits.
+        ns: Dict[str, object] = {'np': np, 'SolCF': _SolCF}
+        exec(self.kernel_source, ns)
+        kernel_func = ns[kernel_name]
+        kernel_func._kernel_source = self.kernel_source  # for debug
+
+        # Build SYMBOLS dict matching the kernel's arg list order.
+        # Each entry maps name → Solverz sympy symbol (iVar / Para).
+        self.SYMBOLS: Dict[str, sp.Symbol] = {}
+        for nm in sorted_symbols:
+            sol_obj = var_map[nm]
+            if isinstance(sol_obj, sSymBasic):
+                self.SYMBOLS[nm] = sol_obj.symbol
+            elif isinstance(sol_obj, ParamBase):
+                self.SYMBOLS[nm] = Para(sol_obj.name, dim=sol_obj.dim)
+
+        # Attributes the ``Eqn``/``EqnDiff``/``FormJac`` machinery
+        # reads. Most mirror what the parent ``__init__`` would set.
+        self.name = name
+        self.LHS = Derivative(Function('F'), diff_var)
+
+        # Marker RHS is a sympy ``Function`` application of the
+        # kernel function. When the inline J printer lambdifies the
+        # mutable-matrix block via ``MutableMatJacData``, it emits
+        # ``SolCF.mutable_mat_fallback_extract(<kernel_name>(...),
+        # rows, cols)`` — the kernel is looked up by name from the
+        # lambdify namespace, which ``made_numerical`` populates
+        # with ``{<kernel_name>: kernel_func}`` (alongside the F-side
+        # ``_sz_loop_<name>`` registration).
+        #
+        # Two properties matter for downstream classification:
+        # 1. The Function application's free symbols include every
+        #    Solverz iVar/Para arg, so ``is_constant_matrix_deri``
+        #    sees iVars → mutable.
+        # 2. ``FormJac`` still short-circuits the mutable
+        #    re-lambdify path via ``isinstance(ed, LoopEqnDiff)``
+        #    because creating a fresh ``Eqn('_MutMatJb_...', RHS)``
+        #    would fail to resolve the kernel at lambdify time
+        #    (the custom func dict isn't threaded into that path).
+        kernel_call_args = [self.SYMBOLS[nm] for nm in sorted_symbols]
+        self.RHS = _LoopJacBlockCall(
+            sp.Symbol(kernel_name), *kernel_call_args
+        )
+        self.mixed_matrix_vector = False
+        self.NUM_EQN = kernel_func
+        self.derivatives: Dict[str, EqnDiff] = dict()
+
+        # EqnDiff-specific attributes.
+        self.diff_var = diff_var
+        self.diff_var_name = (
+            diff_var.name0 if isinstance(diff_var, IdxVar)
+            else diff_var.name
+        )
+        self.var_idx = None
+        self.var_idx_func = None
+        self.dim = -1
+        self.v_type = ''
+
+        # Phase J3 LoopEqn-specific metadata — module printer reads
+        # these to emit the kernel source as a @njit function.
+        self.canonical = canonical
+        self.outer_idx = outer_idx
+        self.diff_idx = diff_idx
+        self.n_outer = n_outer
+        self.n_diff = n_diff
+        self._loop_var_map = dict(var_map)
+        self._kernel_func_name = kernel_name
+
+
 def Idx(name: str, n: int = None):
     """Create a sympy :class:`sympy.Idx` for :class:`LoopEqn` body
     construction — a thin shortcut so users don't need to
@@ -893,10 +1061,38 @@ class LoopEqn(Eqn):
             if is_zero(canonical):
                 continue
 
-            sz_expr = loop_jac_to_solverz_expr(
-                canonical, self.outer_index, k,
-                self.n_outer, self.var_map,
-            )
+            try:
+                sz_expr = loop_jac_to_solverz_expr(
+                    canonical, self.outer_index, k,
+                    self.n_outer, self.var_map,
+                )
+            except NotImplementedError:
+                # Phase J3 fallback: the Phase J1/J2 classifier
+                # couldn't express this block as a pure Solverz
+                # Diag / Mat_Mul / Para combination. Fall back to
+                # a dense LoopEqnDiff that evaluates the canonical
+                # expression element-by-element via a generated
+                # double for-loop kernel. Covers bilinear / trig
+                # patterns like polar PF.
+                #
+                # The diff block is square: n_diff equals the
+                # target Var's length, which for LoopEqn's current
+                # contract equals n_outer (row-per-outer-index).
+                # If future LoopEqns differentiate w.r.t. a Var of
+                # different length this'll need to change.
+                n_diff = sol_obj.value.shape[0]
+                ed = LoopEqnDiff(
+                    name=f'Diff {self.name} w.r.t. {var_iVar.name}',
+                    diff_var=var_iVar,
+                    canonical=canonical,
+                    outer_idx=self.outer_index,
+                    diff_idx=k,
+                    n_outer=self.n_outer,
+                    n_diff=n_diff,
+                    var_map=self.var_map,
+                )
+                self.derivatives[var_iVar.name] = ed
+                continue
 
             ed = EqnDiff(
                 name=f'Diff {self.name} w.r.t. {var_iVar.name}',
@@ -904,6 +1100,39 @@ class LoopEqn(Eqn):
                 diff_var=var_iVar,
             )
             self.derivatives[var_iVar.name] = ed
+
+
+class _LoopJacBlockCall(Function):
+    """Sympy ``Function`` node that lambdifies to a call into a
+    pre-registered LoopEqn Jacobian block kernel.
+
+    First argument is a ``Symbol`` whose name matches the kernel
+    function's sanitized identifier (registered in the inline
+    ``made_numerical`` custom_func dict, or emitted as a top-level
+    ``def`` in the JIT module). Remaining arguments are the Solverz
+    ``iVar``/``Para`` symbols the kernel consumes, in the order the
+    kernel's ``def`` line expects. Sympy's printer uses the
+    ``_numpycode`` method below to emit a plain Python function
+    call string — at runtime the call resolves via the lambdify
+    namespace (or module-level import in the JIT path).
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        # Don't auto-simplify; keep the application intact so the
+        # printer can intercept it.
+        return None
+
+    def _numpycode(self, printer, **kwargs):
+        kernel_name = str(self.args[0])
+        call_args = [printer._print(a) for a in self.args[1:]]
+        return f'{kernel_name}({", ".join(call_args)})'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
 
 
 class _LoopJacEye(Function):
@@ -1175,6 +1404,18 @@ def _translate_loop_body_njit(expr, state) -> str:
         base = _translate_loop_body_njit(expr.args[0], state)
         exp = _translate_loop_body_njit(expr.args[1], state)
         return f"({base} ** {exp})"
+    if isinstance(expr, KroneckerDelta):
+        # ``KroneckerDelta(a, b)`` appears in J-side canonical
+        # expressions when the delta's second argument is NOT the
+        # sum dummy (e.g. ``δ(i, k)`` where ``i`` is the outer index
+        # and ``k`` is the diff index). Emit a Python conditional —
+        # valid both for pure Python (inline path) and ``@njit``
+        # (module path). For J-side kernels both operand names are
+        # loop variables in scope (``outer_name`` and the diff
+        # index name), so the comparison resolves at runtime.
+        a_code = _translate_loop_body_njit(expr.args[0], state)
+        b_code = _translate_loop_body_njit(expr.args[1], state)
+        return f"(1.0 if {a_code} == {b_code} else 0.0)"
     if isinstance(expr, sp.Indexed):
         base_name = expr.base.name
         ctx = state.get('sparse_walker_ctx')

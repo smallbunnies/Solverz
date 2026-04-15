@@ -173,6 +173,8 @@ class Equations:
 
         Fy_list = self.Fy(y, self.a.object_list, self.var_address.object_list)
 
+        from Solverz.equation.eqn import LoopEqnDiff
+
         for fy in Fy_list:
             EqnName = fy[0]
             EqnAddr = self.a[EqnName]
@@ -184,6 +186,45 @@ class Equations:
             DiffVarEqn = Eqn('DiffVarEqn' + DiffVar.name, DiffVar)
             args = self.obtain_eqn_args(DiffVarEqn, y, 0)
             DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
+
+            # LoopEqn Phase J3 fast-path: if the EqnDiff is a
+            # ``LoopEqnDiff``, its ``NUM_EQN`` already evaluates the
+            # full 2-D Jacobian block via a pre-generated dense
+            # kernel. We skip the mutable-matrix re-lambdify loop
+            # (which tries to substitute ``Diag → SpDiag`` and
+            # perturb the vars — that rewrite doesn't apply to
+            # LoopEqn's sympy-IndexedBase canonical expression,
+            # and the marker ``RHS`` wouldn't lambdify cleanly
+            # anyway). Instead we re-evaluate the kernel with
+            # perturbed variable samples to capture the full
+            # sparsity union at Value0, same as the existing path.
+            #
+            # Note: FormJac's earlier ``args`` is for a temporary
+            # ``DiffVarEqn`` carrying only the diff var. The
+            # LoopEqnDiff kernel needs its own SYMBOLS args — we
+            # obtain them via ``obtain_eqn_args(fy[2], y)``.
+            if isinstance(fy[2], LoopEqnDiff):
+                loop_args = self.obtain_eqn_args(fy[2], y)
+                rng = np.random.default_rng(seed=20260414)
+                perturbed_args = []
+                for symbol, arg in zip(fy[2].SYMBOLS.values(), loop_args):
+                    if symbol.name in y.var_list:
+                        perturbed_args.append(rng.random(arg.shape) + 1.0)
+                    else:
+                        perturbed_args.append(arg)
+                Value0 = fy[2].NUM_EQN(*perturbed_args)
+                if not isinstance(Value0, csc_array):
+                    Value0 = csc_array(Value0)
+
+                jb = JacBlock(EqnName,
+                              EqnAddr,
+                              DiffVar,
+                              DiffVarValue,
+                              VarAddr,
+                              DeriExpr,
+                              Value0)
+                self.jac.add_block(EqnName, DiffVar, jb)
+                continue
 
             # Mutable-matrix-block detection. This predicate MUST match
             # ``JacBlock.is_mutable_matrix`` exactly — FormJac picks

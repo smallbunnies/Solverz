@@ -47,7 +47,8 @@ from Solverz.utilities.type_checker import is_zero
 
 def canonicalize_kronecker(expr: sp.Expr,
                             outer_idx: sp.Idx,
-                            diff_idx: sp.Idx) -> sp.Expr:
+                            diff_idx: sp.Idx,
+                            _expanded: bool = False) -> sp.Expr:
     """Canonicalize a raw ``sp.diff`` output so every ``Sum`` is
     either collapsed (``KroneckerDelta`` on the sum dummy dropped
     along with the Sum) or has its ``KroneckerDelta`` factors pulled
@@ -82,14 +83,32 @@ def canonicalize_kronecker(expr: sp.Expr,
     The result is a sum-of-products form where every KroneckerDelta
     is either (a) gone (collapsed) or (b) a top-level coefficient.
     """
+    if not _expanded:
+        # Push multiplication inside addition at the top level so
+        # ``(δ(k,i) - δ(k,j)) * rest`` becomes
+        # ``δ(k,i)*rest - δ(k,j)*rest`` BEFORE we try to classify
+        # factors. Without this expansion, the per-summand
+        # KroneckerDelta detection inside ``_canonicalize_sum``
+        # never sees a standalone delta factor — the delta is
+        # hidden inside an ``Add`` subexpression and never gets
+        # collapsed. This arises naturally from ``sp.diff`` on
+        # trig/exponential bodies (probe 6 of the investigation)
+        # where the chain rule produces ``d(f(a-b))/dx =
+        # f'(a-b) * (∂a/∂x - ∂b/∂x)`` with both partial derivatives
+        # being ``KroneckerDelta``s.
+        expr = sp.expand_mul(expr)
+        return canonicalize_kronecker(expr, outer_idx, diff_idx,
+                                      _expanded=True)
     if isinstance(expr, sp.Add):
         return sp.Add(*(
-            canonicalize_kronecker(a, outer_idx, diff_idx)
+            canonicalize_kronecker(a, outer_idx, diff_idx,
+                                   _expanded=True)
             for a in expr.args
         ))
     if isinstance(expr, sp.Mul):
         return sp.Mul(*(
-            canonicalize_kronecker(a, outer_idx, diff_idx)
+            canonicalize_kronecker(a, outer_idx, diff_idx,
+                                   _expanded=True)
             for a in expr.args
         ))
     if isinstance(expr, sp.Sum):
@@ -100,7 +119,8 @@ def canonicalize_kronecker(expr: sp.Expr,
         for branch_expr, _cond in expr.args:
             if not is_zero(branch_expr):
                 return canonicalize_kronecker(branch_expr,
-                                              outer_idx, diff_idx)
+                                              outer_idx, diff_idx,
+                                              _expanded=True)
         return sp.S.Zero
     return expr
 
@@ -570,6 +590,101 @@ def _sum_to_matmul(sum_node: sp.Sum,
         Para(param_node.base.name, dim=2),
         var_sol_obj.symbol,
     )
+
+
+def build_loop_jac_kernel_source(func_name: str,
+                                   canonical: sp.Expr,
+                                   outer_idx: sp.Idx,
+                                   diff_idx: sp.Idx,
+                                   n_outer: int,
+                                   n_diff: int,
+                                   symbols_list,
+                                   var_map: Dict[str, object]) -> str:
+    """Generate Python source for a LoopEqn Jacobian block kernel.
+
+    The kernel is a nested ``for i in range(n_outer): for k in range(
+    n_diff):`` loop that evaluates the canonicalized diff expression
+    at each ``(i, k)`` position and writes the result to a flat
+    ``data`` array in row-major order. The result has length
+    ``n_outer * n_diff`` and represents a DENSE block — sparsity
+    pruning is deferred to a later phase.
+
+    Reuses :func:`Solverz.equation.eqn._translate_loop_body_njit` to
+    translate the canonical sympy expression (which may contain
+    ``KroneckerDelta``, ``Sum``, ``Indexed``, function calls etc.)
+    to Python code. Any inner ``Sum`` becomes an explicit inner
+    for-loop with an accumulator (the same mechanism the F-side
+    translator uses for body-level Sums). ``KroneckerDelta`` between
+    the outer and diff indices lowers to a Python conditional.
+
+    Parameters
+    ----------
+    func_name : str
+        Name of the generated function, e.g. ``"_loop_jac_kernel_0"``.
+    canonical : sympy.Expr
+        Canonicalized Jacobian expression (output of
+        :func:`canonicalize_kronecker`). May contain
+        ``KroneckerDelta`` factors (the J3.0 translator branch
+        handles them).
+    outer_idx : sympy.Idx
+        The LoopEqn's outer index — becomes the outer for-loop
+        variable in the generated kernel.
+    diff_idx : sympy.Idx
+        The fresh diff index (e.g. ``_sz_loop_dk``) — becomes the
+        inner for-loop variable.
+    n_outer, n_diff : int
+        Loop ranges.
+    symbols_list : list of str
+        Sorted Var/Param names that flow in as function arguments.
+        Matches what the F-side ``_build_num_eqn`` uses so the
+        caller can share its arg-preparation logic.
+    var_map : dict
+        IndexedBase name → Solverz Var/Param (only passed through to
+        ``_translate_loop_body_njit`` for the sparse-walker context;
+        not consumed here directly).
+
+    Returns
+    -------
+    str
+        Full Python source for the kernel function, including the
+        ``def`` line and a trailing newline. Ready to ``exec`` (for
+        the inline path) or to ``@njit(cache=True)``-decorate and
+        paste into a module file (for the JIT path).
+    """
+    from Solverz.equation.eqn import _translate_loop_body_njit
+
+    outer_name = _name_of(outer_idx)
+    diff_name = _name_of(diff_idx)
+
+    state = {
+        'acc_counter': 0,
+        'prelude': [],
+        'var_map': var_map,
+        'outer_name': outer_name,
+        'sparse_walker_ctx': None,
+    }
+    body_expr = _translate_loop_body_njit(canonical, state)
+
+    indent = '    '
+    body_indent = indent * 3
+    lines = [
+        f"def {func_name}({', '.join(symbols_list)}):",
+        # Allocate as a 2-D ndarray so ``FormJac`` sees a
+        # matrix-valued derivative (``fy[3].ndim == 2``). The
+        # downstream JacBlock path stores it as a ``csc_array`` for
+        # sparsity analysis; at runtime the ``J_`` wrapper flattens
+        # the block's contribution to the global ``_data_`` array.
+        f"{indent}data = np.empty(({n_outer}, {n_diff}))",
+        f"{indent}for {outer_name} in range({n_outer}):",
+        f"{indent * 2}for {diff_name} in range({n_diff}):",
+    ]
+    for stmt in state['prelude']:
+        lines.append(f"{body_indent}{stmt}")
+    lines.append(
+        f"{body_indent}data[{outer_name}, {diff_name}] = {body_expr}"
+    )
+    lines.append(f"{indent}return data")
+    return '\n'.join(lines) + '\n'
 
 
 def _name_of(x) -> str:
