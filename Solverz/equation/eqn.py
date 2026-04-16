@@ -1802,7 +1802,7 @@ def _translate_loop_body_njit(expr, state) -> str:
             try:
                 return expr._numpycode(_MinimalPrinter())
             except Exception:
-                pass  # fall through to the NotImplementedError below
+                pass
     raise NotImplementedError(
         f"LoopEqn njit body translator does not yet handle "
         f"{type(expr).__name__}: {expr!r}"

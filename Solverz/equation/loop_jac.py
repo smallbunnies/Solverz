@@ -593,6 +593,35 @@ def _sum_to_matmul(sum_node: sp.Sum,
     )
 
 
+def _probe_kron_entries(expr: sp.Expr,
+                       outer_idx: sp.Idx,
+                       n_outer: int,
+                       n_diff: int) -> list | None:
+    """Numerically evaluate a KroneckerDelta argument at each outer
+    index value.
+
+    Used when the argument contains ``outer_idx`` in a form too
+    complex for ``_classify_axis`` — e.g.
+    ``off + k - 1 + 2 * KroneckerDelta(k, 0)``.  Substitutes
+    ``outer_idx → Integer(i)`` for each ``i`` in ``[0, n_outer)``
+    and checks whether the result reduces to a concrete integer
+    column index in ``[0, n_diff)``.
+
+    Returns a list of ``(row, col)`` tuples, or ``None`` if any
+    evaluation fails to reduce.
+    """
+    entries: list = []
+    for i in range(n_outer):
+        try:
+            val = expr.subs(outer_idx, sp.Integer(i))
+            col = int(val)
+        except (TypeError, ValueError):
+            return None
+        if 0 <= col < n_diff:
+            entries.append((i, col))
+    return entries
+
+
 def compute_loop_jac_sparsity(canonical: sp.Expr,
                                 outer_idx: sp.Idx,
                                 diff_idx: sp.Idx,
@@ -646,12 +675,14 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
 
     def _classify_axis(expr):
         """Return ``('outer', None)`` if ``expr`` is the outer Idx,
-        ``('diff', None)`` if ``expr`` is the diff Idx, and
+        ``('diff', None)`` if ``expr`` is the diff Idx,
         ``('indirect_outer', map_name)`` if ``expr`` is
         ``Indexed(map_param, outer_idx)`` where ``map_param`` is a
-        1-D int ``Param``. Otherwise ``(None, None)`` — the axis is
+        1-D int ``Param``, or ``('outer_shifted', shift)`` if
+        ``expr`` is ``outer_idx + integer_constant`` (e.g.
+        ``off + k + 1``). Otherwise ``(None, None)`` — the axis is
         not structurally classifiable and the term will fall through
-        to the dense fallback.
+        to the dense fallback or the numerical probing path.
         """
         if isinstance(expr, sp.Idx):
             if _name_of(expr) == outer_name:
@@ -672,6 +703,25 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
             if getattr(map_obj, 'dim', None) != 1:
                 return None, None
             return 'indirect_outer', map_name
+        if isinstance(expr, sp.Add):
+            has_outer = False
+            shift = 0
+            all_simple = True
+            for arg in expr.args:
+                if (isinstance(arg, sp.Idx)
+                        and _name_of(arg) == outer_name):
+                    if has_outer:
+                        all_simple = False
+                        break
+                    has_outer = True
+                elif isinstance(arg, (sp.Integer, sp.Rational,
+                                      sp.Number)):
+                    shift += int(arg)
+                else:
+                    all_simple = False
+                    break
+            if has_outer and all_simple:
+                return 'outer_shifted', shift
         return None, None
 
     def _map_values(map_name):
@@ -705,6 +755,10 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
         has_diag_kron = False
         has_indirect_diag_kron = False
         indirect_diag_map: str = ''
+        has_shifted_diag_kron = False
+        shifted_diag_shift: int = 0
+        has_probed_kron = False
+        probed_kron_entries: list = []
         for f in factors:
             if isinstance(f, KroneckerDelta):
                 a0 = f.args[0]
@@ -719,6 +773,26 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
                     has_indirect_diag_kron = True
                     indirect_diag_map = map0 if kind0 == 'indirect_outer' else map1
                     break
+                if 'outer_shifted' in kinds and 'diff' in kinds:
+                    has_shifted_diag_kron = True
+                    shifted_diag_shift = (
+                        map0 if kind0 == 'outer_shifted' else map1
+                    )
+                    break
+                diff_side = (0 if kind0 == 'diff'
+                             else 1 if kind1 == 'diff'
+                             else -1)
+                if diff_side >= 0:
+                    other = a1 if diff_side == 0 else a0
+                    other_kind = kind1 if diff_side == 0 else kind0
+                    if (other_kind is None
+                            and outer_idx in other.free_symbols):
+                        entries = _probe_kron_entries(
+                            other, outer_idx, n_outer, n_diff)
+                        if entries is not None:
+                            has_probed_kron = True
+                            probed_kron_entries = entries
+                            break
 
         # Look for ``Indexed(Param, axis0, axis1)`` where
         # ``{axis0_kind, axis1_kind}`` is one of
@@ -813,15 +887,24 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
                 if 0 <= int(real_col) < n_diff:
                     all_positions.add((int(i_outer), int(real_col)))
 
+        if has_shifted_diag_kron:
+            for i in range(n_outer):
+                col = i + shifted_diag_shift
+                if 0 <= col < n_diff:
+                    all_positions.add((i, col))
+
+        if has_probed_kron:
+            all_positions.update(probed_kron_entries)
+
         if param_hits:
             for r, c in param_hits:
                 all_positions.update(zip(r.tolist(), c.tolist()))
 
         if (not has_diag_kron
                 and not has_indirect_diag_kron
+                and not has_shifted_diag_kron
+                and not has_probed_kron
                 and not param_hits):
-            # Term has no structural indicator — fall back to
-            # the full dense block.
             has_dense_fallback = True
             break
 
