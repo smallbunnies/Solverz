@@ -1283,10 +1283,12 @@ class LoopEqn(Eqn):
             if is_zero(canonical):
                 continue
 
+            n_diff = sol_obj.value.shape[0]
             try:
                 sz_expr = loop_jac_to_solverz_expr(
                     canonical, self.outer_index, k,
                     self.n_outer, self.var_map,
+                    n_diff=n_diff,
                 )
             except NotImplementedError:
                 # Phase J3 fallback: the Phase J1/J2 classifier
@@ -1297,12 +1299,6 @@ class LoopEqn(Eqn):
                 # double for-loop kernel. Covers bilinear / trig
                 # patterns like polar PF.
                 #
-                # The diff block is square: n_diff equals the
-                # target Var's length, which for LoopEqn's current
-                # contract equals n_outer (row-per-outer-index).
-                # If future LoopEqns differentiate w.r.t. a Var of
-                # different length this'll need to change.
-                n_diff = sol_obj.value.shape[0]
                 ed = LoopEqnDiff(
                     name=f'Diff {self.name} w.r.t. {var_iVar.name}',
                     diff_var=var_iVar,

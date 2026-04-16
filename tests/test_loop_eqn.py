@@ -1902,3 +1902,71 @@ def test_loop_eqn_sparse_walker_rejects_multi_sparse_sum():
             var_map={'ux': m.ux, 'uy': m.uy, 'G': m.G, 'B': m.B,
                      'ix_pin': m.ix_pin},
         )
+
+
+def test_loop_eqn_select_mat_n_diff_from_var_size():
+    """Regression: ``_LoopJacSelectMat`` column count must match the
+    actual target Var size, not ``max(col_map)+1``.
+
+    When a LoopEqn iterates ``n_outer`` pipes (say, 4 pipes) with a
+    ``pipe_to_node`` map that references nodes ``{0, 1, 2, 3}`` but
+    the target Var has 7 entries (4 pipe endpoints plus 3 isolated
+    nodes), the selection matrix must still be ``(4, 7)`` — not
+    ``(4, 4)`` — because JacBlock multiplies it against the full
+    7-element Var.
+
+    Before the ``n_diff`` passthrough fix, this raised
+    ``ValueError: Incompatible matrix derivative size (4, 4) and
+    vector variable size (7,)`` in JacBlock.__init__.
+    """
+    from Solverz import LoopEqn, Rodas, Opt
+
+    n_pipe = 3
+    n_node = 7  # 4 pipe endpoints + 3 extra nodes
+    # Pipes connect nodes 0→1, 1→2, 2→3 (no cycle). max(pfn)=2,
+    # max(ptn)=3 — both < n_node-1=6.
+    pfn_v = np.array([0, 1, 2], dtype=int)
+    ptn_v = np.array([1, 2, 3], dtype=int)
+
+    m = Model()
+    m.Ts = Var('Ts', np.linspace(300., 360., n_node))
+    m.pfn = Param('pfn', pfn_v, dtype=int)
+    m.ptn = Param('ptn', ptn_v, dtype=int)
+
+    p = Idx('p', n_pipe)
+    # Body: Ts[from] - Ts[to] - <pin> per pipe. Derivative w.r.t. Ts
+    # has indirect KD(diff, pfn[p]) - KD(diff, ptn[p]).
+    m.Tdrop = LoopEqn(
+        'Tdrop', outer_index=p,
+        body=m.Ts[m.pfn[p]] - m.Ts[m.ptn[p]] - 10.0,
+        model=m,
+    )
+    # Pin the extra nodes plus one loop node to fix the gauge.
+    # 3 Tdrop + 4 pins = 7 eqns over 7 vars.
+    m.pin_0 = Eqn('pin_0', m.Ts[0] - 300.0)
+    m.pin_4 = Eqn('pin_4', m.Ts[4] - 320.0)
+    m.pin_5 = Eqn('pin_5', m.Ts[5] - 340.0)
+    m.pin_6 = Eqn('pin_6', m.Ts[6] - 360.0)
+
+    # This would have raised in JacBlock with the old code.
+    smdl, y0 = m.create_instance()
+    assert smdl.vsize == n_node
+
+    # Verify the selection matrix has the right shape by checking the
+    # generated J: rendering must succeed and J must be square with
+    # correct dimension.
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        module_printer(smdl, y0, name='select_mat_ndiff_test',
+                       directory=tmp, jit=False).render()
+        import sys
+        sys.path.insert(0, tmp)
+        import importlib
+        mod = importlib.import_module('select_mat_ndiff_test')
+        J = mod.mdl.J(mod.y.array, mod.mdl.p)
+        assert J.shape == (n_node, n_node), (
+            f"J shape {J.shape} != ({n_node}, {n_node})")
+        # Columns 4, 5, 6 in the Tdrop rows should be zero — the
+        # selection matrix only hits columns 0-3.
+        J_dense = J.toarray()
+        assert np.all(J_dense[:n_pipe, 4:] == 0)

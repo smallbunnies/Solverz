@@ -222,7 +222,8 @@ def loop_jac_to_solverz_expr(expr: sp.Expr,
                               outer_idx: sp.Idx,
                               diff_idx: sp.Idx,
                               n_outer: int,
-                              var_map: Dict[str, object]) -> sp.Expr:
+                              var_map: Dict[str, object],
+                              n_diff: int = 0) -> sp.Expr:
     """Translate a *canonicalized* LoopEqn Jacobian expression back
     to a Solverz expression that ``FormJac`` and ``JacBlock`` can
     process through the existing constant / mutable-matrix paths.
@@ -261,7 +262,7 @@ def loop_jac_to_solverz_expr(expr: sp.Expr,
     if isinstance(expr, sp.Add):
         return sp.Add(*(
             loop_jac_to_solverz_expr(t, outer_idx, diff_idx,
-                                      n_outer, var_map)
+                                      n_outer, var_map, n_diff=n_diff)
             for t in expr.args
         ))
 
@@ -272,7 +273,7 @@ def loop_jac_to_solverz_expr(expr: sp.Expr,
     # Single-atom cases that don't need the Mul-splitting classifier.
     if isinstance(expr, KroneckerDelta):
         result = _translate_kronecker_delta(
-            expr, outer_idx, diff_idx, n_outer, var_map)
+            expr, outer_idx, diff_idx, n_outer, var_map, n_diff=n_diff)
         if result is not None:
             return result
         raise NotImplementedError(
@@ -289,7 +290,7 @@ def loop_jac_to_solverz_expr(expr: sp.Expr,
     # through to classifier) representing one term of the sum.
     # Extract the sign, examine the remaining factors, and classify.
     return _classify_and_translate_term(
-        expr, outer_idx, diff_idx, n_outer, var_map
+        expr, outer_idx, diff_idx, n_outer, var_map, n_diff=n_diff
     )
 
 
@@ -299,6 +300,7 @@ def _translate_kronecker_delta(
         diff_idx: sp.Idx,
         n_outer: int,
         var_map: Dict[str, object],
+        n_diff: int = 0,
 ):
     """Translate a ``KroneckerDelta`` to a constant J2 expression.
 
@@ -345,13 +347,15 @@ def _translate_kronecker_delta(
             continue
         if getattr(map_obj, 'dim', None) != 1:
             continue
-        # Build the selection matrix node.
+        # Build the selection matrix node.  Use the caller-supplied
+        # n_diff (the actual variable size) when available; fall back
+        # to max(col_map)+1 which is a safe lower bound.
         col_map = np.asarray(map_obj.v, dtype=np.int64).reshape(-1)
-        n_diff = int(col_map.max()) + 1 if len(col_map) else 0
+        nd = n_diff if n_diff > 0 else (int(col_map.max()) + 1 if len(col_map) else 0)
         return _LoopJacSelectMat(
             sp.Tuple(*[sp.Integer(int(c)) for c in col_map]),
             sp.Integer(n_outer),
-            sp.Integer(n_diff),
+            sp.Integer(nd),
         )
 
     return None
@@ -402,7 +406,8 @@ def _classify_and_translate_term(term: sp.Expr,
                                   outer_idx: sp.Idx,
                                   diff_idx: sp.Idx,
                                   n_outer: int,
-                                  var_map: Dict[str, object]) -> sp.Expr:
+                                  var_map: Dict[str, object],
+                                  n_diff: int = 0) -> sp.Expr:
     """Classify a single *term* (post canonicalize_kronecker) into
     one of the Phase J1 / J2 shapes and translate it to a Solverz
     expression.
@@ -452,7 +457,7 @@ def _classify_and_translate_term(term: sp.Expr,
             and not other_factors):
         d = delta_factors[0]
         result = _translate_kronecker_delta(
-            d, outer_idx, diff_idx, n_outer, var_map)
+            d, outer_idx, diff_idx, n_outer, var_map, n_diff=n_diff)
         if result is not None:
             return coeff * result
         raise NotImplementedError(
@@ -525,7 +530,7 @@ def _classify_and_translate_term(term: sp.Expr,
         # Indirect KD — let Phase J3 handle (Sum-KD sparsity is
         # already computed correctly by the sparsity analyzer).
         result = _translate_kronecker_delta(
-            d, outer_idx, diff_idx, n_outer, var_map)
+            d, outer_idx, diff_idx, n_outer, var_map, n_diff=n_diff)
         if result is not None:
             # Can't fold the Sum into a Diag for indirect patterns —
             # fall through to Phase J3 which handles them via sparse
