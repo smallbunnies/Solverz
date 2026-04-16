@@ -1697,6 +1697,24 @@ def _translate_loop_body_njit(expr, state) -> str:
         parts = [_translate_loop_body_njit(a, state) for a in expr.args]
         return "(" + " + ".join(parts) + ")"
     if isinstance(expr, sp.Mul):
+        delta_factors = []
+        other_factors = []
+        for a in expr.args:
+            if isinstance(a, KroneckerDelta):
+                delta_factors.append(a)
+            else:
+                other_factors.append(a)
+        if delta_factors and other_factors:
+            other_parts = [_translate_loop_body_njit(a, state)
+                           for a in other_factors]
+            other_code = " * ".join(other_parts)
+            conds = []
+            for d in delta_factors:
+                ac = _translate_loop_body_njit(d.args[0], state)
+                bc = _translate_loop_body_njit(d.args[1], state)
+                conds.append(f"{ac} == {bc}")
+            cond_code = " and ".join(conds)
+            return f"(({other_code}) if {cond_code} else 0.0)"
         parts = [_translate_loop_body_njit(a, state) for a in expr.args]
         return "(" + " * ".join(parts) + ")"
     if isinstance(expr, sp.Pow):
