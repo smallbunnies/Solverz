@@ -1020,28 +1020,71 @@ def build_loop_jac_kernel_source(func_name: str,
     outer_name = _name_of(outer_idx)
     diff_name = _name_of(diff_idx)
 
-    state = {
-        'acc_counter': 0,
-        'prelude': [],
-        'var_map': var_map,
-        'outer_name': outer_name,
-        'sparse_walker_ctx': None,
-        'sparse_point_helpers': set(),
-    }
-    body_expr = _translate_loop_body_njit(canonical, state)
-
     indent = '    '
     body_indent = indent * 2
 
-    # Collect scalar CSR point-lookup helper sources for every
-    # sparse 2-D Param that showed up in the canonical expression
-    # as a bare ``M[row, col]`` outside a walker. Returning them
-    # *separately* from the kernel source lets downstream callers
-    # (inline ``LoopEqnDiff.__init__`` / module printer) decorate
-    # each function independently (``@njit(cache=True)`` per
-    # ``mut_mat_block_funcs`` entry).
+    def _make_state():
+        return {
+            'acc_counter': 0,
+            'prelude': [],
+            'var_map': var_map,
+            'outer_name': outer_name,
+            'sparse_walker_ctx': None,
+            'sparse_point_helpers': set(),
+        }
+
+    # Try to decompose the canonical Add into per-δ branches so the
+    # generated kernel uses an if/elif chain instead of evaluating
+    # every term. Each branch computes only the one matching stencil
+    # derivative — critical for WENO/kt2 stencils where N terms
+    # share the same loop but only 1 fires per (row, col) position.
+    # Decompose the canonical Add into per-δ-condition branches.
+    # Terms sharing the same KroneckerDelta condition are SUMMED so
+    # an if/elif chain correctly accumulates all contributions at
+    # each stencil position.
+    from collections import OrderedDict
+    branch_map: OrderedDict = OrderedDict()  # cond_key → [value_codes]
+    fallback_terms: list = []
+    has_sum = canonical.has(sp.Sum)
+    if isinstance(canonical, sp.Add) and not has_sum:
+        for term in canonical.args:
+            if isinstance(term, sp.Mul):
+                factors = list(term.args)
+            else:
+                factors = [term]
+            deltas = [f for f in factors if isinstance(f, KroneckerDelta)]
+            others = [f for f in factors if not isinstance(f, KroneckerDelta)]
+            if deltas and others:
+                st = _make_state()
+                conds = []
+                for d in deltas:
+                    ac = _translate_loop_body_njit(d.args[0], st)
+                    bc = _translate_loop_body_njit(d.args[1], st)
+                    conds.append(f"{ac} == {bc}")
+                cond_key = " and ".join(sorted(conds))
+                val_expr = sp.Mul(*others) if len(others) > 1 else others[0]
+                val_code = _translate_loop_body_njit(val_expr, st)
+                branch_map.setdefault(cond_key, []).append(val_code)
+            else:
+                fallback_terms.append(term)
+    branches: List[Tuple[str, str]] = [
+        (cond, " + ".join(vals)) for cond, vals in branch_map.items()
+    ]
+
+    state = _make_state()
+    use_branches = len(branches) >= 3 and not fallback_terms
+
+    if not use_branches:
+        body_expr = _translate_loop_body_njit(canonical, state)
+
     helper_sources: List[str] = []
-    for walker_name in sorted(state.get('sparse_point_helpers', set())):
+    all_point_helpers = set()
+    if use_branches:
+        for st_key in [state] + [_make_state()]:
+            all_point_helpers |= st_key.get('sparse_point_helpers', set())
+    else:
+        all_point_helpers = state.get('sparse_point_helpers', set())
+    for walker_name in sorted(all_point_helpers):
         helper_sources.append(
             f"def _sz_csr_{walker_name}_point(row, col):\n"
             f"{indent}for _sz_pk in range("
@@ -1062,7 +1105,16 @@ def build_loop_jac_kernel_source(func_name: str,
     ]
     for stmt in state['prelude']:
         lines.append(f"{body_indent}{stmt}")
-    lines.append(f"{body_indent}data[_sz_idx] = {body_expr}")
+
+    if use_branches:
+        for i, (cond, val) in enumerate(branches):
+            kw = "if" if i == 0 else "elif"
+            lines.append(f"{body_indent}{kw} {cond}:")
+            lines.append(f"{body_indent}{indent}data[_sz_idx] = {val}")
+        lines.append(f"{body_indent}else:")
+        lines.append(f"{body_indent}{indent}data[_sz_idx] = 0.0")
+    else:
+        lines.append(f"{body_indent}data[_sz_idx] = {body_expr}")
     lines.append(f"{indent}return data")
     kernel_source = '\n'.join(lines) + '\n'
 
