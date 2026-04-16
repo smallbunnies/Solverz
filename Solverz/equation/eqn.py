@@ -1431,6 +1431,52 @@ class _LoopJacEye(Function):
         return self._numpycode(printer, **kwargs)
 
 
+class _LoopJacSelectMat(Function):
+    """Sympy ``Function`` node that prints to a sparse selection matrix.
+
+    Emitted by :func:`Solverz.equation.loop_jac.loop_jac_to_solverz_expr`
+    whenever a LoopEqn derivative produces
+    ``KroneckerDelta(diff_idx, map_param[outer_idx])`` — an indirect
+    diagonal (a.k.a. selection / permutation operator).  Row *i* of
+    the ``(n_outer, n_diff)`` matrix has a single 1 at column
+    ``col_map[i]``.
+
+    Arguments: ``_LoopJacSelectMat(col_map_tuple, n_outer, n_diff)``
+    where *col_map_tuple* is a sympy ``Tuple`` of integer column
+    indices.
+
+    Has no free symbols → classified as constant by
+    ``is_constant_matrix_deri`` → baked into ``_data_`` at module-
+    build time, zero per-iteration cost.
+    """
+
+    @classmethod
+    def eval(cls, col_map_tuple, n_outer, n_diff):
+        return None
+
+    def _numpycode(self, printer, **kwargs):
+        col_map, n_outer, n_diff = self.args
+        cols = list(col_map.args)
+        n_o = int(n_outer)
+        n_d = int(n_diff)
+        # Emit inline code that builds a csc_array.
+        # COO format: (data, (row, col)) where row[i]=i, col[i]=col_map[i].
+        return (
+            f'__import__("scipy.sparse", fromlist=["csc_array"])'
+            f'.csc_array('
+            f'(__import__("numpy").ones({n_o}, dtype=__import__("numpy").float64), '
+            f'(__import__("numpy").arange({n_o}, dtype=__import__("numpy").int64), '
+            f'__import__("numpy").array({[int(c) for c in cols]}, dtype=__import__("numpy").int64))), '
+            f'shape=({n_o}, {n_d}))'
+        )
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
 def _translate_loop_body(expr) -> str:
     """Recursively translate a sympy expression to a Python expression
     string. Supports the subset needed for ``LoopEqn`` bodies:

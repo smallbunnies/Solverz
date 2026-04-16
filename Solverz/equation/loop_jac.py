@@ -181,7 +181,18 @@ def _canonicalize_sum(sum_node: sp.Sum,
                 other_side = b if a == dummy else a
                 dummy_collapse = (dummy, other_side)
             else:
-                pulled_deltas.append(f)
+                # Only pull the delta out if it doesn't reference the
+                # Sum dummy at all.  A delta like
+                # ``δ(k, map_param[p_p])`` *contains* the dummy ``p_p``
+                # inside the ``Indexed`` argument but doesn't *equal*
+                # it, so the exact-equality check above misses it.
+                # Pulling such a delta out of the Sum creates a stale
+                # reference to ``p_p`` that incorrectly evaluates to
+                # the last loop-iteration value in generated code.
+                if dummy in f.free_symbols:
+                    other_factors.append(f)
+                else:
+                    pulled_deltas.append(f)
         else:
             other_factors.append(f)
 
@@ -260,9 +271,10 @@ def loop_jac_to_solverz_expr(expr: sp.Expr,
 
     # Single-atom cases that don't need the Mul-splitting classifier.
     if isinstance(expr, KroneckerDelta):
-        arg_names = {_name_of(a) for a in expr.args}
-        if arg_names == {_name_of(outer_idx), _name_of(diff_idx)}:
-            return _LoopJacEye(sp.Integer(n_outer))
+        result = _translate_kronecker_delta(
+            expr, outer_idx, diff_idx, n_outer, var_map)
+        if result is not None:
+            return result
         raise NotImplementedError(
             f"LoopEqn J translator: unsupported KroneckerDelta args "
             f"{expr.args}"
@@ -279,6 +291,70 @@ def loop_jac_to_solverz_expr(expr: sp.Expr,
     return _classify_and_translate_term(
         expr, outer_idx, diff_idx, n_outer, var_map
     )
+
+
+def _translate_kronecker_delta(
+        expr: KroneckerDelta,
+        outer_idx: sp.Idx,
+        diff_idx: sp.Idx,
+        n_outer: int,
+        var_map: Dict[str, object],
+):
+    """Translate a ``KroneckerDelta`` to a constant J2 expression.
+
+    Returns ``None`` if the pattern is not recognized.
+
+    Recognized patterns:
+
+    - ``KD(outer, diff)`` → ``_LoopJacEye(n_outer)``
+    - ``KD(diff, map_param[outer])`` → ``_LoopJacSelectMat(...)``
+      where *map_param* is a 1-D integer ``Param`` that maps each
+      outer index to a column.  The result is a sparse selection
+      matrix with one 1 per row.
+    """
+    import numpy as np
+    from Solverz.equation.eqn import _LoopJacEye, _LoopJacSelectMat
+    from Solverz.equation.param import ParamBase
+
+    outer_name = _name_of(outer_idx)
+    diff_name = _name_of(diff_idx)
+
+    a0, a1 = expr.args
+
+    # --- direct diagonal: KD(outer, diff) ---
+    if ({_name_of(a0), _name_of(a1)}
+            == {outer_name, diff_name}):
+        return _LoopJacEye(sp.Integer(n_outer))
+
+    # --- indirect diagonal: KD(diff, map[outer]) ---
+    for arg_d, arg_m in [(a0, a1), (a1, a0)]:
+        if not (isinstance(arg_d, sp.Idx)
+                and _name_of(arg_d) == diff_name):
+            continue
+        if not isinstance(arg_m, sp.Indexed):
+            continue
+        if len(arg_m.indices) != 1:
+            continue
+        inner = arg_m.indices[0]
+        if not (isinstance(inner, sp.Idx)
+                and _name_of(inner) == outer_name):
+            continue
+        map_name = arg_m.base.name
+        map_obj = var_map.get(map_name)
+        if not isinstance(map_obj, ParamBase):
+            continue
+        if getattr(map_obj, 'dim', None) != 1:
+            continue
+        # Build the selection matrix node.
+        col_map = np.asarray(map_obj.v, dtype=np.int64).reshape(-1)
+        n_diff = int(col_map.max()) + 1 if len(col_map) else 0
+        return _LoopJacSelectMat(
+            sp.Tuple(*[sp.Integer(int(c)) for c in col_map]),
+            sp.Integer(n_outer),
+            sp.Integer(n_diff),
+        )
+
+    return None
 
 
 def _translate_indexed_param(e: sp.Indexed,
@@ -369,15 +445,16 @@ def _classify_and_translate_term(term: sp.Expr,
 
     # --- Phase J1 shapes ---------------------------------------------
 
-    # Constant identity: KroneckerDelta(outer, diff) * numeric
+    # Constant identity / selection: KroneckerDelta(...) * numeric
     if (len(delta_factors) == 1
             and len(indexed_factors) == 0
             and len(sum_factors) == 0
             and not other_factors):
         d = delta_factors[0]
-        if ({_name_of(d.args[0]), _name_of(d.args[1])}
-                == {outer_name, diff_name}):
-            return coeff * _LoopJacEye(sp.Integer(n_outer))
+        result = _translate_kronecker_delta(
+            d, outer_idx, diff_idx, n_outer, var_map)
+        if result is not None:
+            return coeff * result
         raise NotImplementedError(
             f"LoopEqn J translator: unsupported KroneckerDelta {d}"
         )
@@ -426,22 +503,38 @@ def _classify_and_translate_term(term: sp.Expr,
                 f"— index must be outer or diff"
             )
 
-    # DiagTermWithSum: KroneckerDelta(outer, diff) * Sum(...)
+    # DiagTermWithSum: KroneckerDelta(...) * Sum(...)
+    # Direct diagonal KD(outer,diff)*Sum → Diag(Mat_Mul(...))
+    # Indirect KD(diff,map[outer])*Sum → SelectMat * Diag(Sum_scalar)
+    #   — but the Sum is a scalar per outer iteration, so the
+    #   overall expression stays a selection matrix scaled per-row.
+    #   For now we only handle the direct diagonal form; the indirect
+    #   KD * Sum is left to Phase J3 (still correctly sparse via the
+    #   Sum-KD sparsity analyzer).
     if (len(delta_factors) == 1
-            and len(sum_factors) == 1
+            and len(sum_factors) >= 1
             and len(indexed_factors) == 0
             and not other_factors):
         d = delta_factors[0]
         d_names = {_name_of(d.args[0]), _name_of(d.args[1])}
-        if d_names != {outer_name, diff_name}:
-            raise NotImplementedError(
-                f"LoopEqn J translator: DiagTerm with unsupported "
-                f"KroneckerDelta {d}"
+        if d_names == {outer_name, diff_name} and len(sum_factors) == 1:
+            inner_mm = _sum_to_matmul(
+                sum_factors[0], outer_idx, var_map
             )
-        inner_mm = _sum_to_matmul(
-            sum_factors[0], outer_idx, var_map
+            return coeff * Diag(inner_mm)
+        # Indirect KD — let Phase J3 handle (Sum-KD sparsity is
+        # already computed correctly by the sparsity analyzer).
+        result = _translate_kronecker_delta(
+            d, outer_idx, diff_idx, n_outer, var_map)
+        if result is not None:
+            # Can't fold the Sum into a Diag for indirect patterns —
+            # fall through to Phase J3 which handles them via sparse
+            # kernels.
+            pass
+        raise NotImplementedError(
+            f"LoopEqn J translator: DiagTerm with unsupported "
+            f"KroneckerDelta {d}"
         )
-        return coeff * Diag(inner_mm)
 
     # No shape matched — Phase J3 territory.
     raise NotImplementedError(
@@ -900,11 +993,115 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
             for r, c in param_hits:
                 all_positions.update(zip(r.tolist(), c.tolist()))
 
+        # --- Sum-KD pattern: a factor is ``Sum(... * KD(diff,
+        # map[dummy]) * Param2D[row_expr, dummy] * ..., (dummy,
+        # lo, hi))``.  The KD collapses the sum to specific
+        # columns; a 2-D Param further restricts which dummy
+        # values contribute per row.
+        has_sum_kd = False
+        for f in term.atoms(sp.Sum):
+            if not isinstance(f, sp.Sum):
+                continue
+            sum_body = f.args[0]
+            sum_lim = f.args[1:]
+            if len(sum_lim) != 1:
+                continue
+            sdummy, slo, shi = sum_lim[0]
+            s_range = int(shi) - int(slo) + 1
+            # Find KD(diff_idx, expr_of_dummy) inside the Sum body
+            sbody_factors = (list(sum_body.args)
+                             if isinstance(sum_body, sp.Mul)
+                             else [sum_body])
+            col_map_name = None
+            for sf in sbody_factors:
+                if not isinstance(sf, KroneckerDelta):
+                    continue
+                sa0, sa1 = sf.args
+                # One side must be the diff_idx, the other an
+                # Indexed(param, dummy).
+                for sarg_d, sarg_m in [(sa0, sa1), (sa1, sa0)]:
+                    if not (isinstance(sarg_d, sp.Idx)
+                            and _name_of(sarg_d) == diff_name):
+                        continue
+                    if not isinstance(sarg_m, sp.Indexed):
+                        continue
+                    if len(sarg_m.indices) != 1:
+                        continue
+                    sinner = sarg_m.indices[0]
+                    if not (isinstance(sinner, sp.Idx)
+                            and sinner == sdummy):
+                        continue
+                    mname = sarg_m.base.name
+                    mobj = var_map.get(mname)
+                    if isinstance(mobj, ParamBase) and mobj.dim == 1:
+                        col_map_name = mname
+                        break
+                if col_map_name is not None:
+                    break
+            if col_map_name is None:
+                continue
+            # We found the column-map param.  Now look for a 2-D
+            # Param with axes (outer_expr, dummy) inside the Sum
+            # body to restrict which dummy values contribute per
+            # row.
+            col_map = _map_values(col_map_name)
+            sparse_param = None
+            sp_row_map_name = None
+            for sf in sbody_factors:
+                if not isinstance(sf, sp.Indexed):
+                    continue
+                sbase = sf.base.name
+                sobj = var_map.get(sbase)
+                if not isinstance(sobj, ParamBase):
+                    continue
+                if sobj.dim != 2 or len(sf.indices) != 2:
+                    continue
+                sax0, sax1 = sf.indices
+                # One axis must be the Sum dummy, the other the
+                # outer index (possibly indirect).
+                if sax1 == sdummy:
+                    kind_row, map_row = _classify_axis(sax0)
+                elif sax0 == sdummy:
+                    kind_row, map_row = _classify_axis(sax1)
+                else:
+                    continue
+                if kind_row in ('outer', 'indirect_outer'):
+                    sparse_param = sobj
+                    sp_row_map_name = map_row  # None for direct
+                    break
+            # Build sparsity entries.
+            if sparse_param is not None and hasattr(
+                    sparse_param.v, 'tocsr'):
+                csr = sparse_param.v.tocsr()
+                row_map = (_map_values(sp_row_map_name)
+                           if sp_row_map_name else
+                           np.arange(n_outer, dtype=np.int64))
+                for i_outer in range(n_outer):
+                    real_row = int(row_map[i_outer])
+                    start = int(csr.indptr[real_row])
+                    stop = int(csr.indptr[real_row + 1])
+                    for pos in range(start, stop):
+                        pp = int(csr.indices[pos])
+                        col = int(col_map[pp])
+                        if 0 <= col < n_diff:
+                            all_positions.add((i_outer, col))
+            else:
+                # No 2-D Param filter — every dummy value
+                # contributes to every row.
+                unique_cols = set(int(c) for c in col_map
+                                  if 0 <= int(c) < n_diff)
+                for i_outer in range(n_outer):
+                    for col in unique_cols:
+                        all_positions.add((i_outer, col))
+            has_sum_kd = True
+            # Don't break — union sparsity from all Sum-KD atoms
+
         if (not has_diag_kron
                 and not has_indirect_diag_kron
                 and not has_shifted_diag_kron
                 and not has_probed_kron
-                and not param_hits):
+                and not param_hits
+                and not has_sum_kd):
             has_dense_fallback = True
             break
 
