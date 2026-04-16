@@ -68,7 +68,8 @@ class Equations:
                 # this is not fully initialize of Parameters, please use param_initializer
                 self.PARAM[symbol_.name] = Param(symbol_.name,
                                                  value=symbol_.value,
-                                                 dim=symbol_.dim)
+                                                 dim=symbol_.dim,
+                                                 dtype=getattr(symbol_, '_solverz_dtype', float))
             elif isinstance(symbol_, iAliasVar):
                 self.PARAM[symbol_.name] = Param(symbol_.name,
                                                  value=symbol_.value,

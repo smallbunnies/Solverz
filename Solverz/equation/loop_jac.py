@@ -921,6 +921,13 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
         return rows, cols
 
     if has_dense_fallback:
+        import warnings
+        warnings.warn(
+            f"compute_loop_jac_sparsity: dense fallback triggered "
+            f"for {n_outer}×{n_diff} block ({n_outer * n_diff} nnz). "
+            f"Consider pre-computing index expressions as Params to "
+            f"help the sparsity analyzer.",
+            stacklevel=3)
         return _dense_fallback()
 
     if not all_positions:

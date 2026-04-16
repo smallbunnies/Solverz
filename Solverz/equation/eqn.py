@@ -817,8 +817,9 @@ class LoopEqn(Eqn):
             elif isinstance(sol_obj, ParamBase):
                 # ParamBase exposes its sympy symbol as ``.sym`` (or
                 # equivalent). We look up by name from the model.
-                symbols_dict[sol_obj.name] = Para(sol_obj.name,
-                                                   dim=sol_obj.dim)
+                para_sym = Para(sol_obj.name, dim=sol_obj.dim)
+                para_sym._solverz_dtype = getattr(sol_obj, 'dtype', float)
+                symbols_dict[sol_obj.name] = para_sym
             else:
                 raise TypeError(
                     f"var_map entry {indexed_base_name!r} must be a "
