@@ -452,6 +452,254 @@ def Sum(expr, dummy, n: int = None):
     )
 
 
+# Module-level counter used to generate unique param names for the
+# auxiliary ``Idx`` symbols produced by :meth:`IndexSet.idx`. Sharing
+# the counter across all ``IndexSet`` instances avoids collisions
+# when two calls to ``IndexSet.idx('i')`` happen to reuse the same
+# name.
+_INDEX_SET_IDX_COUNTER = [0]
+
+
+class IndexSet:
+    """Named set of integer indices used as the outer iteration range
+    of a :class:`LoopEqn` / :class:`LoopOde`.
+
+    Pyomo's ``Set`` primitive inspired the API. Two construction forms:
+
+    * Identity range — ``Set('Nodes', n)`` where ``n`` is a positive
+      ``int``. The set is the full range ``[0, n)``. The translator
+      emits a plain ``for i in range(n):`` loop; no auxiliary Param is
+      stored.
+    * Explicit subset — ``Set('PVPQ', values)`` where ``values`` is a
+      1-D integer sequence (``np.ndarray``, ``list``, ``tuple``, or
+      ``range`` — anything ``np.asarray(..., dtype=int)`` can eat).
+      The values must be non-negative and duplicate-free. An internal
+      ``Param`` named after the set is created lazily when the set is
+      registered on a :class:`Model` so the generated kernel can read
+      ``for _i in range(len(values)): i = set_param[_i]``.
+
+    The set exposes four attributes the LoopEqn machinery consumes:
+
+    * :attr:`size` — length of the set.
+    * :attr:`is_identity` — True when values are ``[0, len)`` so the
+      direct-outer (no Param) fast path can be used.
+    * :attr:`param` — the auxiliary 1-D int ``Param`` for a non-identity
+      set; ``None`` for an identity set. Lazily created when
+      :meth:`_register` is called by ``Model.__setattr__``.
+    * :attr:`values` — the underlying ``np.ndarray`` of indices.
+
+    Examples
+    --------
+    Identity range (equivalent to ``Idx('i', n)`` + explicit ``n_outer``)::
+
+        m.Bus = Set('Bus', nb)
+        i = m.Bus.idx('i')
+        m.eqn = LoopEqn('eqn', outer=m.Bus, body=body, model=m)
+
+    Explicit subset (replaces the ``Param + Idx + indirect-access``
+    pattern)::
+
+        m.PVPQ = Set('PVPQ', pv_pq_array)
+        i = m.PVPQ.idx('i')
+        m.eqn = LoopEqn('eqn', outer=m.PVPQ, body=m.Vm[i], model=m)
+    """
+
+    def __init__(self, name: str, values):
+        if not isinstance(name, str) or not name:
+            raise ValueError("IndexSet name must be a non-empty string")
+        self.name = name
+
+        # Identity range: Set('X', n) where n is an int.
+        if isinstance(values, int):
+            if values <= 0:
+                raise ValueError(
+                    f"IndexSet({name!r}, {values}): size must be positive"
+                )
+            self._values = np.arange(values, dtype=np.int64)
+            self._is_identity = True
+        else:
+            arr = np.asarray(values).reshape(-1)
+            if arr.size == 0:
+                raise ValueError(
+                    f"IndexSet({name!r}): empty value sequence"
+                )
+            if not np.issubdtype(arr.dtype, np.integer):
+                # Accept float arrays whose entries happen to be
+                # integral, as long as the round-trip is exact. Users
+                # often build index arrays via ``np.concatenate`` which
+                # upcasts to float when any input was floating.
+                if not np.all(arr == np.floor(arr)):
+                    raise TypeError(
+                        f"IndexSet({name!r}): values must be integers"
+                    )
+                arr = arr.astype(np.int64)
+            else:
+                arr = arr.astype(np.int64, copy=False)
+            if (arr < 0).any():
+                raise ValueError(
+                    f"IndexSet({name!r}): negative values not allowed"
+                )
+            if len(np.unique(arr)) != arr.size:
+                raise ValueError(
+                    f"IndexSet({name!r}): duplicate values not allowed "
+                    f"(the set must be injective into the target "
+                    f"variable's index space)."
+                )
+            self._values = arr
+            # Identity iff values == [0, len).
+            self._is_identity = bool(
+                np.array_equal(arr, np.arange(arr.size, dtype=np.int64))
+            )
+        self._param = None  # populated lazily for non-identity sets
+
+    @property
+    def size(self) -> int:
+        return int(self._values.size)
+
+    @property
+    def is_identity(self) -> bool:
+        return self._is_identity
+
+    @property
+    def values(self) -> np.ndarray:
+        return self._values
+
+    @property
+    def param(self):
+        """The auxiliary 1-D int :class:`Param` that stores the set's
+        values at runtime. Materialised lazily on first access so body
+        rewriters can reference it without waiting for ``Model.add``.
+
+        Identity full-range sets (``values == arange(size)``) still
+        receive a Param — at the API layer ``is_identity`` only tells
+        the translator "no gather needed when the target is the same
+        size", but small-identity sets used as subsets of a larger
+        target (e.g. ``Ref = Set('Ref', [0])`` indexing a 30-bus
+        Var) still need the Param at runtime to emit the gather.
+        """
+        if self._param is None:
+            from Solverz.equation.param import Param
+            self._param = Param(self.name, self._values, dtype=int)
+        return self._param
+
+    def idx(self, name: str) -> sp.Idx:
+        """Produce a bounded ``sympy.Idx`` sized to this set.
+
+        Body authors use the returned ``Idx`` exactly as they would a
+        bare ``Idx(name, n)`` — the body rewriter detects that the
+        ``Idx`` came from a non-identity set and transparently wraps
+        every ``Var`` / ``Param`` access with the set's gather Param.
+        """
+        if not isinstance(name, str) or not name:
+            raise ValueError("IndexSet.idx requires a non-empty name")
+        i = sp.Idx(name, self.size)
+        # Tag the Idx so the rewriter can find its parent set. We stash
+        # the tag on a module-level registry keyed by the Idx's
+        # ``name``-and-bounds fingerprint — sympy Idx objects with the
+        # same name and bounds compare equal, so using the name alone
+        # is enough to round-trip here.
+        _IDX_SET_TAGS[(str(i), int(i.lower), int(i.upper))] = self
+        return i
+
+    def __repr__(self) -> str:
+        kind = 'range' if self._is_identity else 'subset'
+        return f"IndexSet({self.name!r}, {kind}, size={self.size})"
+
+
+# Registry mapping ``(idx_name, lower, upper)`` → the ``IndexSet`` that
+# produced the Idx via :meth:`IndexSet.idx`. Consulted by
+# :func:`_rewrite_solverz_body` to detect non-identity sets and wrap
+# their accesses with the set's gather Param.
+_IDX_SET_TAGS: Dict[Tuple[str, int, int], 'IndexSet'] = {}
+
+
+def _lookup_index_set(idx_expr: sp.Expr):
+    """Return the :class:`IndexSet` that produced ``idx_expr`` via
+    :meth:`IndexSet.idx`, or ``None`` when ``idx_expr`` is a plain
+    ``sp.Idx`` not associated with a set.
+    """
+    if not isinstance(idx_expr, sp.Idx):
+        return None
+    lower = getattr(idx_expr, 'lower', None)
+    upper = getattr(idx_expr, 'upper', None)
+    if lower is None or upper is None:
+        return None
+    try:
+        key = (str(idx_expr), int(lower), int(upper))
+    except (TypeError, ValueError):
+        return None
+    return _IDX_SET_TAGS.get(key)
+
+
+def _desugar_set_idx(index_expr, var_map, model, target_len=None):
+    """When ``index_expr`` is a bounded ``sp.Idx`` produced by
+    :meth:`IndexSet.idx` for a *non-identity* set, wrap it as
+    ``sp.IndexedBase(set_name)[index_expr]`` so the rest of the
+    LoopEqn pipeline sees the familiar indirect-outer shape
+    (``m.V[map[i]]``). Identity sets and plain Idxs pass through
+    unchanged.
+
+    ``target_len`` is the size of the array being indexed (the first
+    axis of a 2-D Param, or the length of a 1-D Var/Param). When the
+    target is subset-aligned (``target_len == iset.size``) we leave the
+    index bare — the user allocated storage directly over the subset
+    and doesn't want a gather.
+
+    Side-effect: records the set's auxiliary Param in ``var_map`` so
+    the generated kernel signature receives it. The Param is also
+    pulled out of its parent :class:`IndexSet` by
+    :meth:`Model.create_instance` which recognises IndexSet attributes
+    and registers their ``.param`` in ``param_dict`` automatically.
+    """
+    # Only single-atom Idx is interesting; Indexed/Add/Mul index
+    # expressions pass through (they're already the user's explicit
+    # indirect form).
+    if not isinstance(index_expr, sp.Idx):
+        return index_expr
+    iset = _lookup_index_set(index_expr)
+    if iset is None:
+        return index_expr
+    # Subset-aligned target: user already stored exactly ``iset.size``
+    # values (e.g. ``Vm_pinned`` of length 6 indexed by a 6-element
+    # pin set). Use the bare Idx — indirection would read out of bounds.
+    if target_len is not None and target_len == iset.size:
+        return index_expr
+    # Identity sets only wrap when the target is strictly larger than
+    # the set (e.g. a ``Ref = Set('Ref', [0])`` of size 1 indexing a
+    # 30-bus Var — the set is "identity in its own value space" but
+    # still a *subset* of the target). Identity sets whose ``param``
+    # is None must first materialise one for the gather to have a
+    # runtime operand.
+    if iset.is_identity and (target_len is None
+                              or target_len == iset.size):
+        return index_expr
+    if iset.name not in var_map:
+        var_map[iset.name] = iset.param
+    return sp.IndexedBase(iset.name)[index_expr]
+
+
+def _target_first_axis_len(sol_obj):
+    """Return ``sol_obj.value.shape[0]`` (or ``.v.shape[0]`` for
+    Params / Vars that expose the array under ``.v``). Used by the
+    body rewriter to decide whether a set-tagged Idx should be
+    gathered through the set's Param or passed through bare."""
+    if sol_obj is None:
+        return None
+    arr = None
+    for attr in ('value', 'v'):
+        val = getattr(sol_obj, attr, None)
+        if val is not None:
+            arr = val
+            break
+    if arr is None:
+        return None
+    try:
+        import numpy as _np
+        return int(_np.asarray(arr).shape[0])
+    except Exception:
+        return None
+
+
 def _rewrite_solverz_body(body, model):
     """Rewrite Solverz ``IdxVar``/``IdxPara`` nodes inside a LoopEqn
     body to their ``sympy.IndexedBase`` equivalents, and return the
@@ -534,7 +782,8 @@ def _rewrite_solverz_body(body, model):
             return sp.sympify(expr)
         if isinstance(expr, (IdxVar, IdxPara)):
             name = expr.name0
-            _resolve(name)  # populate var_map and validate
+            target_obj = _resolve(name)  # populate var_map and validate
+            target_len = _target_first_axis_len(target_obj)
             # ``IdxSymBasic.index`` is either a single sympy Expr / Idx
             # (1-D access) or a tuple (2-D access). Recurse so any
             # inner Solverz ``IdxVar`` / ``IdxPara`` used as part of
@@ -542,9 +791,14 @@ def _rewrite_solverz_body(body, model):
             # nodes LoopEqn) also gets rewritten to ``IndexedBase``.
             raw_idx = expr.index
             if isinstance(raw_idx, tuple):
-                new_idx = tuple(walk(x) for x in raw_idx)
+                new_idx = tuple(
+                    _desugar_set_idx(walk(x), var_map, model,
+                                     target_len if k == 0 else None)
+                    for k, x in enumerate(raw_idx)
+                )
             else:
-                new_idx = walk(raw_idx)
+                new_idx = _desugar_set_idx(walk(raw_idx), var_map,
+                                            model, target_len)
             return sp.IndexedBase(name)[new_idx]
 
         # Bare Solverz ``iVar`` / ``Para`` (non-indexed) — e.g. a
@@ -591,12 +845,19 @@ def _rewrite_solverz_body(body, model):
             # have mixed native and Solverz styles. Register the base
             # name in var_map if the model has a matching attribute.
             name = expr.base.name
-            if hasattr(model, name) and name not in var_map:
-                _resolve(name)
+            target_len = None
+            if hasattr(model, name):
+                if name not in var_map:
+                    _resolve(name)
+                target_len = _target_first_axis_len(var_map.get(name))
             # Recurse into the indices too — the user might build a
             # native-sympy outer with a Solverz-indexed inner (weird
             # but legal) and we want the same uniform rewrite.
-            new_indices = tuple(walk(i) for i in expr.indices)
+            new_indices = tuple(
+                _desugar_set_idx(walk(ix), var_map, model,
+                                 target_len if k == 0 else None)
+                for k, ix in enumerate(expr.indices)
+            )
             return expr.base[new_indices if len(new_indices) > 1
                              else new_indices[0]]
 
@@ -734,13 +995,52 @@ class LoopEqn(Eqn):
 
     def __init__(self,
                  name: str,
-                 outer_index,
-                 body,
+                 outer_index=None,
+                 body=None,
                  n_outer: int = None,
                  var_map: Dict[str, object] = None,
-                 model=None):
+                 model=None,
+                 outer=None):
         if not isinstance(name, str):
             raise ValueError("Equation name must be string!")
+        # ``outer=IndexSet`` is an optional forward declaration of the set
+        # the outer index belongs to. When given, it must be consistent
+        # with ``outer_index`` (if that Idx was produced by a Set, the
+        # Set must match). When ``outer_index`` is omitted, ``outer=``
+        # is a convenience that synthesises one via ``outer.idx(...)``.
+        if outer is not None:
+            if not isinstance(outer, IndexSet):
+                raise TypeError(
+                    f"outer= must be an IndexSet, got "
+                    f"{type(outer).__name__}"
+                )
+            if outer_index is None:
+                outer_index = outer.idx(f'_outer_{outer.name}')
+            else:
+                tagged = _lookup_index_set(outer_index)
+                if tagged is not None and tagged is not outer:
+                    raise ValueError(
+                        f"LoopEqn: outer_index was produced by Set "
+                        f"{tagged.name!r} but outer= points to a "
+                        f"different Set {outer.name!r}."
+                    )
+            if n_outer is None:
+                n_outer = outer.size
+            elif n_outer != outer.size:
+                raise ValueError(
+                    f"LoopEqn: n_outer={n_outer} contradicts "
+                    f"outer={outer!r}.size={outer.size}"
+                )
+        # When ``outer_index`` itself came from an IndexSet and
+        # ``outer=`` was not supplied, still auto-infer ``n_outer``
+        # from the set's size so the two declaration styles are
+        # interchangeable.
+        if outer_index is not None and n_outer is None:
+            tagged = _lookup_index_set(outer_index)
+            if tagged is not None:
+                n_outer = tagged.size
+        if body is None:
+            raise ValueError("LoopEqn: body is required")
         if not isinstance(outer_index, sp.Idx):
             raise TypeError(
                 f"outer_index must be a sympy.Idx, got {type(outer_index).__name__}"
@@ -1974,12 +2274,13 @@ class LoopOde(LoopEqn, Ode):
 
     def __init__(self,
                  name: str,
-                 outer_index: sp.Idx,
-                 body,
-                 diff_var: Union[iVar, IdxVar, Var],
+                 outer_index=None,
+                 body=None,
+                 diff_var: Union[iVar, IdxVar, Var] = None,
                  n_outer: int = None,
                  model=None,
-                 var_map=None):
+                 var_map=None,
+                 outer=None):
         # Defer to LoopEqn.__init__ for all the body rewriting,
         # var_map inference, sparse-walker collection, SYMBOLS
         # assembly, and NUM_EQN building. After it returns, ``self``
@@ -1990,7 +2291,8 @@ class LoopOde(LoopEqn, Ode):
                          body=body,
                          n_outer=n_outer,
                          model=model,
-                         var_map=var_map)
+                         var_map=var_map,
+                         outer=outer)
         # Overwrite ``LHS`` with the time-derivative expression so
         # Solverz treats ``self`` like any other ``Ode`` during DAE
         # partitioning. ``diff_var`` is stashed for ``eval_lhs`` and

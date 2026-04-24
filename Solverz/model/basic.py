@@ -62,6 +62,16 @@ class Model:
                 nstep = 1 if nstep is None else nstep
                 self.alias_dict[key] = value
                 nstep = np.max([nstep, value.step])
+            else:
+                # IndexSet attributes carry an auxiliary 1-D int Param
+                # that the generated kernel needs whenever the body
+                # rewriter emitted a gather through this set. Register
+                # the Param only when the set actually materialised
+                # one (i.e. a body ended up using ``set_param[i]``);
+                # set._param stays None when no gather was needed.
+                from Solverz.equation.eqn import IndexSet
+                if isinstance(value, IndexSet) and value._param is not None:
+                    self.param_dict[key] = value._param
 
         if any([isinstance(arg, Ode) for arg in self.eqn_dict.values()]):
             if nstep is not None:

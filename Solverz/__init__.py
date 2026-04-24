@@ -1,4 +1,4 @@
-from Solverz.equation.eqn import Eqn, LoopEqn, LoopOde, Ode, Idx, Sum
+from Solverz.equation.eqn import Eqn, LoopEqn, LoopOde, Ode, Idx, Sum, IndexSet as Set
 from Solverz.equation.equations import AE, FDAE, DAE
 from Solverz.equation.param import Param, IdxParam, TimeSeriesParam
 from Solverz.sym_algebra.functions import (Sign, Abs, transpose, exp, Diag, Mat_Mul, sin, cos, atan2, Min,

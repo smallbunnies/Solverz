@@ -2335,3 +2335,104 @@ def test_loop_jac_pattern4_non_identity_map_select_mat():
             f"non-identity Pattern 4 must route {ed.name} to J2, got J3 fallback"
         )
 
+
+
+# ----------------------------------------------------------------------
+# IndexSet primitive (#129)
+# ----------------------------------------------------------------------
+
+
+def test_index_set_identity_range_attributes():
+    """``Set('X', n)`` builds an identity range: ``.is_identity`` is
+    True and ``.size`` equals the positional argument. ``.param``
+    materialises on demand — it stays unregistered on the model
+    unless the body rewriter actually emits a gather through it
+    (which happens only when an identity Set is smaller than the
+    target it indexes, e.g. a one-element Ref set indexing a 30-bus
+    Var)."""
+    from Solverz import Set
+
+    s = Set('Bus', 4)
+    assert s.is_identity
+    assert s.size == 4
+    # Materialised ``.param`` carries the expected [0..n) values.
+    np.testing.assert_array_equal(s.param.v, np.arange(4))
+
+
+def test_index_set_explicit_subset_creates_param():
+    """An explicit non-identity set materialises a 1-D int Param
+    named after the set. Duplicate or negative values raise."""
+    import pytest
+    from Solverz import Set
+    from Solverz.equation.param import ParamBase
+
+    s = Set('PVPQ', np.array([2, 0, 4], dtype=int))
+    assert not s.is_identity
+    assert isinstance(s.param, ParamBase)
+    assert s.size == 3
+    np.testing.assert_array_equal(s.param.v, [2, 0, 4])
+
+    with pytest.raises(ValueError, match='duplicate'):
+        Set('Bad', [1, 1, 2])
+    with pytest.raises(ValueError, match='negative'):
+        Set('Neg', [-1, 2])
+
+
+def test_index_set_subset_loopeqn_end_to_end():
+    """End-to-end: a LoopEqn whose outer iterates an explicit subset
+    converges through the Newton solver and recovers the pinned
+    targets — proving that the Set-based indirect-outer desugaring
+    produces a correct F / J pair through ``module_printer`` rendering.
+    """
+    from Solverz import Set
+    import pytest as _pytest  # local alias; file already imports pytest
+
+    n = 6
+    subset = np.array([0, 2, 4], dtype=int)
+    pin = np.array([1, 3, 5], dtype=int)
+    targets = np.array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0])
+
+    m = Model()
+    m.x = Var('x', np.zeros(n))
+    m.target = Param('target', targets)
+    m.Sub = Set('Sub', subset)
+    m.Pin = Set('Pin', pin)
+    i = m.Sub.idx('i')
+    j = m.Pin.idx('j')
+    m.eqn_free = LoopEqn('eqn_free', outer_index=i,
+                         body=m.x[i] - m.target[i], model=m)
+    m.eqn_pin = LoopEqn('eqn_pin', outer_index=j,
+                        body=m.x[j] - m.target[j], model=m)
+
+    spf, y0 = m.create_instance()
+    mdl, y = _mdl_from_module(spf, y0)
+    sol = nr_method(mdl, y)
+    np.testing.assert_allclose(sol.y['x'], targets, atol=1e-10)
+
+
+def test_index_set_outer_kwarg_matches_outer_index():
+    """Using ``outer=<IndexSet>`` instead of ``outer_index=<Idx>`` is
+    equivalent — both produce the same LoopEqn when the index
+    originated from the same set."""
+    from Solverz import Set
+
+    n = 4
+    m = Model()
+    m.x = Var('x', np.zeros(n))
+    m.target = Param('target', np.arange(1.0, n + 1))
+    m.Sub = Set('Sub', np.array([0, 2], dtype=int))
+    i = m.Sub.idx('i')
+    eqn_via_outer_index = LoopEqn(
+        'e1', outer_index=i, body=m.x[i] - m.target[i], model=m,
+    )
+    # Reset model so the second LoopEqn doesn't collide
+    m2 = Model()
+    m2.x = Var('x', np.zeros(n))
+    m2.target = Param('target', np.arange(1.0, n + 1))
+    m2.Sub = Set('Sub', np.array([0, 2], dtype=int))
+    ii = m2.Sub.idx('i')
+    eqn_via_outer = LoopEqn(
+        'e2', outer=m2.Sub, outer_index=ii,
+        body=m2.x[ii] - m2.target[ii], model=m2,
+    )
+    assert eqn_via_outer_index.n_outer == eqn_via_outer.n_outer == 2
