@@ -541,6 +541,22 @@ def _classify_and_translate_term(term: sp.Expr,
             f"KroneckerDelta {d}"
         )
 
+    # Pattern 4 (#133): Sum-KD → sliced Param.
+    # ``Sum(f(outer, dummy) * KD(diff, map[dummy]), (dummy, ...))`` collapses
+    # via ``dummy := inv_map[diff]`` to ``f(outer, inv_map[diff])``. When
+    # ``map`` is the identity, the result is ``f(outer, diff)`` — a bare
+    # 2-D Param access that ``_translate_indexed_param`` already handles.
+    if (len(sum_factors) == 1
+            and len(delta_factors) == 0
+            and len(indexed_factors) == 0
+            and not other_factors):
+        collapsed = _try_sum_kd_collapse(
+            sum_factors[0], outer_idx, diff_idx,
+            n_outer, var_map, n_diff,
+        )
+        if collapsed is not None:
+            return coeff * collapsed
+
     # No shape matched — Phase J3 territory.
     raise NotImplementedError(
         f"LoopEqn J translator: cannot classify term {term!r}. "
@@ -548,6 +564,116 @@ def _classify_and_translate_term(term: sp.Expr,
         f"indexed={len(indexed_factors)}, sums={len(sum_factors)}, "
         f"other={len(other_factors)}. Reserved for Phase J3 "
         f"(LoopEqn-native per-entry kernel emitter)."
+    )
+
+
+def _try_sum_kd_collapse(
+    sum_node: sp.Sum,
+    outer_idx: sp.Idx,
+    diff_idx: sp.Idx,
+    n_outer: int,
+    var_map: Dict[str, object],
+    n_diff: int,
+):
+    """Pattern 4 (#133): recognise
+
+        Sum(f(outer, dummy) * KroneckerDelta(diff, map[dummy]),
+            (dummy, lo, hi))
+
+    and collapse via ``dummy := inv_map[diff]`` to
+    ``f(outer, inv_map[diff])``.
+
+    Today only the identity-map case is supported — the collapsed body
+    is ``f(outer, diff)``, which downstream translation handles. For a
+    non-identity ``map``, the inverse lookup would require either a
+    permuted Param registration or a new Select-Mat primitive; both are
+    deferred and we return ``None`` so the caller falls back to Phase J3
+    (still correct, just slower).
+
+    Returns the translated Solverz expression, or ``None`` when the
+    shape doesn't match.
+    """
+    from Solverz.equation.param import ParamBase
+
+    if len(sum_node.args) != 2:
+        return None
+    body, sum_range = sum_node.args
+    if len(sum_range) != 3:
+        return None
+    dummy = sum_range[0]
+    dummy_name = _name_of(dummy)
+    diff_name = _name_of(diff_idx)
+
+    factors = list(body.args) if isinstance(body, sp.Mul) else [body]
+
+    kd_factor = None
+    map_obj = None
+    for f in factors:
+        if not isinstance(f, KroneckerDelta):
+            continue
+        a0, a1 = f.args
+        for arg_d, arg_m in ((a0, a1), (a1, a0)):
+            if not (isinstance(arg_d, sp.Idx) and _name_of(arg_d) == diff_name):
+                continue
+            if not isinstance(arg_m, sp.Indexed):
+                continue
+            if len(arg_m.indices) != 1:
+                continue
+            inner = arg_m.indices[0]
+            if not (isinstance(inner, sp.Idx) and _name_of(inner) == dummy_name):
+                continue
+            base_name = arg_m.base.name
+            mobj = var_map.get(base_name)
+            if not (isinstance(mobj, ParamBase) and mobj.dim == 1):
+                continue
+            if kd_factor is not None:
+                return None  # two KDs — ambiguous, skip
+            kd_factor = f
+            map_obj = mobj
+    if kd_factor is None:
+        return None
+
+    map_v = np.asarray(map_obj.v, dtype=np.int64).reshape(-1)
+    nd = n_diff if n_diff > 0 else (int(map_v.max()) + 1 if len(map_v) else 0)
+    if nd <= 0:
+        return None
+    is_identity = (len(map_v) == nd
+                   and np.array_equal(map_v, np.arange(nd)))
+    if not is_identity:
+        return None
+
+    other_factors = [f for f in factors if f is not kd_factor]
+    new_body = sp.Mul(*other_factors) if other_factors else sp.S.One
+    substituted = new_body.subs(dummy, diff_idx)
+
+    # Safety: the substituted expression must be recognisable as a bare
+    # ``Indexed(2-D Param, outer, diff)``. If it's more complex (e.g.
+    # multiple indexed factors, scalar coefficients via outer, etc.) the
+    # downstream translator can't produce a matrix of shape
+    # ``(n_outer, n_diff)`` and we'd emit a DeriExpr whose evaluated
+    # ``Value0`` has incompatible shape with the JacBlock's ``EqnAddr``.
+    # Restrict Pattern 4 to the single-2-D-Param case to avoid that.
+    if isinstance(substituted, sp.Indexed):
+        single_indexed = substituted
+    else:
+        return None
+    if single_indexed.base.name not in var_map:
+        return None
+    sol_obj = var_map[single_indexed.base.name]
+    if not (isinstance(sol_obj, ParamBase) and sol_obj.dim == 2):
+        return None
+    # Shape must match (n_outer, n_diff). If either axis mismatches the
+    # LoopEqn block's actual sizes, the resulting Para expression would
+    # evaluate a too-large matrix and JacBlock.ParseSp would crash on
+    # out-of-bounds row indices.
+    val_shape = sol_obj.value.shape if sol_obj.value is not None else None
+    if val_shape is None or len(val_shape) != 2:
+        return None
+    if val_shape[0] != n_outer or val_shape[1] != nd:
+        return None
+
+    return loop_jac_to_solverz_expr(
+        substituted, outer_idx, diff_idx, n_outer, var_map, n_diff=nd,
     )
 
 

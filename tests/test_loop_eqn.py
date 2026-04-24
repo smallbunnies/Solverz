@@ -1999,3 +1999,133 @@ def test_loop_eqn_select_mat_n_diff_from_var_size():
         # selection matrix only hits columns 0-3.
         J_dense = J.toarray()
         assert np.all(J_dense[:n_pipe, 4:] == 0)
+
+
+# ----------------------------------------------------------------------
+# Phase J2 translator extensions (#133)
+# ----------------------------------------------------------------------
+
+
+def _force_translate(canonical, outer_idx, diff_idx, n_outer, var_map, n_diff):
+    """Thin wrapper around ``loop_jac_to_solverz_expr`` used by the
+    Pattern 4 / 1 / 2 / 3 tests — confirms the canonical expression is
+    classifiable as Phase J1/J2 (rather than a Phase J3 fallback)."""
+    from Solverz.equation.loop_jac import loop_jac_to_solverz_expr
+    return loop_jac_to_solverz_expr(
+        canonical, outer_idx, diff_idx, n_outer, var_map, n_diff=n_diff,
+    )
+
+
+def test_loop_jac_pattern4_sum_kd_identity_map():
+    """#133 Pattern 4 — identity-map Sum-KD collapses to bare 2-D Param.
+
+    Body: ``Sum(V[i, p] * x[map[p]], (p, 0, N-1))``. Differentiating
+    w.r.t. ``x[k]`` yields ``Sum(V[i, p] * KD(k, map[p]), ...)`` which
+    the canonicalizer cannot pull apart (``map[p]`` isn't the sum
+    dummy). With ``map`` the identity permutation, Pattern 4 collapses
+    ``dummy := k`` → ``V[i, k]`` — a bare Indexed that
+    ``_translate_indexed_param`` handles as ``Para(V, dim=2)``.
+    """
+    from Solverz import LoopEqn, Model, Param, Var
+    from Solverz.equation.loop_jac import canonicalize_kronecker
+
+    n_outer = 3
+    n_dummy = 5
+    V_val = np.arange(n_outer * n_dummy, dtype=float).reshape(n_outer, n_dummy)
+    m = Model()
+    m.x = Var('x', np.zeros(n_dummy))
+    m.V = Param('V', V_val, dim=2, sparse=False)
+    m.map_id = Param('map_id', np.arange(n_dummy, dtype=np.int64), dtype=int)
+
+    i = sp.Idx('i')
+    p = sp.Idx('p')
+    V_sym = sp.IndexedBase('V')
+    x_sym = sp.IndexedBase('x')
+    map_sym = sp.IndexedBase('map_id')
+    body = sp.Sum(V_sym[i, p] * x_sym[map_sym[p]], (p, 0, n_dummy - 1))
+
+    m.eqn_loop = LoopEqn('eqn_loop',
+                         outer_index=i, n_outer=n_outer, body=body,
+                         var_map={'x': m.x, 'V': m.V, 'map_id': m.map_id})
+
+    k = sp.Idx('_sz_loop_dk')
+    raw = sp.diff(body, x_sym[k])
+    canonical = canonicalize_kronecker(raw, i, k)
+    # Sanity: the canonical form must still contain the Sum and KD —
+    # if the canonicalizer accidentally collapsed it we aren't testing
+    # Pattern 4.
+    assert canonical.has(sp.Sum), f"canonical unexpectedly eager: {canonical}"
+    assert canonical.has(sp.KroneckerDelta), canonical
+    translated = _force_translate(
+        canonical, i, k, n_outer, m.eqn_loop.var_map, n_diff=n_dummy,
+    )
+    from Solverz.sym_algebra.symbols import Para
+    assert isinstance(translated, Para)
+    assert translated.name == 'V'
+
+
+def test_loop_jac_pattern4_full_loop_eqn_identity():
+    """End-to-end: a LoopEqn whose body indexes the Var via an
+    identity map reaches Phase J2 (no LoopEqnDiff derivative)."""
+    from Solverz import LoopEqn, Model, Param, Var
+    from Solverz.equation.eqn import LoopEqnDiff
+
+    n_outer = 4
+    n_dummy = 6
+    V_val = np.arange(n_outer * n_dummy, dtype=float).reshape(n_outer, n_dummy)
+    m = Model()
+    m.x = Var('x', np.zeros(n_dummy))
+    m.V = Param('V', V_val, dim=2, sparse=False)
+    m.map_id = Param('map_id', np.arange(n_dummy, dtype=np.int64), dtype=int)
+    i = sp.Idx('i')
+    p = sp.Idx('p')
+    x_sym = sp.IndexedBase('x')
+    V_sym = sp.IndexedBase('V')
+    map_sym = sp.IndexedBase('map_id')
+    body = sp.Sum(V_sym[i, p] * x_sym[map_sym[p]], (p, 0, n_dummy - 1))
+    m.eqn_sliced = LoopEqn('eqn_sliced',
+                           outer_index=i, n_outer=n_outer,
+                           body=body,
+                           var_map={'x': m.x, 'V': m.V, 'map_id': m.map_id})
+    m.eqn_sliced.derive_derivative()
+    assert m.eqn_sliced.derivatives, "expected a derivative w.r.t. x"
+    for ed in m.eqn_sliced.derivatives.values():
+        assert not isinstance(ed, LoopEqnDiff), (
+            f"Pattern 4 translator should route {ed.name} to Phase J2, "
+            f"but got a J3 LoopEqnDiff fallback"
+        )
+
+
+def test_loop_jac_pattern4_non_identity_map_falls_back():
+    """Pattern 4 non-identity maps are deferred to Phase J3 (not yet
+    implemented). Pin the fallback contract so the non-identity branch,
+    when it lands, is a strict extension rather than a silent rewrite."""
+    from Solverz import LoopEqn, Model, Param, Var
+    from Solverz.equation.eqn import LoopEqnDiff
+
+    n_outer = 3
+    n_dummy = 4
+    V_val = np.arange(n_outer * n_dummy, dtype=float).reshape(n_outer, n_dummy)
+    permuted = np.array([2, 0, 3, 1], dtype=np.int64)
+    m = Model()
+    m.x = Var('x', np.zeros(n_dummy))
+    m.V = Param('V', V_val, dim=2, sparse=False)
+    m.map_perm = Param('map_perm', permuted, dtype=int)
+
+    i = sp.Idx('i')
+    p = sp.Idx('p')
+    x_sym = sp.IndexedBase('x')
+    V_sym = sp.IndexedBase('V')
+    map_sym = sp.IndexedBase('map_perm')
+    body = sp.Sum(V_sym[i, p] * x_sym[map_sym[p]], (p, 0, n_dummy - 1))
+    m.eqn_loop = LoopEqn('eqn_loop',
+                         outer_index=i, n_outer=n_outer, body=body,
+                         var_map={'x': m.x, 'V': m.V, 'map_perm': m.map_perm})
+    m.eqn_loop.derive_derivative()
+    # Non-identity map → Pattern 4 returns None → J3 fallback.
+    assert any(isinstance(ed, LoopEqnDiff)
+               for ed in m.eqn_loop.derivatives.values()), (
+        "Non-identity Pattern 4 must currently fall back to LoopEqnDiff — "
+        "remove this assertion when the non-identity branch lands."
+    )
+
