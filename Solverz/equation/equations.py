@@ -11,7 +11,7 @@ from sympy import Symbol, Integer, Expr, Number as SymNumber
 from scipy.sparse import csc_array, coo_array
 # from cvxopt import spmatrix, matrix
 
-from Solverz.equation.eqn import Eqn, Ode, EqnDiff
+from Solverz.equation.eqn import Eqn, Ode, EqnDiff, LoopEqn
 from Solverz.equation.param import ParamBase, Param, IdxParam, TimeSeriesParam
 from Solverz.sym_algebra.symbols import iVar, idx, IdxVar, Para, iAliasVar
 from Solverz.sym_algebra.functions import Slice, Mat_Mul, Diag, SpDiag
@@ -323,6 +323,7 @@ class Equations:
                        y,
                        eqn_list: List[str] = None,
                        var_list: List[str] = None):
+        _guard_loopeqn_not_supported(self, 'FormPartialJac')
 
         def is_sublist(sub, main):
             n = len(sub)
@@ -913,3 +914,25 @@ class DAE(Equations):
             return f"DAE {self.name} with addresses uninitialized"
         else:
             return f"DAE {self.name} ({self.eqn_size}×{self.vsize})"
+
+
+def _guard_loopeqn_not_supported(eqs, caller: str) -> None:
+    """Raise when an equation system that contains any ``LoopEqn`` is fed
+    into an inline / partial-Jacobian code path.
+
+    LoopEqn is designed for the numba JIT module_printer: its F/J
+    kernels are emitted as explicit Python ``for``-loops that depend on
+    Numba for speed, and ``LoopEqnDiff.NUM_EQN`` returns flat 1-D nnz
+    data that only the sparse ``FormJac`` path understands. Running
+    either the inline printer or ``FormPartialJac`` on a LoopEqn model
+    therefore silently produces wrong output or Python-interpreter-speed
+    code (issue #132; C2 guard from #128).
+    """
+    offenders = [n for n, e in eqs.EQNs.items() if isinstance(e, LoopEqn)]
+    if offenders:
+        raise NotImplementedError(
+            f"{caller} does not support LoopEqn. Offending equations: "
+            f"{offenders}. LoopEqn is designed for the Numba-JIT module "
+            f"printer path; use Solverz.module_printer(..., jit=True) "
+            f"instead. See issue #132."
+        )
