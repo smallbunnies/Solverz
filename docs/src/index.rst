@@ -28,6 +28,7 @@ Additional Solverz paradigms covering multiple areas can be found in
    advanced.md
    matrix_calculus.md
    extend_matrix_calculus.md
+   loopeqn.md
    reference/index.rst
    release_notes.md
    gethelp.md
