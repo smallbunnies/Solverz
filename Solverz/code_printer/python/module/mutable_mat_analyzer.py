@@ -138,9 +138,14 @@ def _is_supported_matrix_operand(expr: Expr) -> bool:
 def _unwrap_sign_and_matrix(expr: Expr) -> Tuple[int, Optional[Expr]]:
     """If ``expr`` or ``-expr`` reduces to a supported constant matrix
     operand (``Para`` / ``_LoopJacSelectMat`` / ``Mat_Mul`` chain
-    thereof), return ``(sign, core)``. Otherwise ``(1, None)``."""
-    if _is_supported_matrix_operand(expr):
-        return 1, expr
+    thereof), return ``(sign, core)``. Otherwise ``(1, None)``.
+
+    Strip a top-level ``Mul(-1, ...)`` wrapper *before* consulting
+    :func:`_is_supported_matrix_operand` — that predicate also tolerates
+    a leading ``-1`` recursively (so negated leaves inside
+    ``Mat_Mul.args`` keep matching), and short-circuiting on it first
+    would silently drop the outer sign.
+    """
     if isinstance(expr, Mul):
         sign = 1
         rest: List[Expr] = []
@@ -151,6 +156,9 @@ def _unwrap_sign_and_matrix(expr: Expr) -> Tuple[int, Optional[Expr]]:
                 rest.append(a)
         if len(rest) == 1 and _is_supported_matrix_operand(rest[0]):
             return sign, rest[0]
+        return 1, None
+    if _is_supported_matrix_operand(expr):
+        return 1, expr
     return 1, None
 
 
