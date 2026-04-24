@@ -2,6 +2,58 @@
 
 # Release Notes
 
+## 0.8.3
+
+Safety and correctness hardening for the LoopEqn prototype landing
+through its Phase 1 refactors.
+
+### New
+
+- **`Model.add` name-collision detection** (#130). Raises
+  `ValueError` when merging a sub-model whose attribute would
+  overwrite an existing `Param` / `Var` / `Eqn` with a non-equal value.
+  Previously the clash was silent — a real IES integration bug
+  (gas- vs heat-network `pipe_from_node` parameters silently
+  overwriting each other, producing `|F| ≈ 1.5e6` residuals) motivates
+  the guard. Identical values (shared object or value-equal Params like
+  a common `Cp`) still merge without error.
+
+- **LoopEqn + inline / partial-Jacobian path guard** (#132, C2 guard
+  from #128). `made_numerical` and `Equations.FormPartialJac` now
+  raise `NotImplementedError` when the equation system contains any
+  `LoopEqn` instance. LoopEqn kernels emit Python `for`-loops that are
+  3–7× slower than the lambdify-vectorised legacy `Eqn` path without
+  Numba JIT; the guard redirects users to
+  `Solverz.module_printer(..., jit=True)`, which is LoopEqn's design
+  target. Tests that previously exercised the inline path with
+  LoopEqn are migrated to `module_printer(jit=False)`.
+
+### Performance
+
+- **Phase J2 translator extension: Sum-KD → sliced Param** (#133
+  Pattern 4). LoopEqn Jacobian blocks of the shape
+  `Sum(f(outer, dummy) * KroneckerDelta(diff, map[dummy]), (dummy,
+  lo, hi))` now collapse to a bare `Indexed(Param, outer, diff)` when
+  `map` is the identity permutation. The collapsed form goes through
+  the existing constant 2-D-Param path and skips the Phase J3 Python
+  double-for-loop kernel. Non-identity maps remain on the J3 fallback
+  (correct, just slower); see #133 for the extension plan.
+  The three other Phase J3 → J2 patterns from #133 (DiagSelectTerm,
+  KD × Sum, KD × Sum bilinear mixing) need additional infrastructure
+  (vector translation of gathered outer-indexed scalars +
+  mutable-matrix-analyzer extension for `_LoopJacSelectMat`) and are
+  tracked for a follow-up release.
+
+### Internal
+
+- The inline printer no longer registers `LoopEqn.NUM_EQN` or
+  `LoopEqnDiff._kernel_func_name` callables — that code path is now
+  unreachable behind the guard and has been pruned.
+- Value0 shape is verified against `(n_outer, n_diff)` before Pattern 4
+  emits its translated Param expression, preventing a latent
+  `IndexError` when a sparse-pattern row falls outside the LoopEqn's
+  equation-block range.
+
 ## 0.8.2
 
 **Documentation-only release.** No source-code, test, or behaviour
