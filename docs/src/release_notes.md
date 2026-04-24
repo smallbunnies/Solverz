@@ -30,19 +30,37 @@ through its Phase 1 refactors.
 
 ### Performance
 
-- **Phase J2 translator extension: Sum-KD → sliced Param** (#133
-  Pattern 4). LoopEqn Jacobian blocks of the shape
-  `Sum(f(outer, dummy) * KroneckerDelta(diff, map[dummy]), (dummy,
-  lo, hi))` now collapse to a bare `Indexed(Param, outer, diff)` when
-  `map` is the identity permutation. The collapsed form goes through
-  the existing constant 2-D-Param path and skips the Phase J3 Python
-  double-for-loop kernel. Non-identity maps remain on the J3 fallback
-  (correct, just slower); see #133 for the extension plan.
-  The three other Phase J3 → J2 patterns from #133 (DiagSelectTerm,
-  KD × Sum, KD × Sum bilinear mixing) need additional infrastructure
-  (vector translation of gathered outer-indexed scalars +
-  mutable-matrix-analyzer extension for `_LoopJacSelectMat`) and are
-  tracked for a follow-up release.
+- **Phase J2 translator extension: Sum-KD → sliced / row-gathered /
+  column-permuted Param** (#133 Pattern 4). LoopEqn Jacobian blocks
+  of the shape `Sum(f(outer, dummy) * KroneckerDelta(diff, map[dummy]),
+  (dummy, lo, hi))` now land on the constant-matrix fast path in
+  three configurations:
+  * Identity map, bare outer → bare `Para(V, dim=2)`.
+  * Identity map, indirect outer (`V[row_map[outer], dummy]`) or
+    bare outer with `n_outer < V.shape[0]` → `Mat_Mul(SelectMat_row,
+    Para(V))`.
+  * Non-identity injective column map → `Mat_Mul(Para(V),
+    SelectMat_col)`.
+
+  All three cases keep `is_constant_matrix_deri = True`, so Value0
+  is evaluated once at FormJac and baked into `_data_` at module-
+  build time — zero per-Newton-iteration J cost versus the previous
+  Phase J3 Python double-for-loop kernel.
+
+- **Pattern 3 identity-map indirect KD → DiagTerm** (#133). A
+  top-level `KD(diff, map[outer]) * Sum(...)` with identity `map`
+  (and `n_outer == n_diff`) now folds into the existing direct-KD
+  `Diag(Mat_Mul(Para, iVar))` branch — previously raised
+  `NotImplementedError` and dropped to Phase J3.
+
+- **Still-deferred cases for #133**:
+  * Pattern 4 with mixed Var-dependent factors (e.g.
+    `Sign(ms[orig]) * Tsp_all[inlet] * V[row_map, :]` after KD
+    collapse) — needs a vector translator for outer/diff-gathered
+    scalars plus a mutable-matrix analyzer extension that accepts
+    `_LoopJacSelectMat` in `_classify_matmul`.
+  * Pattern 1 DiagSelectTerm and Pattern 2 bilinear mixing — same
+    infrastructure dependencies. Tracked for a follow-up release.
 
 ### Internal
 
