@@ -161,6 +161,168 @@ sparsity machinery is shared with `LoopEqn`.
 
 See the {class}`Solverz.equation.eqn.LoopOde` docstring for details.
 
+## Physics cheat-sheet — what body shapes show up where
+
+The translator patterns are easier to remember through the physics
+they model. This section walks through five simulation problems and
+labels which Phase J2 pattern each one lands on. Every example is
+self-contained — copy, change the numbers, and run.
+
+### 1. DC resistor network — bare 2-D Param (Pattern J1)
+
+A network of ideal resistors driven by current injections ``I_ext``
+and grounded through conductances ``G``. Kirchhoff's current law at
+each node ``i``:
+
+$$
+\sum_{j} G_{ij}\,(V_i - V_j) = I_{\mathrm{ext},i}
+\;\;\Longleftrightarrow\;\;
+G_{ii} V_i - \sum_{j \ne i} G_{ij} V_j = I_{\mathrm{ext},i}.
+$$
+
+```python
+m.V = Var('V', np.zeros(nb))
+m.G = Param('G', G_bus, dim=2, sparse=True)    # bus-admittance matrix
+m.I_ext = Param('I_ext', I_ext)
+
+i, j = Idx('i', nb), Idx('j', nb)
+m.node_balance = LoopEqn(
+    'node_balance',
+    outer_index=i,
+    body=Sum(m.G[i, j] * m.V[j], j) - m.I_ext[i],
+    model=m,
+)
+```
+
+**Jacobian:** ``∂F[i] / ∂V[k] = G[i, k]`` — a bare 2-D Param entry.
+The Phase J1 classifier turns this into ``Para(G, dim=2)``; the
+block is **constant** and baked into ``_data_`` at module-build
+time, so J-eval cost is zero per Newton step.
+
+### 2. Pipe pressure drop — Pattern 1 (DiagSelectTerm)
+
+Per-pipe hydraulic head loss in a district heating system,
+``ΔH_p = K_p · sign(m_p) · m_p^2``, looped over non-leak pipes
+selected by ``orig_idx`` (an injective map from iteration index to
+pipe ID):
+
+```python
+p = Idx('p', n_real_pipes)
+m.H_drop = LoopEqn(
+    'H_drop',
+    outer_index=p,
+    body=m.K[m.orig[p]] * m.ms[m.orig[p]]**2 * Sign(m.ms[m.orig[p]]),
+    model=m,
+)
+```
+
+**Jacobian:** ``∂F[p] / ∂ms[k] = 2 · K[orig[p]] · Sign(ms[orig[p]]) · ms[orig[p]] · δ(k, orig[p])``.
+The ``δ(k, orig[p])`` is a KD with an indirect (non-identity) map;
+every other factor depends only on the outer index ``p``. Pattern 1
+emits ``Mat_Mul(Diag(scalar_vec), SelectMat(orig))`` — a
+**row-scaled selection matrix** that lands on the compiled biscale
+scatter-add path. No Python for-loop kernel.
+
+### 3. Heat network node mass continuity — Pattern 4 (Sum-KD)
+
+At each supply-side node the flows in minus the flows out must match
+the injection. Express with a sparse ``(n_node × n_pipe)``
+incidence matrix ``V_in``:
+
+```python
+i_reg = Idx('i_reg', n_node)
+p_p = Idx('p_p', n_pipes)
+m.Mass_flow_continuity = LoopEqn(
+    'Mass_flow_continuity',
+    outer_index=i_reg,
+    body=(m.is_gen[i_reg] * Abs(m.min[i_reg])
+          + Sum(m.V_in[i_reg, p_p] * m.ms[m.orig[p_p]], p_p)
+          - Sum(m.V_out[i_reg, p_p] * m.ms[m.orig[p_p]], p_p)),
+    model=m,
+)
+```
+
+**Jacobian w.r.t. `ms`:** each ``Sum`` differentiates to
+``Sum(V[i_reg, p] · δ(k, orig[p]), p)`` — the Pattern 4 Sum-KD
+shape. With identity ``orig`` the translator collapses to bare
+``Para(V, dim=2)`` (constant). With non-identity ``orig`` (as in
+Barry, where the env-leak pipe is dropped) it emits
+``Mat_Mul(Para(V), SelectMat_col)`` — still constant, baked once.
+
+### 4. Temperature mixing at a node — Pattern 2 (bilinear)
+
+Energy balance at a supply node says the mixed-out temperature
+equals the flow-weighted average of all incoming pipe outlets:
+
+$$
+T_{\mathrm{mix},i}\,\sum_p \bigl|m_p\bigr|\,V_{in}(i, p)
+\;=\;
+\sum_p \bigl|m_p\bigr|\,V_{in}(i, p)\,T_p^{\mathrm{out}}.
+$$
+
+```python
+i_ns = Idx('i_ns', n_non_slack)
+p_p = Idx('p_p', n_pipes)
+lhs = Sum(m.V_in[m.ns[i_ns], p_p] * Abs(m.ms[m.orig[p_p]]), p_p)
+rhs = Sum(m.V_in[m.ns[i_ns], p_p] * Abs(m.ms[m.orig[p_p]])
+          * m.Tsp_all[m.pipe_outlet[p_p]], p_p)
+m.Ts_mixing = LoopEqn(
+    'Ts_mixing',
+    outer_index=i_ns,
+    body=m.Ts[m.ns[i_ns]] * lhs - rhs,
+    model=m,
+)
+```
+
+**Jacobian w.r.t. `ms`:** produces terms like
+``Ts[ns[i]] · Sum(V[ns[i], p] · Sign(ms[orig[p]]) · δ(k, orig[p]), p)``.
+Pattern 2 sees: one outer-indexed Var factor (``Ts[ns[i]]``), one
+Sum with a Pattern 4 shape inside. It composes
+``Mat_Mul(Diag(Ts[ns]), Sum_translation)`` where the inner Sum
+reduces to ``Mat_Mul(SelectMat_row, Para(V), Diag(scalar_vec))``.
+The resulting 4-arg chain lands on the biscale term.
+
+### 5. Polar power flow — where the bilinear hits Phase J3
+
+Active-power injection at bus `i` in a polar admittance form:
+
+$$
+P_i = V_{m,i} \sum_j V_{m,j}\,
+       \bigl(G_{ij}\cos(V_{a,i} - V_{a,j}) + B_{ij}\sin(V_{a,i} - V_{a,j})\bigr).
+$$
+
+```python
+i, j = Idx('i', nb), Idx('j', nb)
+m.P_balance = LoopEqn(
+    'P_balance',
+    outer_index=i,
+    body=m.Vm[i] * Sum(m.Vm[j]
+                        * (m.G[i, j] * cos(m.Va[i] - m.Va[j])
+                           + m.B[i, j] * sin(m.Va[i] - m.Va[j])), j)
+         - m.Pinj[i],
+    model=m,
+)
+```
+
+**Jacobian w.r.t. `Va[k]`:** after applying the product rule we get
+terms where *two* axes (outer `i` and dummy `j`) are multiplied
+together under the same sum, e.g. ``Vm[i] · Vm[j] · sin(Va[i] - Va[j])
+· δ(k, j)`` — a genuinely bilinear off-diagonal contribution. None
+of the J2 patterns express the dual-axis product in their
+``Diag`` / ``Mat_Mul`` vocabulary, so this derivative falls to the
+Phase J3 Python-loop kernel. The sparsity analyzer still reports
+the correct per-entry nnz pattern (``KD`` on `j` collapses to a
+single column per outer row), so the kernel is ``O(nnz)`` per
+Newton step — correct, just slower than the compiled J2 fast path.
+
+Writing the same body with the *rectangular* admittance form
+(``ix[i] = Σ_j G[i, j] · ux[j] - B[i, j] · uy[j]``, used by
+``eps_network.mdl(dyn=True)``) avoids the bilinear and stays on the
+Phase J2 fast path — this is the canonical rewrite if the PF
+convergence allows rectangular coordinates.
+
+---
+
 ## Supported body shapes
 
 The F-side printer walks the LoopEqn body as a pure sympy expression
