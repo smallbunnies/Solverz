@@ -40,6 +40,9 @@ Equations
 
 .. autoclass:: Solverz.equation.eqn.LoopOde
 
+.. autoclass:: Solverz.equation.eqn.IndexSet
+   :members:
+
 .. autofunction:: Solverz.equation.eqn.Idx
 
 .. autofunction:: Solverz.equation.eqn.Sum
