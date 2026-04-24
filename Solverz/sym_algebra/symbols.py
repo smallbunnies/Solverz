@@ -37,12 +37,21 @@ def SymbolExtractor(index) -> Dict:
 
     temp = dict()
 
-    if isinstance(index, (int, np.integer, idx, IdxSymBasic)):
+    # Solverz leaf symbols used as indices (``Para``, ``iVar``,
+    # ``iAliasVar``) need to be registered by name so the downstream
+    # SYMBOLS walker picks them up for lambdify — otherwise an
+    # expression like ``iVar('Ts')[Para('fht_nl')]`` emits a
+    # lambdified function whose body references ``fht_nl`` but whose
+    # signature omits it, producing a ``NameError`` at runtime.
+    if isinstance(index, (int, np.integer, idx, IdxSymBasic,
+                          iVar, Para, iAliasVar)):
         if isinstance(index, idx):
             temp.update({index.name: index})
         elif isinstance(index, IdxSymBasic):
             temp.update({index.name0: index.symbol0})
             temp.update(index.SymInIndex)
+        elif isinstance(index, (iVar, Para, iAliasVar)):
+            temp.update({index.name: index})
     elif isinstance(index, list):
         for i in range(len(index)):
             temp.update(SymbolExtractor(index[i]))
