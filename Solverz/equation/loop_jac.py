@@ -580,20 +580,31 @@ def _try_sum_kd_collapse(
         Sum(f(outer, dummy) * KroneckerDelta(diff, map[dummy]),
             (dummy, lo, hi))
 
-    and collapse via ``dummy := inv_map[diff]`` to
-    ``f(outer, inv_map[diff])``.
+    and collapse it via ``dummy := inv_map[diff]``.
 
-    Today only the identity-map case is supported — the collapsed body
-    is ``f(outer, diff)``, which downstream translation handles. For a
-    non-identity ``map``, the inverse lookup would require either a
-    permuted Param registration or a new Select-Mat primitive; both are
-    deferred and we return ``None`` so the caller falls back to Phase J3
-    (still correct, just slower).
+    **Identity map** (``map[p] == p``): the result is
+    ``f(outer, diff)`` — typically a bare ``Indexed(Param[outer, diff])``
+    that downstream translation lowers to ``Para(name, dim=2)``.
+
+    **Non-identity map** (bijection ``[0, M) → subset of [0, n_diff)``):
+    the body must simplify to a single 2-D ``Param[outer, dummy]``
+    (after dropping the KD). The collapsed expression is emitted as
+
+        ``Mat_Mul(Para(V, dim=2), _LoopJacSelectMat(map, M, n_diff))``
+
+    — a constant sparse matrix product. The sparsity analyzer already
+    reports the right nnz positions for the Sum-KD shape, and the
+    ``is_constant_matrix_deri`` predicate routes the block to the
+    constant-value fast path (Value0 baked into ``_data_`` at
+    module-build time).
 
     Returns the translated Solverz expression, or ``None`` when the
     shape doesn't match.
     """
+    from Solverz.equation.eqn import _LoopJacSelectMat
     from Solverz.equation.param import ParamBase
+    from Solverz.sym_algebra.functions import Mat_Mul
+    from Solverz.sym_algebra.symbols import Para
 
     if len(sum_node.args) != 2:
         return None
@@ -634,47 +645,161 @@ def _try_sum_kd_collapse(
         return None
 
     map_v = np.asarray(map_obj.v, dtype=np.int64).reshape(-1)
-    nd = n_diff if n_diff > 0 else (int(map_v.max()) + 1 if len(map_v) else 0)
-    if nd <= 0:
+    M = len(map_v)
+    nd = n_diff if n_diff > 0 else (int(map_v.max()) + 1 if M else 0)
+    if nd <= 0 or M == 0:
         return None
-    is_identity = (len(map_v) == nd
-                   and np.array_equal(map_v, np.arange(nd)))
-    if not is_identity:
+    # map must be an injection into [0, n_diff) — otherwise two dummies
+    # would collide at the same diff column and the collapse would
+    # double-count.
+    if int(map_v.min()) < 0 or int(map_v.max()) >= nd:
+        return None
+    if len(set(map_v.tolist())) != M:
         return None
 
+    is_identity = (M == nd and np.array_equal(map_v, np.arange(nd)))
+
+    # Identity map: substitute dummy := diff and let the downstream
+    # translator lower the resulting bare Indexed(Param, outer, diff).
+    if is_identity:
+        other_factors = [f for f in factors if f is not kd_factor]
+        new_body = sp.Mul(*other_factors) if other_factors else sp.S.One
+        substituted = new_body.subs(dummy, diff_idx)
+        if not isinstance(substituted, sp.Indexed):
+            return None
+        if substituted.base.name not in var_map:
+            return None
+        sol_obj = var_map[substituted.base.name]
+        if not (isinstance(sol_obj, ParamBase) and sol_obj.dim == 2):
+            return None
+        val_shape = sol_obj.value.shape if sol_obj.value is not None else None
+        if val_shape is None or len(val_shape) != 2:
+            return None
+        if len(substituted.indices) != 2:
+            return None
+        row_idx, col_idx = substituted.indices
+        # Column axis must be the bare diff index.
+        if not (isinstance(col_idx, sp.Idx)
+                and _name_of(col_idx) == diff_name):
+            return None
+        if val_shape[1] != nd:
+            return None
+        # Resolve the row axis to a concrete (n_outer,) gather map.
+        row_select = _resolve_row_gather(
+            row_idx, outer_idx, n_outer, var_map, val_shape[0],
+        )
+        if row_select is None:
+            return None
+        row_map_v, row_is_identity = row_select
+        para_expr = Para(substituted.base.name, dim=2)
+        if row_is_identity and val_shape[0] == n_outer:
+            return para_expr
+        select_row = _LoopJacSelectMat(
+            sp.Tuple(*[sp.Integer(int(r)) for r in row_map_v]),
+            sp.Integer(n_outer),
+            sp.Integer(val_shape[0]),
+        )
+        return Mat_Mul(select_row, para_expr)
+
+    # Non-identity map: require that the body (minus the KD) is a single
+    # Indexed(V, outer, dummy) 2-D-Param access. Emit
+    # ``Mat_Mul(Para(V, dim=2), _LoopJacSelectMat(map, M, n_diff))``.
     other_factors = [f for f in factors if f is not kd_factor]
-    new_body = sp.Mul(*other_factors) if other_factors else sp.S.One
-    substituted = new_body.subs(dummy, diff_idx)
-
-    # Safety: the substituted expression must be recognisable as a bare
-    # ``Indexed(2-D Param, outer, diff)``. If it's more complex (e.g.
-    # multiple indexed factors, scalar coefficients via outer, etc.) the
-    # downstream translator can't produce a matrix of shape
-    # ``(n_outer, n_diff)`` and we'd emit a DeriExpr whose evaluated
-    # ``Value0`` has incompatible shape with the JacBlock's ``EqnAddr``.
-    # Restrict Pattern 4 to the single-2-D-Param case to avoid that.
-    if isinstance(substituted, sp.Indexed):
-        single_indexed = substituted
-    else:
+    if len(other_factors) != 1:
         return None
-    if single_indexed.base.name not in var_map:
+    indexed_v = other_factors[0]
+    if not isinstance(indexed_v, sp.Indexed):
         return None
-    sol_obj = var_map[single_indexed.base.name]
-    if not (isinstance(sol_obj, ParamBase) and sol_obj.dim == 2):
+    if len(indexed_v.indices) != 2:
         return None
-    # Shape must match (n_outer, n_diff). If either axis mismatches the
-    # LoopEqn block's actual sizes, the resulting Para expression would
-    # evaluate a too-large matrix and JacBlock.ParseSp would crash on
-    # out-of-bounds row indices.
-    val_shape = sol_obj.value.shape if sol_obj.value is not None else None
+    base_name = indexed_v.base.name
+    if base_name not in var_map:
+        return None
+    v_obj = var_map[base_name]
+    if not (isinstance(v_obj, ParamBase) and v_obj.dim == 2):
+        return None
+    # V's indices must be {outer, dummy} in either order so that the
+    # matrix-side Mat_Mul composition picks up the right axes.
+    outer_name = _name_of(outer_idx)
+    idx_names = {_name_of(ix) for ix in indexed_v.indices}
+    if idx_names != {outer_name, dummy_name}:
+        return None
+    val_shape = v_obj.value.shape if v_obj.value is not None else None
     if val_shape is None or len(val_shape) != 2:
         return None
-    if val_shape[0] != n_outer or val_shape[1] != nd:
+    # V must be (n_outer, M): n_outer rows, one column per dummy entry.
+    if val_shape[0] != n_outer or val_shape[1] != M:
         return None
 
-    return loop_jac_to_solverz_expr(
-        substituted, outer_idx, diff_idx, n_outer, var_map, n_diff=nd,
+    select_mat = _LoopJacSelectMat(
+        sp.Tuple(*[sp.Integer(int(c)) for c in map_v]),
+        sp.Integer(M),
+        sp.Integer(nd),
     )
+    return Mat_Mul(Para(base_name, dim=2), select_mat)
+
+
+def _resolve_row_gather(
+    row_idx: sp.Expr,
+    outer_idx: sp.Idx,
+    n_outer: int,
+    var_map: Dict[str, object],
+    source_row_count: int,
+):
+    """Return ``(row_map_1d, is_identity)`` describing how the outer
+    axis gathers rows of the source 2-D Param, or ``None`` when the
+    row-index shape isn't recognised.
+
+    Three supported cases:
+
+    1. ``row_idx == outer_idx`` — the LoopEqn's outer iterates rows
+       ``0..n_outer-1``. ``row_map = np.arange(n_outer)`` and
+       ``is_identity = (n_outer == source_row_count)``.
+
+    2. ``row_idx == Indexed(row_map_param, outer_idx)`` — row axis is
+       gathered via a 1-D integer Param of length ``n_outer``; values
+       must lie in ``[0, source_row_count)``.
+
+    3. ``row_idx == Integer(k)`` with ``0 <= k < source_row_count`` —
+       a constant row slice. Treated as ``row_map = [k] * n_outer``
+       (every outer iteration picks the same row). Rare; covered for
+       completeness.
+    """
+    from Solverz.equation.param import ParamBase
+
+    outer_name = _name_of(outer_idx)
+
+    if isinstance(row_idx, sp.Idx) and _name_of(row_idx) == outer_name:
+        row_map = np.arange(n_outer, dtype=np.int64)
+        is_identity = (n_outer == source_row_count)
+        return row_map, is_identity
+
+    if isinstance(row_idx, sp.Indexed):
+        if len(row_idx.indices) != 1:
+            return None
+        inner = row_idx.indices[0]
+        if not (isinstance(inner, sp.Idx) and _name_of(inner) == outer_name):
+            return None
+        map_name = row_idx.base.name
+        map_obj = var_map.get(map_name)
+        if not (isinstance(map_obj, ParamBase) and map_obj.dim == 1):
+            return None
+        row_map = np.asarray(map_obj.v, dtype=np.int64).reshape(-1)
+        if len(row_map) != n_outer:
+            return None
+        if int(row_map.min()) < 0 or int(row_map.max()) >= source_row_count:
+            return None
+        is_identity = np.array_equal(row_map, np.arange(source_row_count))
+        return row_map, is_identity
+
+    if isinstance(row_idx, (sp.Integer, int)):
+        k = int(row_idx)
+        if k < 0 or k >= source_row_count:
+            return None
+        row_map = np.full(n_outer, k, dtype=np.int64)
+        return row_map, False
+
+    return None
 
 
 def _split_param_var_indexed(indexed_factors,

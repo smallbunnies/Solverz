@@ -2096,19 +2096,131 @@ def test_loop_jac_pattern4_full_loop_eqn_identity():
         )
 
 
-def test_loop_jac_pattern4_non_identity_map_falls_back():
-    """Pattern 4 non-identity maps are deferred to Phase J3 (not yet
-    implemented). Pin the fallback contract so the non-identity branch,
-    when it lands, is a strict extension rather than a silent rewrite."""
+def test_loop_jac_pattern4_row_gather_via_param():
+    """#133 Pattern 4 — indirect outer via a row-map Param emits
+    Mat_Mul(SelectMat, Para). E.g. `V[fht_nsr[i_nsr], p_p]` with
+    `fht_nsr` a 1-D int Param of length n_outer. The translator must
+    left-multiply V by a row-selection matrix."""
     from Solverz import LoopEqn, Model, Param, Var
-    from Solverz.equation.eqn import LoopEqnDiff
+    from Solverz.equation.eqn import LoopEqnDiff, _LoopJacSelectMat
+    from Solverz.equation.loop_jac import (
+        canonicalize_kronecker, loop_jac_to_solverz_expr,
+    )
+    from Solverz.sym_algebra.functions import Mat_Mul
+    from Solverz.sym_algebra.symbols import Para
+
+    n_source_rows = 5
+    n_outer = 3
+    n_diff = 4
+    V_val = np.arange(n_source_rows * n_diff,
+                      dtype=float).reshape(n_source_rows, n_diff)
+    row_map = np.array([2, 0, 4], dtype=np.int64)
+    m = Model()
+    m.x = Var('x', np.zeros(n_diff))
+    m.V = Param('V', V_val, dim=2, sparse=False)
+    m.row_map = Param('row_map', row_map, dtype=int)
+    m.map_id = Param('map_id', np.arange(n_diff, dtype=np.int64), dtype=int)
+
+    i = sp.Idx('i')
+    p = sp.Idx('p')
+    x_sym = sp.IndexedBase('x')
+    V_sym = sp.IndexedBase('V')
+    row_sym = sp.IndexedBase('row_map')
+    map_id_sym = sp.IndexedBase('map_id')
+    body = sp.Sum(V_sym[row_sym[i], p] * x_sym[map_id_sym[p]],
+                  (p, 0, n_diff - 1))
+    m.eqn_rowgather = LoopEqn(
+        'eqn_rowgather', outer_index=i, n_outer=n_outer, body=body,
+        var_map={'x': m.x, 'V': m.V, 'row_map': m.row_map,
+                 'map_id': m.map_id},
+    )
+
+    k = sp.Idx('_sz_loop_dk')
+    raw = sp.diff(body, x_sym[k])
+    canonical = canonicalize_kronecker(raw, i, k)
+    translated = loop_jac_to_solverz_expr(
+        canonical, i, k, n_outer, m.eqn_rowgather.var_map, n_diff=n_diff,
+    )
+    assert isinstance(translated, Mat_Mul), translated
+    left, right = translated.args
+    assert isinstance(left, _LoopJacSelectMat)
+    assert isinstance(right, Para) and right.name == 'V'
+
+    m.eqn_rowgather.derive_derivative()
+    assert m.eqn_rowgather.derivatives
+    for ed in m.eqn_rowgather.derivatives.values():
+        assert not isinstance(ed, LoopEqnDiff), ed.name
+
+
+def test_loop_jac_pattern4_row_slice_via_bare_outer():
+    """#133 Pattern 4 — bare outer idx with n_outer < V.shape[0]
+    emits a row-slice: `Mat_Mul(_LoopJacSelectMat([0..n_outer-1],
+    n_outer, V.shape[0]), Para(V))`. This covers LoopEqns whose outer
+    iterates a prefix of V's rows (e.g. non-slack node subset)."""
+    from Solverz import LoopEqn, Model, Param, Var
+    from Solverz.equation.eqn import _LoopJacSelectMat
+    from Solverz.equation.loop_jac import (
+        canonicalize_kronecker, loop_jac_to_solverz_expr,
+    )
+    from Solverz.sym_algebra.functions import Mat_Mul
+    from Solverz.sym_algebra.symbols import Para
+
+    n_source_rows = 5
+    n_outer = 3  # prefix slice: rows 0..2 of V
+    n_diff = 4
+    V_val = np.arange(n_source_rows * n_diff,
+                      dtype=float).reshape(n_source_rows, n_diff)
+    m = Model()
+    m.x = Var('x', np.zeros(n_diff))
+    m.V = Param('V', V_val, dim=2, sparse=False)
+    m.map_id = Param('map_id', np.arange(n_diff, dtype=np.int64), dtype=int)
+    i = sp.Idx('i')
+    p = sp.Idx('p')
+    x_sym = sp.IndexedBase('x')
+    V_sym = sp.IndexedBase('V')
+    map_id_sym = sp.IndexedBase('map_id')
+    body = sp.Sum(V_sym[i, p] * x_sym[map_id_sym[p]], (p, 0, n_diff - 1))
+    m.eqn_slice = LoopEqn(
+        'eqn_slice', outer_index=i, n_outer=n_outer, body=body,
+        var_map={'x': m.x, 'V': m.V, 'map_id': m.map_id},
+    )
+    k = sp.Idx('_sz_loop_dk')
+    raw = sp.diff(body, x_sym[k])
+    canonical = canonicalize_kronecker(raw, i, k)
+    translated = loop_jac_to_solverz_expr(
+        canonical, i, k, n_outer, m.eqn_slice.var_map, n_diff=n_diff,
+    )
+    assert isinstance(translated, Mat_Mul), translated
+    left, right = translated.args
+    assert isinstance(left, _LoopJacSelectMat)
+    assert isinstance(right, Para) and right.name == 'V'
+
+
+def test_loop_jac_pattern4_non_identity_map_select_mat():
+    """#133 Pattern 4 non-identity map lands as Mat_Mul(Para, SelectMat).
+
+    Body: ``Sum(V[i, p] * x[map[p]], (p, 0, M-1))`` with ``map`` a
+    non-identity injection into ``[0, n_diff)``. Translator must emit
+    a constant ``Mat_Mul(Para(V, dim=2), _LoopJacSelectMat(map, M,
+    n_diff))`` — the sparsity pattern and numerical values exactly
+    match the J3 per-entry kernel, but the block is classified as
+    constant and baked into ``_data_`` at module-build time."""
+    from Solverz import LoopEqn, Model, Param, Var
+    from Solverz.equation.eqn import LoopEqnDiff, _LoopJacSelectMat
+    from Solverz.equation.loop_jac import (
+        canonicalize_kronecker, loop_jac_to_solverz_expr,
+    )
+    from Solverz.sym_algebra.functions import Mat_Mul
+    from Solverz.sym_algebra.symbols import Para
 
     n_outer = 3
     n_dummy = 4
+    n_diff = 5
     V_val = np.arange(n_outer * n_dummy, dtype=float).reshape(n_outer, n_dummy)
-    permuted = np.array([2, 0, 3, 1], dtype=np.int64)
+    # map: permutation + padding (values in [0, n_diff), injective)
+    permuted = np.array([2, 0, 4, 1], dtype=np.int64)
     m = Model()
-    m.x = Var('x', np.zeros(n_dummy))
+    m.x = Var('x', np.zeros(n_diff))
     m.V = Param('V', V_val, dim=2, sparse=False)
     m.map_perm = Param('map_perm', permuted, dtype=int)
 
@@ -2118,14 +2230,30 @@ def test_loop_jac_pattern4_non_identity_map_falls_back():
     V_sym = sp.IndexedBase('V')
     map_sym = sp.IndexedBase('map_perm')
     body = sp.Sum(V_sym[i, p] * x_sym[map_sym[p]], (p, 0, n_dummy - 1))
+
     m.eqn_loop = LoopEqn('eqn_loop',
                          outer_index=i, n_outer=n_outer, body=body,
                          var_map={'x': m.x, 'V': m.V, 'map_perm': m.map_perm})
-    m.eqn_loop.derive_derivative()
-    # Non-identity map → Pattern 4 returns None → J3 fallback.
-    assert any(isinstance(ed, LoopEqnDiff)
-               for ed in m.eqn_loop.derivatives.values()), (
-        "Non-identity Pattern 4 must currently fall back to LoopEqnDiff — "
-        "remove this assertion when the non-identity branch lands."
+
+    k = sp.Idx('_sz_loop_dk')
+    raw = sp.diff(body, x_sym[k])
+    canonical = canonicalize_kronecker(raw, i, k)
+    translated = loop_jac_to_solverz_expr(
+        canonical, i, k, n_outer, m.eqn_loop.var_map, n_diff=n_diff,
     )
+    assert isinstance(translated, Mat_Mul), (
+        f"expected Mat_Mul(Para, SelectMat), got {translated!r}"
+    )
+    assert len(translated.args) == 2
+    left, right = translated.args
+    assert isinstance(left, Para) and left.name == 'V'
+    assert isinstance(right, _LoopJacSelectMat)
+
+    # End-to-end: LoopEqnDiff MUST NOT appear for any derivative.
+    m.eqn_loop.derive_derivative()
+    assert m.eqn_loop.derivatives, "expected derivative w.r.t. x"
+    for ed in m.eqn_loop.derivatives.values():
+        assert not isinstance(ed, LoopEqnDiff), (
+            f"non-identity Pattern 4 must route {ed.name} to J2, got J3 fallback"
+        )
 
