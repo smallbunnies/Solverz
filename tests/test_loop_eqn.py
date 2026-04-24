@@ -12,9 +12,12 @@ real Solverz ``Var`` / ``Param``. Solverz's printer translates the
 code-gen time, and replaces ``Sum`` nodes with Python ``for``-loops.
 """
 
+import contextlib
+import importlib
 import os
 import sys
 import tempfile
+import uuid
 
 import numpy as np
 import sympy as sp
@@ -24,6 +27,32 @@ from Solverz import (
     Abs, Eqn, Idx, LoopEqn, Mat_Mul, Model, Param, Sign, Sum, Var,
     cos, heaviside, made_numerical, module_printer, nr_method, sin,
 )
+
+
+_LOOPEQN_TEST_TEMPDIRS = []
+
+
+def _mdl_from_module(spf, y0, jit: bool = False):
+    """Drop-in replacement for ``made_numerical(spf, y0, sparse=True)`` for
+    LoopEqn tests: renders ``spf`` with ``module_printer(jit=jit)`` into a
+    unique tempdir, imports the generated module, and returns
+    ``(mdl, y)`` — the same shape ``made_numerical`` produced.
+
+    The inline ``made_numerical`` path rejects LoopEqn (issue #132)
+    because it runs Python for-loops at interpreter speed.
+    ``jit=False`` renders a plain Python module (no ``@njit``) —
+    interpreter-speed but correct — which is what these tests
+    exercise. Tempdirs are kept alive for the test session (deleted by
+    the OS); cleanup is not critical for a test fixture.
+    """
+    mod_name = f'_sz_loop_test_{uuid.uuid4().hex[:8]}'
+    d = tempfile.mkdtemp()
+    _LOOPEQN_TEST_TEMPDIRS.append(d)
+    printer = module_printer(spf, y0, mod_name, directory=d, jit=jit)
+    printer.render()
+    sys.path.insert(0, d)
+    mod = importlib.import_module(mod_name)
+    return mod.mdl, mod.y
 
 
 def test_loop_eqn_eps_minimal():
@@ -132,7 +161,7 @@ def test_loop_eqn_eps_minimal():
     spf, y0 = m.create_instance()
 
     # === Stage 2: made_numerical ===
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
 
     # === Stage 3: F evaluation at flat-start ===
     F_val = mdl.F(y0, mdl.p)
@@ -239,7 +268,7 @@ def test_loop_eqn_eps_dyn_with_var_residual():
     m.anchor_iy = Eqn('anchor_iy', m.iy - m.iy_pin)
 
     spf, y0 = m.create_instance()
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
 
     # F-side smoke: residual at flat-start.
     F_val = mdl.F(y0, mdl.p)
@@ -336,7 +365,7 @@ def test_loop_eqn_mass_continuity():
     )
 
     spf, y0 = m.create_instance()
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
 
     sol = nr_method(mdl, y0)
     m_target = np.array([6.0, 6.0, 6.0])
@@ -563,7 +592,7 @@ def test_loop_eqn_sparse_walker_inline():
     assert 'j = _sz_csr_G_indices' in src or 'j = _sz_csr_B_indices' in src
 
     spf, y0 = m.create_instance()
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
 
     # F-side evaluation at flat-start should match the dense expected.
     F_val = mdl.F(y0, mdl.p)
@@ -779,7 +808,7 @@ def test_loop_eqn_native_solverz_syntax_inline():
         assert not isinstance(atom, (IdxVar, IdxPara))
 
     spf, y0 = m.create_instance()
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
 
     F_val = mdl.F(y0, mdl.p)
     expected_F_re = ix_pin - G_dense.sum(axis=1)
@@ -936,7 +965,7 @@ def test_loop_eqn_ultra_concise_api():
     assert set(m.eqn_re._sparse_csr.keys()) == {'G', 'B'}
 
     spf, y0 = m.create_instance()
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
     sol = nr_method(mdl, y0)
     np.testing.assert_allclose(sol.y['ux'], ux_target, atol=1e-8)
     np.testing.assert_allclose(sol.y['uy'], uy_target, atol=1e-8)
@@ -967,7 +996,7 @@ def test_loop_eqn_sum_with_explicit_n():
     m.eqn = LoopEqn('eqn', outer_index=i, n_outer=nb, body=body, model=m)
 
     spf, y0 = m.create_instance()
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
     sol = nr_method(mdl, y0)
     np.testing.assert_allclose(sol.y['x'],
                                np.array([1.0, 2.0, 3.0]),
@@ -1311,7 +1340,7 @@ def test_loop_eqn_pow_body_newton_j3():
                 np.testing.assert_array_equal(jb.CooRow, [0, 1, 2])
                 np.testing.assert_array_equal(jb.CooCol, [0, 1, 2])
 
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
     sol = nr_method(mdl, y0)
     np.testing.assert_allclose(sol.y['Vm'], Vm_target, atol=1e-8)
 
@@ -1523,7 +1552,7 @@ def test_loop_eqn_trig_diag_newton_j3_j4():
         assert 'np.empty(3)' in ed.kernel_source
         assert 'for _sz_idx in range(3):' in ed.kernel_source
 
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
     sol = nr_method(mdl, y0)
     # NR default tolerance is 1e-6; allow 1e-5 margin here.
     np.testing.assert_allclose(sol.y['Va'], Va_target, atol=1e-5)
@@ -1770,7 +1799,7 @@ def test_loop_eqn_bilinear_newton_j2():
     m.eqn = LoopEqn('bilinear', outer_index=i, body=body, model=m)
 
     spf, y0 = m.create_instance()
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
     sol = nr_method(mdl, y0)
     np.testing.assert_allclose(sol.y['x'], x_target, atol=1e-8)
 
@@ -1805,7 +1834,7 @@ def test_loop_eqn_bilinear_newton_j2_sparse():
     m.eqn = LoopEqn('bilinear', outer_index=i, body=body, model=m)
 
     spf, y0 = m.create_instance()
-    mdl = made_numerical(spf, y0, sparse=True)
+    mdl, y0 = _mdl_from_module(spf, y0)
     sol = nr_method(mdl, y0)
     np.testing.assert_allclose(sol.y['x'], x_target, atol=1e-8)
 
