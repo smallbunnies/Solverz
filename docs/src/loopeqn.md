@@ -161,7 +161,81 @@ sparsity machinery is shared with `LoopEqn`.
 
 See the {class}`Solverz.equation.eqn.LoopOde` docstring for details.
 
-## Known limitations
+## Supported body shapes
+
+The F-side printer walks the LoopEqn body as a pure sympy expression
+tree. The following shapes are understood and emit a compiled
+`@njit` `inner_F` under `module_printer(jit=True)`:
+
+| Body element | Syntax | Notes |
+|---|---|---|
+| Direct Var / Param reference | `m.x[i]`, `m.G[i, j]` | `i` / `j` are bounded `Idx` |
+| Indirect gather | `m.x[m.map[i]]`, `m.G[m.ns[i], j]` | `map` / `ns` are 1-D `int` Params |
+| Bare scalar Param | `m.Cp`, `m.Cp * something` | scalar Param used as coefficient |
+| Nested `Sum` over `Idx` | `Sum(body, j)` with `j = Idx('j', n)` | printer emits a `for j in range(n)` |
+| `Sum` with bounded Idx | `Sum(body, (j, 0, n-1))` | equivalent sympy form |
+| Sparse 2-D Param walker | `Sum(m.G[i, j] * m.x[j], j)` with `G` sparse | emits CSR row-walk automatically |
+| Arithmetic | `+`, `-`, `*`, `/`, `**` | element-wise in the loop body |
+| Unary functions | `sin`, `cos`, `exp`, `log`, `sqrt`, `Abs`, `Sign`, `heaviside`, `atan2` | dispatched to `np.*` / `SolCF.*` |
+| Piecewise / conditionals | not currently in the F-side grammar | raise via user-defined `Function` |
+
+### Jacobian translator coverage (Phase J2)
+
+When a LoopEqn block is differentiated, the canonical expression is
+routed through the Phase J2 classifier which turns recognised shapes
+into standard Solverz `Diag` / `Mat_Mul` / `Para` expressions.
+Anything the classifier can lower to a constant or
+Diag/Row-scale/Col-scale/Biscale term lands on the compiled
+`_mut_block_` scatter-add fast path. Unrecognised shapes fall to the
+Phase J3 Python double-for-loop kernel (`_sz_loop_jac_kernel_`) —
+correct, but slower.
+
+The J2 patterns currently recognised (#133):
+
+| Pattern | Shape (after canonicalization) | Emission |
+|---|---|---|
+| Bare KD | `KD(outer, diff)` | `_LoopJacEye(n)` — constant identity |
+| Indirect KD | `KD(diff, map[outer])` | `_LoopJacSelectMat(map)` — constant selection |
+| Bare 2-D Param | `Param[outer, diff]` | `Para(name, dim=2)` — constant block |
+| Row-scale | `Param[outer, diff] * Var[outer]` | `Diag(Var) @ Para` |
+| Col-scale | `Param[outer, diff] * Var[diff]` | `Para @ Diag(Var)` |
+| DiagTerm (direct) | `KD(outer, diff) * Sum(Param[outer, j] * Var[j], j)` | `Diag(Mat_Mul(Para, iVar))` |
+| DiagTerm (identity indirect) | `KD(diff, map[outer]) * Sum(...)` with identity `map` | same as direct |
+| **Pattern 1 DiagSelect** | `KD(diff, map[outer]) * Π scalar_factors(outer)` | `Diag(scalar_vec) @ SelectMat(map)` (or just `Diag(scalar_vec)` for direct KD) |
+| **Pattern 2 bilinear mixing** | `Π outer_scalars(outer) * Sum(...)` where Sum matches Pattern 4 | `Diag(outer_vec) @ m_inner` where `m_inner` is Pattern 4's output |
+| **Pattern 4 Sum-KD (identity map)** | `Sum(f(outer, dummy) * KD(diff, map[dummy]), dummy)` with identity `map` | bare `Para` / `SelectMat_row @ Para` (constant) or `Mat_Mul` with `Diag(scalar_vec)` (mutable) |
+| **Pattern 4 Sum-KD (non-identity injective map)** | same body, map is an injection | `Mat_Mul(Para, SelectMat_col)` (single-matrix body) |
+
+### Not supported (Phase J3 fallback)
+
+The following shapes still hit the Phase J3 LoopEqnDiff kernel
+(correct but ~3–7× slower than J2 for small `nnz`). Rewrite the
+body to avoid them when the inner loop is on the hot path:
+
+* **Multi-arg sympy `Function` without simplification** — e.g. a
+  user-defined `sp.Function('f')(x[i], y[i])` that doesn't reduce
+  on `sp.diff`. Prefer elementary operations (`atan2` is fine
+  because `sp.diff(atan2(x, y), x)` simplifies).
+* **Bilinear outer–dummy products inside `Sum`** — e.g.
+  `Sum(Vm[i] * Vm[j] * cos(Va[i] - Va[j]), j)` (polar power flow).
+  The Phase J2 classifier cannot express the two-axis product in
+  its `Diag` / `Mat_Mul` vocabulary. The diagonal derivative
+  collapses cleanly, but the bilinear off-diagonal needs J3.
+* **Non-identity-map Sum-KD with Var-dependent scalar factors** —
+  e.g. `Sum(Sign(ms[orig[p]]) * KD(k, map[p]) * V[i, p], p)` with
+  `map` a non-identity injection. The identity-map variant is
+  supported (Pattern 4 mutable); the non-identity case needs an
+  inverse-map gather that the current scatter-add primitives
+  don't express.
+* **Piecewise / conditional bodies** — `canonicalize_kronecker`
+  unwraps the first non-zero branch heuristically, which can
+  produce the wrong result for non-trivial conditions.
+* **Stencil PDE bodies** (`SolPde`-style multi-arg callables) —
+  inherently J3. The sparsity analyzer correctly reports the
+  per-cell contribution pattern, so the J3 kernel is already O(nnz)
+  per Newton step; this is the design endpoint for that shape.
+
+## Body-level limitations (unchanged from prototype)
 
 * **Per-pipe 1-D Vars with different lengths** (e.g. SolMuseum's
   pre-refactor `Tsp_0`, `Tsp_1`, …) cannot be indexed by a LoopEqn
@@ -177,12 +251,6 @@ See the {class}`Solverz.equation.eqn.LoopOde` docstring for details.
   `Sum(Sum(body, (inner, …)), (outer, …))` where the inner sum
   resets each outer iteration cannot be expressed as a flat
   linear-prelude. Split into two bodies or flatten the sum algebra.
-
-* **Some Jacobian block shapes fall back to a Phase J3 Python
-  double-for-loop kernel** when the translator cannot classify the
-  canonical derivative into a constant or Diag/Mat_Mul template.
-  The fallback is correct but slower than the compiled J2 path. See
-  `#133` for the translator extensions currently tracking this.
 
 ## Further reading
 
