@@ -1257,46 +1257,29 @@ def test_loop_eqn_sum_with_sign_and_pow_f_side():
     np.testing.assert_allclose(F[0], expected, atol=1e-12)
 
 
-def test_loop_eqn_pow_body_newton_j3():
-    """Phase J3 end-to-end: a body whose Jacobian forces the
-    LoopEqnDiff fallback path, and Newton solves to the analytic
-    answer.
+def test_loop_eqn_pow_body_newton_pattern1():
+    """Pattern 1 end-to-end: ``x[i]**2`` diagonal body lands on the
+    Phase J2 ``Diag(2*x)`` fast path (no LoopEqnDiff), and Newton
+    solves to the analytic answer ``Vm = sqrt(rhs)``.
 
     Body: ``Vm[i]**2 - rhs[i]``. Differentiating:
 
         ∂F[i] / ∂Vm[k] = 2 * Vm[i] * δ(k, i)
 
-    which canonicalizes to ``2 * Vm[i] * KroneckerDelta(k, i)`` —
-    a ``(delta + 1-D Var factor)`` shape the Phase J2 classifier
-    does NOT recognise (Phase J2 handles DiagTermWithSum — the
-    inner must be a ``Sum``, not a bare ``Vm[i]``). So the diff
-    falls through to the dense LoopEqnDiff kernel built by
-    ``build_loop_jac_kernel_source``. The kernel emits a nested
-    ``for i: for k:`` with a ``(1.0 if i == k else 0.0)``
-    conditional from the ``KroneckerDelta → _translate_loop_body_njit``
-    branch added in Phase J3.0.
-
-    Verifies:
-    - At least one LoopEqnDiff fallback instance exists after
-      ``create_instance``.
-    - ``FormJac``'s LoopEqnDiff short-circuit picks up Value0
-      from the kernel correctly.
-    - Inline ``made_numerical`` + Newton converges to the
-      analytic ``Vm = sqrt(rhs)`` within ``atol=1e-8``.
-
-    Polar PF (``Sum(Vm[i]*Vm[j]*cos(Va[i]-Va[j]), j)``) is the
-    real target. This test uses a simpler scalar-power body only
-    to exercise the pipeline without dragging in gauge-freedom
-    issues from the 3-bus PF.
+    After Pattern 1 (``KD(outer,diff) * scalar_of_outer``), this
+    translates directly to ``Diag(2*iVar(Vm))`` — a bare Solverz
+    Diag with a Var-dependent inner. Before this session the same
+    canonical form fell to the Phase J3 LoopEqnDiff kernel (see the
+    #133 tracking issue for the translator evolution).
     """
     from Solverz import LoopEqn
+    from Solverz.equation.eqn import LoopEqnDiff
 
     n = 3
     Vm_target = np.array([1.0, 2.0, 3.0])
-    rhs_value = Vm_target ** 2   # [1, 4, 9]
+    rhs_value = Vm_target ** 2
 
     m = Model()
-    # Warm-start near but not at target
     m.Vm = Var('Vm', np.array([0.8, 2.3, 2.7]))
     m.rhs = Param('rhs', rhs_value)
 
@@ -1306,60 +1289,26 @@ def test_loop_eqn_pow_body_newton_j3():
 
     spf, y0 = m.create_instance()
 
-    # At least one derivative should be LoopEqnDiff (Phase J2
-    # classifier can't express ``δ(k,i) * 2 * Vm[i]`` as a pure
-    # Solverz Mat_Mul/Diag/Para combination).
-    from Solverz.equation.eqn import LoopEqnDiff
-    loop_diffs = [d for d in m.eqn.derivatives.values()
-                  if isinstance(d, LoopEqnDiff)]
-    assert len(loop_diffs) == 1, (
-        f"Expected 1 LoopEqnDiff fallback, got {len(loop_diffs)}"
-    )
-    # Kernel source should contain the KroneckerDelta conditional.
-    src = loop_diffs[0].kernel_source
-    assert 'if i == _sz_loop_dk' in src or 'if _sz_loop_dk == i' in src
-
-    # Structural sparsity must be the 3x3 diagonal (3 positions)
-    # and NOT the dense 9-entry fallback. ``compute_loop_jac_sparsity``
-    # recognised the ``δ(k,i) * 2 * Vm[i]`` term as contributing
-    # only to (0,0), (1,1), (2,2).
-    ed = loop_diffs[0]
-    assert ed._sparsity_row.tolist() == [0, 1, 2]
-    assert ed._sparsity_col.tolist() == [0, 1, 2]
-
-    # The constructed JacBlock should inherit that sparsity —
-    # not be marked as a 9-entry dense block.
-    spf.FormJac(y0)
-    for jbs_row in spf.jac.blocks_sorted.values():
-        for var, jb in jbs_row.items():
-            if hasattr(jb, '_loop_eqn_diff'):
-                assert jb.SpEleSize == 3, (
-                    f"LoopEqnDiff JacBlock should have 3 nnz, "
-                    f"got {jb.SpEleSize}"
-                )
-                np.testing.assert_array_equal(jb.CooRow, [0, 1, 2])
-                np.testing.assert_array_equal(jb.CooCol, [0, 1, 2])
+    # Pattern 1 must translate the ``δ(k,i) * 2 * Vm[i]`` derivative.
+    for ed in m.eqn.derivatives.values():
+        assert not isinstance(ed, LoopEqnDiff), (
+            f"Pattern 1 should classify diag*Var-scalar to J2, got "
+            f"LoopEqnDiff fallback for {ed.name}"
+        )
 
     mdl, y0 = _mdl_from_module(spf, y0)
     sol = nr_method(mdl, y0)
     np.testing.assert_allclose(sol.y['Vm'], Vm_target, atol=1e-8)
 
 
-def test_loop_eqn_pow_body_newton_j3_jit_module():
-    """Phase J3.3 end-to-end: render a LoopEqnDiff block through
-    the JIT module path and solve via the compiled module.
+def test_loop_eqn_pow_body_newton_pattern1_jit_module():
+    """Pattern 1 end-to-end through ``module_printer(jit=True)``.
 
-    Asserts:
-
-    - ``module_printer(jit=True).render()`` succeeds — the
-      LoopEqnDiff's dense kernel source lands in ``num_func.py``
-      as a top-level ``@njit(cache=True)`` def, and the J_
-      wrapper calls it + fancy-indexes the block's structural
-      (row, col) positions into ``_data_[addr_slice]``.
-    - The generated ``num_func.py`` contains the kernel def line
-      and the row/col array loads from ``setting``.
-    - Importing the module + running Newton converges to
-      ``Vm = sqrt(rhs)``.
+    Same pow body as ``test_loop_eqn_pow_body_newton_pattern1``; here
+    we verify the compiled JIT module imports and Newton converges.
+    With Pattern 1 in place, the diagonal block no longer emits a
+    ``_sz_loop_jac_kernel_`` — it compiles as a regular Diag term,
+    so the earlier source assertions on the J3 kernel are dropped.
     """
     import os as _os
     import sys as _sys
@@ -1385,24 +1334,6 @@ def test_loop_eqn_pow_body_newton_j3_jit_module():
                                  directory=d, jit=True)
         printer.render()
 
-        module_path = _os.path.join(d, 'phase_j3_pow', 'num_func.py')
-        with open(module_path) as f:
-            src = f.read()
-        # The sparse kernel is emitted as a @njit def with a flat
-        # ``for _sz_idx in range(nnz):`` loop. nnz = 3 because the
-        # pow body's Jacobian is the 3-element diagonal — the
-        # kernel iterates exactly 3 positions, NOT 9 (dense).
-        assert '_sz_loop_jac_kernel_0' in src
-        assert 'np.empty(3)' in src
-        assert 'for _sz_idx in range(3):' in src
-        # Row / col arrays loaded from setting at module level.
-        assert '_sz_loop_jac_row_0 = setting["_sz_loop_jac_row_0"]' in src
-        assert '_sz_loop_jac_col_0 = setting["_sz_loop_jac_col_0"]' in src
-        # The J_ wrapper writes directly to data[addr_slice] with
-        # no fancy indexing — the kernel's output is already in
-        # csc column-major order matching Value0.tocoo().
-        assert '_sz_loop_jac_kernel_0(Vm, _sz_loop_jac_row_0, _sz_loop_jac_col_0)' in src
-
         _sys.path.insert(0, d)
         try:
             import phase_j3_pow
@@ -1420,92 +1351,62 @@ def test_loop_eqn_pow_body_newton_j3_jit_module():
 def test_loop_eqn_sparsity_is_symbolic_not_numerical():
     """The structural sparsity analysis (``compute_loop_jac_sparsity``)
     must be SYMBOLIC — derived from the canonical diff expression's
-    tree structure, not from evaluating the kernel at y0. Otherwise
-    a Var starting at zero could trick the analyzer into pruning
-    diagonal positions whose derivative value is ``4·x·δ`` and
-    happens to be zero at that specific point.
+    tree structure, not from evaluating the kernel at y0.
 
-    This test starts ``x = [0, 2, 0]`` for body ``2·x[i]² - rhs[i]``.
-    At ``x=0`` positions the diagonal derivative ``4·x`` is
-    numerically zero. Verifies:
-
-    - ``ed._sparsity_row / _col`` contain all 3 diagonal
-      positions regardless of ``x`` being 0 at (0,0) and (2,2).
-    - After ``FormJac``, the JacBlock's ``CooRow`` / ``CooCol`` /
-      ``SpEleSize`` still describe the 3-entry diagonal.
-    - ``Value0`` is filled via the FormJac perturbation (random
-      non-zero Var values) — so none of the diagonal entries
-      accidentally collapse to zero in scipy's csc construction,
-      but even if they did the structural position would still
-      be recorded.
+    We exercise this with a body ``sqrt(x[i]**2 + y[i]**2)``. The
+    derivative w.r.t. ``x[k]`` is ``x[i] / sqrt(x[i]**2 + y[i]**2) *
+    δ(k, i)`` — a Phase J2 Pattern 1 diagonal whose symbolic sparsity
+    must still correctly report the full diagonal even when ``x[i]=0``
+    at some rows (the numeric value is zero at those rows but the
+    structural position should not be pruned).
     """
     from Solverz.equation.eqn import LoopEqnDiff
 
     n = 3
     m = Model()
-    # Deliberately zero at rows 0 and 2 so the diagonal derivative
-    # 4·x[i]·δ(k,i) is numerically zero at those positions.
+    # Two rows where x[i]=0 (derivative numerically zero at those rows)
     m.x = Var('x', np.array([0.0, 2.0, 0.0]))
-    m.rhs = Param('rhs', np.array([-1.0, 4.0, -9.0]))
+    m.y = Var('y', np.array([1.0, 1.0, 1.0]))
+    m.rhs = Param('rhs', np.array([1.0, np.sqrt(5.0), 1.0]))
     i = Idx('i', n)
-    body = 2 * m.x[i] ** 2 - m.rhs[i]
+    body = sp.sqrt(m.x[i] ** 2 + m.y[i] ** 2) - m.rhs[i]
     m.eqn = LoopEqn('qq', outer_index=i, body=body, model=m)
 
     spf, y0 = m.create_instance()
-    (ed,) = [d for d in m.eqn.derivatives.values()
-             if isinstance(d, LoopEqnDiff)]
+    # Pattern 1 translates both ∂/∂x and ∂/∂y as Diag(...) — no J3.
+    assert not any(isinstance(d, LoopEqnDiff)
+                   for d in m.eqn.derivatives.values())
 
-    # Structural sparsity is the full diagonal — independent of
-    # the Var values ``x = [0, 2, 0]``.
-    np.testing.assert_array_equal(ed._sparsity_row, [0, 1, 2])
-    np.testing.assert_array_equal(ed._sparsity_col, [0, 1, 2])
-    assert ed._nnz == 3
-
-    # After FormJac, the JacBlock inherits the structural
-    # sparsity. The perturbed Value0 has all-non-zero diagonal
-    # entries because FormJac perturbs Vars to [1, 2).
+    # After FormJac, the JacBlock inherits full-diagonal sparsity.
+    # The perturbed Value0 has non-zero diagonal entries because
+    # FormJac perturbs Vars away from the ``x=0`` starting values.
     spf.FormJac(y0)
-    found = False
+    seen_full_diag = False
     for jbs in spf.jac.blocks_sorted.values():
         for var, jb in jbs.items():
-            if hasattr(jb, '_loop_eqn_diff'):
-                found = True
-                np.testing.assert_array_equal(jb.CooRow, [0, 1, 2])
-                np.testing.assert_array_equal(jb.CooCol, [0, 1, 2])
-                assert jb.SpEleSize == 3
-    assert found, "expected at least one LoopEqnDiff-sourced JacBlock"
+            # The pow body's derivative block is the 3-row diagonal.
+            if jb.EqnAddr.stop - jb.EqnAddr.start == n and jb.SpEleSize == n:
+                seen_full_diag = True
+                np.testing.assert_array_equal(sorted(jb.CooRow), [0, 1, 2])
+                np.testing.assert_array_equal(sorted(jb.CooCol), [0, 1, 2])
+    assert seen_full_diag, (
+        "Pattern 1 should preserve the full 3-row diagonal sparsity even "
+        "when some ``x[i]`` entries are numerically zero at y0"
+    )
 
 
-def test_loop_eqn_trig_diag_newton_j3_j4():
-    """Phase J3 fallback + Phase J4 sparse kernel end-to-end on a
-    body whose per-row diagonal derivative is a nonlinear trig
-    expression.
+def test_loop_eqn_trig_diag_newton_pattern1():
+    """Pattern 1 end-to-end on a body whose per-row diagonal
+    derivative is a nonlinear trig expression. Previously the trig
+    scalar placed the term ``δ(outer, diff) * <trig_of_outer>`` into
+    the Phase J3 LoopEqnDiff fallback; with Pattern 1 the term
+    translates to ``Diag(trig_vector)`` and lands on the compiled
+    Phase J2 fast path (no LoopEqnDiff).
 
     Bodies:
 
         F1[i] = Va[i] * cos(Va[i]) + Vm[i] - r1[i]
         F2[i] = Vm[i] * sin(Vm[i])            - r2[i]
-
-    Two LoopEqns, 3 rows each → 6 residuals in (Va, Vm) ∈ ℝ³×ℝ³.
-    No gauge freedom (no angle-differences, no scaling
-    invariance), so the 3-bus square system is well-conditioned.
-
-    Interesting derivatives:
-
-    - ``∂F1[i] / ∂Va[k] = (cos(Va[i]) - Va[i]*sin(Va[i])) * δ(k, i)``
-      — diagonal block with a nonlinear trig scalar per row.
-      Falls through Phase J2's classifier (``other_factors`` in
-      the term's anatomy) → LoopEqnDiff fallback → sparse kernel
-      with 3 entries, ``for _sz_idx in range(3)``.
-    - ``∂F1[i] / ∂Vm[k] = δ(k, i)``
-      — the Phase J1 constant identity path.
-    - ``∂F2[i] / ∂Vm[k] = (sin(Vm[i]) + Vm[i]*cos(Vm[i])) * δ(k, i)``
-      — another Phase J3 fallback diagonal block with trig.
-    - ``∂F2[i] / ∂Va[k] = 0`` — pruned by ``is_zero`` before the
-      classifier ever runs.
-
-    Newton converges from a nearby warm start to the analytic
-    target by construction.
     """
     from Solverz.equation.eqn import LoopEqnDiff
 
@@ -1529,28 +1430,13 @@ def test_loop_eqn_trig_diag_newton_j3_j4():
 
     spf, y0 = m.create_instance()
 
-    # Sanity: at least one derivative in each equation fell into
-    # the Phase J3 LoopEqnDiff fallback (the trig diagonal terms).
-    loop_diffs = []
+    # Pattern 1 must translate every non-zero derivative — no J3.
     for eqn in (m.eqn1, m.eqn2):
         for ed in eqn.derivatives.values():
-            if isinstance(ed, LoopEqnDiff):
-                loop_diffs.append(ed)
-    assert len(loop_diffs) >= 2
-
-    # Each fallback block should be 3 entries (the diagonal), not
-    # 9 (full dense) — proof that ``compute_loop_jac_sparsity``
-    # correctly recognised ``δ(outer, diff) * <scalar>`` as a
-    # diagonal-only contribution even when ``<scalar>`` is a
-    # nonlinear trig expression.
-    for ed in loop_diffs:
-        assert ed._nnz == 3, (
-            f"Expected 3 nnz for a diagonal block, got {ed._nnz}"
-        )
-        # The sparse kernel source should iterate exactly 3
-        # positions.
-        assert 'np.empty(3)' in ed.kernel_source
-        assert 'for _sz_idx in range(3):' in ed.kernel_source
+            assert not isinstance(ed, LoopEqnDiff), (
+                f"Pattern 1 should classify trig-scalar diagonal to J2, "
+                f"got LoopEqnDiff fallback for {ed.name}"
+            )
 
     mdl, y0 = _mdl_from_module(spf, y0)
     sol = nr_method(mdl, y0)
@@ -2253,6 +2139,139 @@ def test_loop_jac_pattern4_row_slice_via_bare_outer():
     left, right = translated.args
     assert isinstance(left, _LoopJacSelectMat)
     assert isinstance(right, Para) and right.name == 'V'
+
+
+def test_loop_jac_pattern4_mutable_col_scale_identity_map():
+    """#133 Pattern 4 mutable case — identity-map Sum-KD with a
+    Var-dependent scalar factor that depends on the diff axis only.
+
+    Body: ``Sum(V[outer, p] * x[map[p]]**2, p)``. Diff w.r.t. ``x[k]``
+    yields ``Sum(2 * V[outer, p] * x[map[p]] * KD(k, map[p]), p)``.
+    With ``map`` identity, collapse dummy := diff gives
+    ``2 * V[outer, diff] * x[map[diff]]``. The matrix is ``Para(V)``,
+    the scalar is ``x[map]`` — a Var vector gathered via ``map``,
+    depending on diff. Translator must emit
+    ``2 * Mat_Mul(Para(V), Diag(iVar(x)[Para(map)]))`` — col-scale.
+    """
+    from Solverz import LoopEqn, Model, Param, Var
+    from Solverz.equation.eqn import LoopEqnDiff
+    from Solverz.equation.loop_jac import (
+        canonicalize_kronecker, loop_jac_to_solverz_expr,
+    )
+    from Solverz.sym_algebra.functions import Diag, Mat_Mul
+    from Solverz.sym_algebra.symbols import Para
+
+    n = 4
+    V_val = np.arange(n * n, dtype=float).reshape(n, n) + 1.0
+    m = Model()
+    m.x = Var('x', np.ones(n))
+    m.V = Param('V', V_val, dim=2, sparse=False)
+    m.map_id = Param('map_id', np.arange(n, dtype=np.int64), dtype=int)
+
+    i = sp.Idx('i')
+    p = sp.Idx('p')
+    x_sym = sp.IndexedBase('x')
+    V_sym = sp.IndexedBase('V')
+    map_sym = sp.IndexedBase('map_id')
+    body = sp.Sum(V_sym[i, p] * x_sym[map_sym[p]]**2, (p, 0, n - 1))
+    m.eqn_mut = LoopEqn(
+        'eqn_mut', outer_index=i, n_outer=n, body=body,
+        var_map={'x': m.x, 'V': m.V, 'map_id': m.map_id},
+    )
+
+    k = sp.Idx('_sz_loop_dk')
+    raw = sp.diff(body, x_sym[k])
+    canonical = canonicalize_kronecker(raw, i, k)
+    translated = loop_jac_to_solverz_expr(
+        canonical, i, k, n, m.eqn_mut.var_map, n_diff=n,
+    )
+    # Shape: (const_coeff) * Mat_Mul(Para(V), Diag(vec_of_diff)).
+    # sympy may wrap the coeff through Mul — handle both shapes.
+    if isinstance(translated, sp.Mul):
+        non_num = [a for a in translated.args
+                   if not isinstance(a, (sp.Integer, sp.Float, sp.Rational))]
+        assert len(non_num) == 1, translated
+        inner = non_num[0]
+    else:
+        inner = translated
+    assert isinstance(inner, Mat_Mul), inner
+    assert len(inner.args) == 2
+    left, right = inner.args
+    assert isinstance(left, Para) and left.name == 'V'
+    assert isinstance(right, Diag), right
+
+    m.eqn_mut.derive_derivative()
+    ed = m.eqn_mut.derivatives['x']
+    assert not isinstance(ed, LoopEqnDiff), (
+        f"Pattern 4 mutable col-scale must land on J2, got J3 {ed}"
+    )
+
+
+def test_loop_jac_pattern4_mutable_row_gather_col_scale():
+    """#133 Pattern 4 mutable case — row-gathered matrix PLUS a
+    Var-dependent scalar of diff. Mirrors the fault_heat_network
+    ``Sum(Sign(ms[orig[p]]) * KD(k, orig[p]) * V[ns[outer], p], p)``
+    shape used in Ts_mixing / Tr_mixing derivatives.
+    """
+    from Solverz import LoopEqn, Model, Param, Var
+    from Solverz.equation.eqn import LoopEqnDiff, _LoopJacSelectMat
+    from Solverz.equation.loop_jac import (
+        canonicalize_kronecker, loop_jac_to_solverz_expr,
+    )
+    from Solverz.sym_algebra.functions import Diag, Mat_Mul
+    from Solverz.sym_algebra.symbols import Para
+
+    n_source = 5
+    n_outer = 3
+    n = 4  # dummy range == n_diff; identity map
+    V_val = np.arange(n_source * n, dtype=float).reshape(n_source, n)
+    ns_val = np.array([2, 0, 4], dtype=np.int64)  # row gather
+    m = Model()
+    m.ms = Var('ms', np.ones(n))
+    m.V = Param('V', V_val, dim=2, sparse=False)
+    m.ns = Param('ns', ns_val, dtype=int)
+    m.orig = Param('orig', np.arange(n, dtype=np.int64), dtype=int)
+
+    i = sp.Idx('i')
+    p = sp.Idx('p')
+    ms_sym = sp.IndexedBase('ms')
+    V_sym = sp.IndexedBase('V')
+    ns_sym = sp.IndexedBase('ns')
+    orig_sym = sp.IndexedBase('orig')
+    body = sp.Sum(ms_sym[orig_sym[p]]**2 * V_sym[ns_sym[i], p],
+                  (p, 0, n - 1))
+    m.eqn_mix = LoopEqn(
+        'eqn_mix', outer_index=i, n_outer=n_outer, body=body,
+        var_map={'ms': m.ms, 'V': m.V, 'ns': m.ns, 'orig': m.orig},
+    )
+
+    k = sp.Idx('_sz_loop_dk')
+    raw = sp.diff(body, ms_sym[k])
+    canonical = canonicalize_kronecker(raw, i, k)
+    translated = loop_jac_to_solverz_expr(
+        canonical, i, k, n_outer, m.eqn_mix.var_map, n_diff=n,
+    )
+    # Shape: 2 * Mat_Mul(Mat_Mul(SelectMat_row, Para(V)), Diag(ms_gather))
+    inner = translated
+    if isinstance(inner, sp.Mul):
+        non_num = [a for a in inner.args
+                   if not isinstance(a, (sp.Integer, sp.Float, sp.Rational))]
+        assert len(non_num) == 1, inner
+        inner = non_num[0]
+    assert isinstance(inner, Mat_Mul)
+    assert len(inner.args) == 2
+    left, right = inner.args
+    assert isinstance(left, Mat_Mul), left
+    assert len(left.args) == 2
+    assert isinstance(left.args[0], _LoopJacSelectMat)
+    assert isinstance(left.args[1], Para) and left.args[1].name == 'V'
+    assert isinstance(right, Diag)
+
+    m.eqn_mix.derive_derivative()
+    ed = m.eqn_mix.derivatives['ms']
+    assert not isinstance(ed, LoopEqnDiff), (
+        f"mutable col-scale + row-gather must land on J2, got J3 {ed}"
+    )
 
 
 def test_loop_jac_pattern4_non_identity_map_select_mat():

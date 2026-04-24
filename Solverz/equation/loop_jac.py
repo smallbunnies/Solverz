@@ -417,7 +417,7 @@ def _classify_and_translate_term(term: sp.Expr,
     numeric coefficients / other, and then match against the known
     shapes in priority order (most specific first).
     """
-    from Solverz.equation.eqn import _LoopJacEye
+    from Solverz.equation.eqn import _LoopJacEye, _LoopJacSelectMat
     from Solverz.equation.param import ParamBase
     from Solverz.sym_algebra.functions import Diag, Mat_Mul
     from Solverz.sym_algebra.symbols import iVar
@@ -433,6 +433,7 @@ def _classify_and_translate_term(term: sp.Expr,
     indexed_factors = []
     sum_factors = []
     other_factors = []
+    add_factors = []
     for f in factors:
         if isinstance(f, KroneckerDelta):
             delta_factors.append(f)
@@ -442,11 +443,38 @@ def _classify_and_translate_term(term: sp.Expr,
             sum_factors.append(f)
         elif isinstance(f, (sp.Integer, sp.Float, sp.Rational, sp.Number)):
             coeff = coeff * f
+        elif isinstance(f, sp.Add):
+            add_factors.append(f)
         else:
             other_factors.append(f)
 
     outer_name = _name_of(outer_idx)
     diff_name = _name_of(diff_idx)
+
+    # --- Distribute Add factors ---------------------------------------
+    # A term like ``(Sum(A) + Sum(B)) * KD * Ts[...]`` — the Add sits
+    # inside a Mul and the per-summand shapes don't get classified.
+    # Distribute: expand each ``Add.args`` into a separate term and
+    # recurse. This covers Pattern 3's ``(Sum + Sum) * KD`` and
+    # Pattern 2's ``(Sum + Sum) * outer_indexed``.
+    if add_factors:
+        rest_factors = (delta_factors + indexed_factors
+                        + sum_factors + other_factors)
+        rest_expr = sp.Mul(*rest_factors) if rest_factors else sp.S.One
+        # Pick one Add and distribute; remaining Adds handled by recursion
+        head_add = add_factors[0]
+        tail_adds = add_factors[1:]
+        tail_mul = sp.Mul(*tail_adds) if tail_adds else sp.S.One
+        translated_summands = []
+        for summand in head_add.args:
+            expanded = summand * rest_expr * tail_mul
+            translated_summands.append(
+                loop_jac_to_solverz_expr(
+                    coeff * expanded, outer_idx, diff_idx,
+                    n_outer, var_map, n_diff=n_diff,
+                )
+            )
+        return sp.Add(*translated_summands)
 
     # --- Phase J1 shapes ---------------------------------------------
 
@@ -507,6 +535,43 @@ def _classify_and_translate_term(term: sp.Expr,
                 f"LoopEqn J translator: Var {var_name}[{var_idx.indices[0]}] "
                 f"— index must be outer or diff"
             )
+
+    # Pattern 1 (#133 DiagSelectTerm): ``KD(diff, map[outer]) *
+    # scalar_factors(outer)`` where the scalar factors are any mix of
+    # indexed / unary-function factors that only reference ``outer`` (not
+    # ``diff``). Emits ``Diag(scalar_vec)`` (direct KD) or
+    # ``Mat_Mul(Diag(scalar_vec), _LoopJacSelectMat(...))`` (indirect KD).
+    if (len(delta_factors) == 1
+            and len(sum_factors) == 0
+            and (len(indexed_factors) + len(other_factors)) >= 1):
+        scalar_factors = indexed_factors + other_factors
+        # All scalar factors must depend only on the outer axis.
+        if all(not _touches_idx(f, diff_idx) for f in scalar_factors):
+            pattern1 = _try_kd_outer_scalars(
+                delta_factors[0], scalar_factors,
+                outer_idx, diff_idx, n_outer, n_diff, var_map,
+            )
+            if pattern1 is not None:
+                return coeff * pattern1
+
+    # Pattern 2 (#133 bilinear mixing): ``outer_indexed_scalar * Sum(...)``
+    # where the Sum has ``KD(diff, map[dummy])`` inside. Example:
+    # ``Ts[fht_ns[outer]] * Sum(V[fht_ns[outer], p] * KD(k, fht_orig[p]) *
+    # Sign(ms[fht_orig[p]]), p)``. After collapsing the inner Sum via
+    # Pattern 4 we get a (mutable) matrix ``M_inner``; the outer
+    # ``Ts[fht_ns[outer]]`` scales rows by an outer-indexed Var vector.
+    # Emit ``Mat_Mul(Diag(outer_scalar_vec), M_inner)``.
+    if (len(sum_factors) == 1
+            and len(delta_factors) == 0
+            and (len(indexed_factors) + len(other_factors)) >= 1):
+        scalar_factors = indexed_factors + other_factors
+        if all(not _touches_idx(f, diff_idx) for f in scalar_factors):
+            pattern2 = _try_outer_scalar_times_sum_kd(
+                scalar_factors, sum_factors[0],
+                outer_idx, diff_idx, n_outer, n_diff, var_map,
+            )
+            if pattern2 is not None:
+                return coeff * pattern2
 
     # DiagTermWithSum: KroneckerDelta(...) * Sum(...)
     # Direct diagonal KD(outer,diff)*Sum → Diag(Mat_Mul(...))
@@ -569,6 +634,141 @@ def _classify_and_translate_term(term: sp.Expr,
         f"other={len(other_factors)}. Reserved for Phase J3 "
         f"(LoopEqn-native per-entry kernel emitter)."
     )
+
+
+def _touches_idx(expr: sp.Expr, idx: sp.Idx) -> bool:
+    """True when ``expr`` references ``idx`` anywhere in its subtree."""
+    target = _name_of(idx)
+    return any(isinstance(s, sp.Idx) and _name_of(s) == target
+               for s in expr.free_symbols)
+
+
+def _try_kd_outer_scalars(
+    kd: KroneckerDelta,
+    scalar_factors: List[sp.Expr],
+    outer_idx: sp.Idx,
+    diff_idx: sp.Idx,
+    n_outer: int,
+    n_diff: int,
+    var_map: Dict[str, object],
+):
+    """Pattern 1 (#133): ``KD(diff, [map[outer] | outer]) * Π scalar_factors(outer)``.
+
+    Every ``scalar_factors`` entry must depend only on the outer axis
+    (already checked by the caller). They are multiplied together and
+    translated into a single 1-D Solverz vector of length ``n_outer``
+    via :func:`_translate_index_scalar_to_vec`.
+
+    KD shape handling:
+
+    * Direct ``KD(outer, diff)`` — emit ``Diag(scalar_vec)``.
+    * Indirect ``KD(diff, map[outer])`` where ``map`` is a 1-D
+      ``ParamBase`` of length ``n_outer`` — emit
+      ``Mat_Mul(Diag(scalar_vec), _LoopJacSelectMat(map, n_outer, n_diff))``.
+
+    Returns ``None`` on unsupported KD shapes or when the scalar
+    product cannot be translated (caller falls back to J3).
+    """
+    from Solverz.equation.eqn import _LoopJacSelectMat
+    from Solverz.equation.param import ParamBase
+    from Solverz.sym_algebra.functions import Diag, Mat_Mul
+
+    outer_name = _name_of(outer_idx)
+    diff_name = _name_of(diff_idx)
+
+    # Classify the KD shape.
+    a0, a1 = kd.args
+    col_map_v = None  # None → direct KD
+    # Direct: {outer, diff}
+    if ({_name_of(a0), _name_of(a1)} == {outer_name, diff_name}):
+        col_map_v = None
+    else:
+        # Indirect: KD(diff, map[outer])
+        matched = False
+        for arg_d, arg_m in ((a0, a1), (a1, a0)):
+            if not (isinstance(arg_d, sp.Idx) and _name_of(arg_d) == diff_name):
+                continue
+            if not isinstance(arg_m, sp.Indexed):
+                continue
+            if len(arg_m.indices) != 1:
+                continue
+            inner = arg_m.indices[0]
+            if not (isinstance(inner, sp.Idx) and _name_of(inner) == outer_name):
+                continue
+            map_name = arg_m.base.name
+            map_obj = var_map.get(map_name)
+            if not (isinstance(map_obj, ParamBase) and map_obj.dim == 1):
+                continue
+            map_v = np.asarray(map_obj.v, dtype=np.int64).reshape(-1)
+            if len(map_v) != n_outer:
+                continue
+            if n_diff > 0 and (int(map_v.min()) < 0 or int(map_v.max()) >= n_diff):
+                continue
+            col_map_v = map_v
+            matched = True
+            break
+        if not matched:
+            return None
+
+    scalar_prod = (sp.Mul(*scalar_factors)
+                   if len(scalar_factors) > 1 else scalar_factors[0])
+    scalar_vec = _translate_index_scalar_to_vec(
+        scalar_prod, outer_idx, var_map,
+    )
+    if scalar_vec is None:
+        return None
+
+    diag_expr = Diag(scalar_vec)
+    if col_map_v is None:
+        return diag_expr
+    nd = n_diff if n_diff > 0 else (int(col_map_v.max()) + 1)
+    select = _LoopJacSelectMat(
+        sp.Tuple(*[sp.Integer(int(c)) for c in col_map_v]),
+        sp.Integer(n_outer),
+        sp.Integer(nd),
+    )
+    return Mat_Mul(diag_expr, select)
+
+
+def _try_outer_scalar_times_sum_kd(
+    outer_scalar_factors: List[sp.Expr],
+    sum_node: sp.Sum,
+    outer_idx: sp.Idx,
+    diff_idx: sp.Idx,
+    n_outer: int,
+    n_diff: int,
+    var_map: Dict[str, object],
+):
+    """Pattern 2 (#133 bilinear): ``Π outer_scalars(outer) * Sum(...)``
+    where the Sum is a Pattern 4 Sum-KD shape.
+
+    Strategy: translate the Sum alone via :func:`_try_sum_kd_collapse`
+    to get a matrix expression ``M_inner`` (shape ``n_outer × n_diff``).
+    Multiply its rows by the outer scalar vector:
+
+        ``Mat_Mul(Diag(outer_scalar_vec), M_inner)``
+
+    Works whether ``M_inner`` is a bare ``Para``, a
+    ``Mat_Mul(SelectMat, Para)`` row-gather, or any composite the
+    mutable-mat analyzer accepts.
+    """
+    from Solverz.sym_algebra.functions import Diag, Mat_Mul
+
+    m_inner = _try_sum_kd_collapse(
+        sum_node, outer_idx, diff_idx, n_outer, var_map, n_diff,
+    )
+    if m_inner is None:
+        return None
+
+    scalar_prod = (sp.Mul(*outer_scalar_factors)
+                   if len(outer_scalar_factors) > 1
+                   else outer_scalar_factors[0])
+    outer_vec = _translate_index_scalar_to_vec(
+        scalar_prod, outer_idx, var_map,
+    )
+    if outer_vec is None:
+        return None
+    return Mat_Mul(Diag(outer_vec), m_inner)
 
 
 def _try_sum_kd_collapse(
@@ -663,47 +863,18 @@ def _try_sum_kd_collapse(
 
     is_identity = (M == nd and np.array_equal(map_v, np.arange(nd)))
 
-    # Identity map: substitute dummy := diff and let the downstream
-    # translator lower the resulting bare Indexed(Param, outer, diff).
+    # Identity map: substitute dummy := diff and classify the resulting
+    # body into a matrix factor + optional scalar-of-diff / scalar-of-outer
+    # factors. Emit the matching Solverz expression (bare Para,
+    # Mat_Mul(SelectMat_row, Para), or the same composed with
+    # Diag(scalar_var) on either side).
     if is_identity:
         other_factors = [f for f in factors if f is not kd_factor]
-        new_body = sp.Mul(*other_factors) if other_factors else sp.S.One
-        substituted = new_body.subs(dummy, diff_idx)
-        if not isinstance(substituted, sp.Indexed):
-            return None
-        if substituted.base.name not in var_map:
-            return None
-        sol_obj = var_map[substituted.base.name]
-        if not (isinstance(sol_obj, ParamBase) and sol_obj.dim == 2):
-            return None
-        val_shape = sol_obj.value.shape if sol_obj.value is not None else None
-        if val_shape is None or len(val_shape) != 2:
-            return None
-        if len(substituted.indices) != 2:
-            return None
-        row_idx, col_idx = substituted.indices
-        # Column axis must be the bare diff index.
-        if not (isinstance(col_idx, sp.Idx)
-                and _name_of(col_idx) == diff_name):
-            return None
-        if val_shape[1] != nd:
-            return None
-        # Resolve the row axis to a concrete (n_outer,) gather map.
-        row_select = _resolve_row_gather(
-            row_idx, outer_idx, n_outer, var_map, val_shape[0],
+        substituted_factors = [f.subs(dummy, diff_idx) for f in other_factors]
+        return _emit_constant_plus_scalars(
+            substituted_factors, outer_idx, diff_idx,
+            n_outer, nd, var_map,
         )
-        if row_select is None:
-            return None
-        row_map_v, row_is_identity = row_select
-        para_expr = Para(substituted.base.name, dim=2)
-        if row_is_identity and val_shape[0] == n_outer:
-            return para_expr
-        select_row = _LoopJacSelectMat(
-            sp.Tuple(*[sp.Integer(int(r)) for r in row_map_v]),
-            sp.Integer(n_outer),
-            sp.Integer(val_shape[0]),
-        )
-        return Mat_Mul(select_row, para_expr)
 
     # Non-identity map: require that the body (minus the KD) is a single
     # Indexed(V, outer, dummy) 2-D-Param access. Emit
@@ -741,6 +912,249 @@ def _try_sum_kd_collapse(
         sp.Integer(nd),
     )
     return Mat_Mul(Para(base_name, dim=2), select_mat)
+
+
+def _emit_constant_plus_scalars(
+    substituted_factors: List[sp.Expr],
+    outer_idx: sp.Idx,
+    diff_idx: sp.Idx,
+    n_outer: int,
+    n_diff: int,
+    var_map: Dict[str, object],
+):
+    """Given factors of the collapsed body ``Mul(*substituted_factors)``
+    after an identity-map Sum-KD dummy substitution, classify each
+    factor and assemble a Solverz Jacobian expression.
+
+    Exactly one factor must be the "matrix carrier" — an
+    ``Indexed(V, row_axis, diff_idx)`` 2-D-Param access — whose row
+    axis is either the bare outer Idx, an indirect gather
+    ``row_map[outer]``, or a constant row. All other factors must be
+    either numeric constants, scalar expressions that depend only on
+    the diff axis, or scalar expressions that depend only on the
+    outer axis.
+
+    Returns a Solverz expression routed through the existing constant
+    / row-scale / col-scale paths. ``None`` on unsupported shapes.
+    """
+    from Solverz.equation.eqn import _LoopJacSelectMat
+    from Solverz.equation.param import ParamBase
+    from Solverz.sym_algebra.functions import Diag, Mat_Mul
+    from Solverz.sym_algebra.symbols import Para
+
+    outer_name = _name_of(outer_idx)
+    diff_name = _name_of(diff_idx)
+
+    matrix_factor = None
+    diff_scalars: List[sp.Expr] = []
+    outer_scalars: List[sp.Expr] = []
+    coeff = sp.S.One
+
+    def touches(idx: sp.Idx, expr: sp.Expr) -> bool:
+        target_name = _name_of(idx)
+        return any(_name_of(s) == target_name for s in expr.free_symbols
+                   if isinstance(s, sp.Idx))
+
+    for f in substituted_factors:
+        if isinstance(f, (sp.Integer, sp.Float, sp.Rational, sp.Number)):
+            coeff = coeff * f
+            continue
+        if isinstance(f, sp.Indexed) and len(f.indices) == 2:
+            idx_touches_outer = tuple(
+                touches(outer_idx, sp.sympify(ix)) for ix in f.indices
+            )
+            idx_touches_diff = tuple(
+                touches(diff_idx, sp.sympify(ix)) for ix in f.indices
+            )
+            is_matrix = any(idx_touches_outer) and any(idx_touches_diff)
+            if is_matrix:
+                if matrix_factor is not None:
+                    return None  # two matrix carriers — unsupported
+                matrix_factor = f
+                continue
+        # Not a matrix carrier — treat as a scalar factor
+        touches_outer = touches(outer_idx, f)
+        touches_diff = touches(diff_idx, f)
+        if touches_outer and touches_diff:
+            return None  # mixed-axis scalar not supported
+        if touches_diff:
+            diff_scalars.append(f)
+        elif touches_outer:
+            outer_scalars.append(f)
+        else:
+            # Neither outer nor diff — pure constant factor
+            coeff = coeff * f
+
+    if matrix_factor is None:
+        return None
+
+    if len(outer_scalars) and len(diff_scalars):
+        # Would need a 3-arg Mat_Mul(Diag, Matrix, Diag) which the
+        # mutable-matrix analyzer can't decompose today.
+        return None
+
+    # Locate the matrix's row/col axes.
+    m_sol = var_map.get(matrix_factor.base.name)
+    if not (isinstance(m_sol, ParamBase) and m_sol.dim == 2):
+        return None
+    val_shape = m_sol.value.shape if m_sol.value is not None else None
+    if val_shape is None or len(val_shape) != 2:
+        return None
+    idx0, idx1 = matrix_factor.indices
+    # Figure out which index is the diff axis vs the row (outer) axis.
+    idx0_is_diff = (isinstance(idx0, sp.Idx)
+                    and _name_of(idx0) == diff_name)
+    idx1_is_diff = (isinstance(idx1, sp.Idx)
+                    and _name_of(idx1) == diff_name)
+    if idx1_is_diff and not idx0_is_diff:
+        row_idx = idx0
+        col_idx = idx1
+        source_row_count = val_shape[0]
+        source_col_count = val_shape[1]
+        transposed = False
+    elif idx0_is_diff and not idx1_is_diff:
+        # Carrier is V[diff, outer] — the transpose — outside the
+        # analyzer's supported shape set for this session.
+        return None
+    else:
+        return None
+    if source_col_count != n_diff:
+        return None
+
+    row_select = _resolve_row_gather(
+        row_idx, outer_idx, n_outer, var_map, source_row_count,
+    )
+    if row_select is None:
+        return None
+    row_map_v, row_is_identity = row_select
+
+    para_expr = Para(matrix_factor.base.name, dim=2)
+    if row_is_identity and source_row_count == n_outer:
+        matrix_expr = para_expr
+    else:
+        select_row = _LoopJacSelectMat(
+            sp.Tuple(*[sp.Integer(int(r)) for r in row_map_v]),
+            sp.Integer(n_outer),
+            sp.Integer(source_row_count),
+        )
+        matrix_expr = Mat_Mul(select_row, para_expr)
+
+    if diff_scalars:
+        scalar_expr = sp.Mul(*diff_scalars) if len(diff_scalars) > 1 else diff_scalars[0]
+        vec = _translate_index_scalar_to_vec(
+            scalar_expr, diff_idx, var_map,
+        )
+        if vec is None:
+            return None
+        result = Mat_Mul(matrix_expr, Diag(vec))
+    elif outer_scalars:
+        scalar_expr = sp.Mul(*outer_scalars) if len(outer_scalars) > 1 else outer_scalars[0]
+        vec = _translate_index_scalar_to_vec(
+            scalar_expr, outer_idx, var_map,
+        )
+        if vec is None:
+            return None
+        result = Mat_Mul(Diag(vec), matrix_expr)
+    else:
+        result = matrix_expr
+
+    if coeff != sp.S.One:
+        result = coeff * result
+    return result
+
+
+def _translate_index_scalar_to_vec(
+    expr: sp.Expr,
+    index_idx: sp.Idx,
+    var_map: Dict[str, object],
+):
+    """Translate a scalar sympy expression that depends on ``index_idx``
+    into a Solverz 1-D vector expression.
+
+    Supported shapes:
+
+    * ``Indexed(Base, index_idx)`` where ``Base`` resolves to a
+      1-D ``Var`` / ``Param`` → full ``iVar(Base)`` /
+      ``Para(Base, dim=1)`` reference.
+    * ``Indexed(Base, Indexed(gather_param, index_idx))`` — indirect
+      gather via a 1-D integer ``Param`` — → ``iVar(Base)[Para(gather)]``
+      or ``Para(Base)[Para(gather)]``. Size equals ``len(gather)``.
+    * Numeric literals — passthrough.
+    * ``Add`` / ``Mul`` / ``Pow`` — recurse element-wise.
+    * Unary sympy ``Function`` (``sign``, ``Abs``, ``cos``, ``sin``,
+      ``exp``, ``log``, ``sqrt``, ``heaviside``…) applied to a
+      translated inner — sympy's NumPy printer maps these to the
+      matching element-wise numpy operations.
+
+    Returns ``None`` on unsupported shapes so callers can fall back to
+    Phase J3 rather than silently mistranslate.
+    """
+    from Solverz.equation.param import ParamBase
+    from Solverz.sym_algebra.symbols import Para
+    from Solverz.variable.ssymbol import Var as SolVar
+
+    idx_name = _name_of(index_idx)
+
+    def walk(node: sp.Expr):
+        if isinstance(node, (sp.Integer, sp.Float, sp.Rational, sp.Number)):
+            return node
+        if isinstance(node, sp.Indexed):
+            base_name = node.base.name
+            sol_obj = var_map.get(base_name)
+            if sol_obj is None:
+                return None
+            if len(node.indices) != 1:
+                return None
+            ix = node.indices[0]
+            if isinstance(ix, sp.Idx) and _name_of(ix) == idx_name:
+                if isinstance(sol_obj, ParamBase):
+                    if sol_obj.dim != 1:
+                        return None
+                    return Para(sol_obj.name, dim=1)
+                if isinstance(sol_obj, SolVar):
+                    return sol_obj.symbol
+                return None
+            if isinstance(ix, sp.Indexed) and len(ix.indices) == 1:
+                inner = ix.indices[0]
+                if not (isinstance(inner, sp.Idx)
+                        and _name_of(inner) == idx_name):
+                    return None
+                gather_name = ix.base.name
+                gather_obj = var_map.get(gather_name)
+                if not (isinstance(gather_obj, ParamBase)
+                        and gather_obj.dim == 1):
+                    return None
+                gather_para = Para(gather_name, dim=1)
+                if isinstance(sol_obj, ParamBase) and sol_obj.dim == 1:
+                    return Para(sol_obj.name, dim=1)[gather_para]
+                if isinstance(sol_obj, SolVar):
+                    return sol_obj.symbol[gather_para]
+                return None
+            return None
+        if isinstance(node, sp.Add):
+            parts = [walk(a) for a in node.args]
+            if any(p is None for p in parts):
+                return None
+            return sp.Add(*parts)
+        if isinstance(node, sp.Mul):
+            parts = [walk(a) for a in node.args]
+            if any(p is None for p in parts):
+                return None
+            return sp.Mul(*parts)
+        if isinstance(node, sp.Pow):
+            b = walk(node.base)
+            e = walk(node.exp)
+            if b is None or e is None:
+                return None
+            return sp.Pow(b, e)
+        if isinstance(node, sp.Function) and len(node.args) == 1:
+            arg = walk(node.args[0])
+            if arg is None:
+                return None
+            return node.func(arg)
+        return None
+
+    return walk(expr)
 
 
 def _indirect_kd_is_identity(
