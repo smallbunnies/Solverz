@@ -105,13 +105,31 @@ def _extract_sign_and_core(term: Expr) -> Tuple[int, Expr]:
     return 1, term
 
 
-def _unwrap_negated_para(expr: Expr) -> Tuple[int, Optional[Para]]:
-    """If ``expr`` is ``Para`` or ``-Para``, return ``(sign, Para)``.
+def _is_supported_matrix_operand(expr: Expr) -> bool:
+    """True if ``expr`` is a constant sparse matrix operand that the
+    analyzer can materialise to COO data — ``Para``, ``_LoopJacSelectMat``,
+    or a ``Mat_Mul`` chain of such leaves (optional ``-1`` scalar)."""
+    from Solverz.equation.eqn import _LoopJacSelectMat
 
-    Handles the common case of ``diag(v) @ (-B)`` where SymPy represents
-    ``-B`` as ``Mul(-1, B)``. For anything else, returns ``(1, None)``.
-    """
     if isinstance(expr, Para):
+        return True
+    if isinstance(expr, _LoopJacSelectMat):
+        return True
+    if isinstance(expr, Mul):
+        rest = [a for a in expr.args if a != S.NegativeOne]
+        if len(rest) == 1:
+            return _is_supported_matrix_operand(rest[0])
+        return False
+    if isinstance(expr, Mat_Mul):
+        return all(_is_supported_matrix_operand(a) for a in expr.args)
+    return False
+
+
+def _unwrap_sign_and_matrix(expr: Expr) -> Tuple[int, Optional[Expr]]:
+    """If ``expr`` or ``-expr`` reduces to a supported constant matrix
+    operand (``Para`` / ``_LoopJacSelectMat`` / ``Mat_Mul`` chain
+    thereof), return ``(sign, core)``. Otherwise ``(1, None)``."""
+    if _is_supported_matrix_operand(expr):
         return 1, expr
     if isinstance(expr, Mul):
         sign = 1
@@ -121,18 +139,19 @@ def _unwrap_negated_para(expr: Expr) -> Tuple[int, Optional[Para]]:
                 sign *= -1
             else:
                 rest.append(a)
-        if len(rest) == 1 and isinstance(rest[0], Para):
+        if len(rest) == 1 and _is_supported_matrix_operand(rest[0]):
             return sign, rest[0]
     return 1, None
 
 
-def _classify_matmul(mm: Mat_Mul) -> Optional[Tuple[str, Expr, Para, int]]:
+def _classify_matmul(mm: Mat_Mul) -> Optional[Tuple[str, Expr, Expr, int]]:
     """Classify a Mat_Mul as row-scale / col-scale / None.
 
-    Returns ``(kind, var_expr, matrix_para, extra_sign)`` where kind is
-    ``'row_scale'`` or ``'col_scale'``, ``extra_sign`` ∈ {+1, −1} captures
-    a ``Mul(-1, Matrix)`` factor, or ``None`` if the shape is not
-    recognised.
+    Returns ``(kind, var_expr, matrix_expr, extra_sign)`` where
+    ``matrix_expr`` is any constant-matrix operand supported by
+    :func:`_sparse_matrix_nnz` (``Para``, ``_LoopJacSelectMat``, or a
+    ``Mat_Mul`` chain of constants). ``extra_sign`` ∈ {+1, −1}.
+    Returns ``None`` when the shape isn't row/col-scale.
     """
     args = list(mm.args)
     if len(args) != 2:
@@ -140,25 +159,91 @@ def _classify_matmul(mm: Mat_Mul) -> Optional[Tuple[str, Expr, Para, int]]:
     left, right = args
     # Diag(var) @ (±Matrix)
     if isinstance(left, Diag):
-        sign, para = _unwrap_negated_para(right)
-        if para is not None:
-            return ('row_scale', left.args[0], para, sign)
+        sign, matrix = _unwrap_sign_and_matrix(right)
+        if matrix is not None:
+            return ('row_scale', left.args[0], matrix, sign)
     # (±Matrix) @ Diag(var)
     if isinstance(right, Diag):
-        sign, para = _unwrap_negated_para(left)
-        if para is not None:
-            return ('col_scale', right.args[0], para, sign)
+        sign, matrix = _unwrap_sign_and_matrix(left)
+        if matrix is not None:
+            return ('col_scale', right.args[0], matrix, sign)
     return None
 
 
-def _sparse_matrix_nnz(para: Para, PARAM) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (coo_row, coo_col, data) for a sparse Para's current value.
+def _matrix_debug_name(expr: Expr) -> str:
+    """Human-readable tag for a matrix operand — used only for debug
+    prints / exception messages (``matrix_name`` in the analyzer
+    entry). Analyzer correctness depends on ``mat_data`` / ``src``,
+    not this string."""
+    from Solverz.equation.eqn import _LoopJacSelectMat
 
-    The caller promises the matrix is immutable after modelling (see the
-    documentation), so these arrays reflect the baked-in runtime state.
+    if isinstance(expr, Para):
+        return expr.name
+    if isinstance(expr, _LoopJacSelectMat):
+        return '_LoopJacSelectMat'
+    if isinstance(expr, Mat_Mul):
+        return '@'.join(_matrix_debug_name(a) for a in expr.args)
+    if isinstance(expr, Mul):
+        return '*'.join(_matrix_debug_name(a) if not isinstance(a, (int, float))
+                        else str(a) for a in expr.args)
+    return type(expr).__name__
+
+
+def _sparse_matrix_nnz(
+    matrix_expr: Expr, PARAM
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return ``(coo_row, coo_col, data)`` for any constant sparse
+    matrix expression the analyzer accepts.
+
+    Supports:
+
+    * ``Para`` — looked up in ``PARAM`` and its value's COO extracted.
+    * ``_LoopJacSelectMat`` — the selection matrix is built inline from
+      its ``col_map`` argument (row ``i`` carries a single 1 at column
+      ``col_map[i]``).
+    * ``Mat_Mul`` of supported operands — evaluated by chaining
+      scipy-sparse multiplies once at analysis time. The result's
+      COO form is returned.
+
+    Signs are not handled here; the caller extracts them via
+    :func:`_unwrap_sign_and_matrix`.
     """
-    value = PARAM[para.name].get_v_t(0)
-    coo = value.tocoo()
+    from scipy.sparse import csc_array, csr_array
+    from Solverz.equation.eqn import _LoopJacSelectMat
+
+    def materialise(expr: Expr):
+        if isinstance(expr, Para):
+            value = PARAM[expr.name].get_v_t(0)
+            if not hasattr(value, 'tocoo'):
+                return csc_array(np.asarray(value))
+            return value
+        if isinstance(expr, _LoopJacSelectMat):
+            col_map_tuple, n_outer_sym, n_diff_sym = expr.args
+            cols = np.asarray(
+                [int(c) for c in col_map_tuple.args], dtype=np.int64)
+            n_outer = int(n_outer_sym)
+            n_diff = int(n_diff_sym)
+            rows = np.arange(n_outer, dtype=np.int64)
+            data = np.ones(n_outer, dtype=np.float64)
+            return csc_array((data, (rows, cols)), shape=(n_outer, n_diff))
+        if isinstance(expr, Mul):
+            # Strip leading -1 — sign is handled by the caller.
+            rest = [a for a in expr.args if a != S.NegativeOne]
+            if len(rest) == 1:
+                return materialise(rest[0])
+            raise TypeError(
+                f"_sparse_matrix_nnz: unexpected Mul {expr!r}")
+        if isinstance(expr, Mat_Mul):
+            factors = [materialise(a) for a in expr.args]
+            result = factors[0]
+            for nxt in factors[1:]:
+                result = result @ nxt
+            return result
+        raise TypeError(
+            f"_sparse_matrix_nnz: unsupported operand {type(expr).__name__}")
+
+    mat = materialise(matrix_expr)
+    coo = mat.tocoo()
     return (np.asarray(coo.row, dtype=np.int64),
             np.asarray(coo.col, dtype=np.int64),
             np.asarray(coo.data, dtype=np.float64))
@@ -241,32 +326,34 @@ def analyze_mutable_mat_expr(expr: Expr,
         if isinstance(core, Mat_Mul):
             classification = _classify_matmul(core)
             if classification is not None:
-                kind, var_expr, matrix_para, extra_sign = classification
+                kind, var_expr, matrix_expr, extra_sign = classification
                 sign = sign * extra_sign
                 try:
-                    mat_row, mat_col, mat_data = _sparse_matrix_nnz(matrix_para, PARAM)
+                    mat_row, mat_col, mat_data = _sparse_matrix_nnz(matrix_expr, PARAM)
                 except Exception:
                     fallback_pieces.append(term)
                     return
                 out_pos_list = []
                 src_list = []
+                mat_data_filtered = []
                 # Build term's nnz → output mapping
                 for k, (r, c) in enumerate(zip(mat_row, mat_col)):
                     out_k = pos_lookup.get((int(r), int(c)))
                     if out_k is None:
-                        # This element is not in the init pattern — shouldn't
-                        # happen when Value0 is computed via SpDiag + union,
-                        # but skip safely if it does.
+                        # This element is not in the init pattern —
+                        # shouldn't happen when Value0 is the structural
+                        # union, but skip safely if it does.
                         continue
                     out_pos_list.append(out_k)
                     src_list.append(int(r) if kind == 'row_scale' else int(c))
+                    mat_data_filtered.append(mat_data[k])
                 entry = {
                     'sign': sign,
                     'var_expr': var_expr,
-                    'matrix_name': matrix_para.name,
+                    'matrix_name': _matrix_debug_name(matrix_expr),
                     'out_pos': np.asarray(out_pos_list, dtype=np.int64),
                     'src': np.asarray(src_list, dtype=np.int64),
-                    'mat_data': mat_data,
+                    'mat_data': np.asarray(mat_data_filtered, dtype=np.float64),
                 }
                 if kind == 'row_scale':
                     mapping.row_scale_terms.append(entry)
