@@ -2096,6 +2096,65 @@ def test_loop_jac_pattern4_full_loop_eqn_identity():
         )
 
 
+def test_loop_jac_pattern3_identity_indirect_kd_becomes_diag():
+    """#133 Pattern 3 (identity case): ``KD(diff, map[outer]) *
+    Sum(Param[outer, dummy] * Var[dummy], dummy)`` with ``map``
+    identity reduces to the direct-KD DiagTerm, i.e.
+    ``Diag(Mat_Mul(Para, iVar))``. No Phase J3 fallback."""
+    from Solverz import LoopEqn, Model, Param, Var
+    from Solverz.equation.eqn import LoopEqnDiff
+    from Solverz.equation.loop_jac import (
+        canonicalize_kronecker, loop_jac_to_solverz_expr,
+    )
+    from Solverz.sym_algebra.functions import Diag, Mat_Mul
+
+    n = 4
+    V_val = np.arange(n * n, dtype=float).reshape(n, n) + 1.0
+    m = Model()
+    m.x = Var('x', np.zeros(n))
+    m.y = Var('y', np.ones(n))
+    m.V = Param('V', V_val, dim=2, sparse=False)
+    m.map_id = Param('map_id', np.arange(n, dtype=np.int64), dtype=int)
+
+    i = sp.Idx('i')
+    p = sp.Idx('p')
+    x_sym = sp.IndexedBase('x')
+    y_sym = sp.IndexedBase('y')
+    V_sym = sp.IndexedBase('V')
+    map_sym = sp.IndexedBase('map_id')
+    # Body: y[map_id[i]] * Sum(V[i, p] * x[p], p) — the y-residual
+    # couples through a per-outer scale factor. ∂/∂x[k] =
+    # KD(k_unused) * (no) ... actually: to trigger the Sum*KD shape
+    # we differentiate the per-outer y indexing. Use:
+    # body = Sum(V[i,p]*x[p], p) * y[map_id[i]]
+    body = (sp.Sum(V_sym[i, p] * x_sym[p], (p, 0, n - 1))
+            * y_sym[map_sym[i]])
+    m.eqn_mix = LoopEqn(
+        'eqn_mix', outer_index=i, n_outer=n, body=body,
+        var_map={'x': m.x, 'y': m.y, 'V': m.V, 'map_id': m.map_id},
+    )
+
+    k = sp.Idx('_sz_loop_dk')
+    raw = sp.diff(body, y_sym[k])
+    canonical = canonicalize_kronecker(raw, i, k)
+    # Canonical should be ``Sum(V[i,p]*x[p], p) * KD(k, map_id[i])``.
+    assert canonical.has(sp.KroneckerDelta)
+    translated = loop_jac_to_solverz_expr(
+        canonical, i, k, n, m.eqn_mix.var_map, n_diff=n,
+    )
+    assert isinstance(translated, Diag), translated
+
+    m.eqn_mix.derive_derivative()
+    # The y-derivative (the Pattern 3 target) must land on J2; the
+    # x-derivative produces an unrelated bilinear shape which this
+    # test doesn't gate.
+    ed_y = m.eqn_mix.derivatives['y']
+    assert not isinstance(ed_y, LoopEqnDiff), (
+        f"Pattern 3 identity indirect-KD must route ∂/∂y to J2; "
+        f"got J3 {ed_y}"
+    )
+
+
 def test_loop_jac_pattern4_row_gather_via_param():
     """#133 Pattern 4 — indirect outer via a row-map Param emits
     Mat_Mul(SelectMat, Para). E.g. `V[fht_nsr[i_nsr], p_p]` with

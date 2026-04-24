@@ -527,15 +527,19 @@ def _classify_and_translate_term(term: sp.Expr,
                 sum_factors[0], outer_idx, var_map
             )
             return coeff * Diag(inner_mm)
-        # Indirect KD — let Phase J3 handle (Sum-KD sparsity is
-        # already computed correctly by the sparsity analyzer).
-        result = _translate_kronecker_delta(
-            d, outer_idx, diff_idx, n_outer, var_map, n_diff=n_diff)
-        if result is not None:
-            # Can't fold the Sum into a Diag for indirect patterns —
-            # fall through to Phase J3 which handles them via sparse
-            # kernels.
-            pass
+        # Indirect KD with identity map (``KD(diff, map[outer])`` where
+        # ``map == arange(n_outer)`` and ``n_outer == n_diff``) behaves
+        # exactly like the direct KD — collapse to ``Diag(inner_mm)``.
+        # Non-identity indirect KD falls through to Phase J3.
+        if len(sum_factors) == 1:
+            identity_indirect = _indirect_kd_is_identity(
+                d, outer_idx, diff_idx, n_outer, var_map, n_diff,
+            )
+            if identity_indirect:
+                inner_mm = _sum_to_matmul(
+                    sum_factors[0], outer_idx, var_map
+                )
+                return coeff * Diag(inner_mm)
         raise NotImplementedError(
             f"LoopEqn J translator: DiagTerm with unsupported "
             f"KroneckerDelta {d}"
@@ -737,6 +741,52 @@ def _try_sum_kd_collapse(
         sp.Integer(nd),
     )
     return Mat_Mul(Para(base_name, dim=2), select_mat)
+
+
+def _indirect_kd_is_identity(
+    d: KroneckerDelta,
+    outer_idx: sp.Idx,
+    diff_idx: sp.Idx,
+    n_outer: int,
+    var_map: Dict[str, object],
+    n_diff: int,
+) -> bool:
+    """True when ``d`` has the form ``KD(diff, map[outer])`` (or the
+    symmetric ``KD(map[outer], diff)``) with ``map`` a 1-D integer
+    ``Param`` of length ``n_outer`` whose values are ``[0, 1, …,
+    n_outer-1]`` and ``n_outer == n_diff``.
+
+    In that configuration the indirect delta is numerically identical
+    to the direct ``KD(outer, diff)``, so any pattern built on the
+    direct form (e.g. Phase J2 DiagTerm) applies unchanged.
+    """
+    from Solverz.equation.param import ParamBase
+
+    outer_name = _name_of(outer_idx)
+    diff_name = _name_of(diff_idx)
+    a0, a1 = d.args
+    for arg_d, arg_m in ((a0, a1), (a1, a0)):
+        if not (isinstance(arg_d, sp.Idx) and _name_of(arg_d) == diff_name):
+            continue
+        if not isinstance(arg_m, sp.Indexed):
+            continue
+        if len(arg_m.indices) != 1:
+            continue
+        inner = arg_m.indices[0]
+        if not (isinstance(inner, sp.Idx) and _name_of(inner) == outer_name):
+            continue
+        map_name = arg_m.base.name
+        map_obj = var_map.get(map_name)
+        if not (isinstance(map_obj, ParamBase) and map_obj.dim == 1):
+            continue
+        map_v = np.asarray(map_obj.v, dtype=np.int64).reshape(-1)
+        if len(map_v) != n_outer:
+            continue
+        if n_diff != n_outer:
+            continue
+        if np.array_equal(map_v, np.arange(n_outer)):
+            return True
+    return False
 
 
 def _resolve_row_gather(
