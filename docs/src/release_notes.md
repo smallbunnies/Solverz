@@ -2,7 +2,7 @@
 
 # Release Notes
 
-## 0.8.3
+## 0.8.4
 
 Safety and correctness hardening for the LoopEqn prototype landing
 through its Phase 1 refactors.
@@ -71,6 +71,70 @@ through its Phase 1 refactors.
   emits its translated Param expression, preventing a latent
   `IndexError` when a sparse-pattern row falls outside the LoopEqn's
   equation-block range.
+
+## 0.8.3
+
+**Tooling-only release.** No Python source-code, test, or runtime
+behaviour changes. The PyPI wheel for 0.8.3 is bit-identical to 0.8.2
+modulo the new in-tree skill files (which are not bundled into the
+wheel).
+
+### Tooling
+
+- **New [Claude Code](https://claude.com/claude-code) skill** at
+  `.claude/skills/solverz-modeling/` that teaches Claude how to use
+  Solverz for symbolic modeling and numerical simulation. Bundles:
+
+  - `SKILL.md` — 4-step workflow (equation type → build → compile →
+    solve), `Var` / `Param` / `Eqn` / `Ode` idioms, inline vs
+    `module_printer` decision, every built-in solver with when-to-use
+    notes, `Mat_Mul` fast vs fallback path with the full rewrite
+    table, common pitfalls table, and a quick-reference card.
+  - `references/ecosystem.md` — chapter map of the Solverz Cookbook,
+    every reusable block in [SolMuseum](https://github.com/rzyu45/SolMuseum)
+    (`gt`, `pv`, `st`, `eb`, `eps_network`, `heat_network`,
+    `gas_network`, `pde.heat`, `pde.gas`), and every helper in
+    [SolUtil](https://github.com/rzyu45/SolUtil) (`PowerFlow`,
+    `DhsFlow`, `GasFlow`, `DhsFaultFlow`).
+  - `references/examples/` — six canonical end-to-end runnable
+    examples covering AE / DAE / FDAE / mutable Jacobian / events /
+    `AliasVar` / `Mat_Mul` / `model.add()` composition:
+
+    - `bouncing-ball.md` — minimal DAE with event handling
+    - `power-flow.md` — canonical AE with `Mat_Mul` (case30,
+      rectangular coordinates)
+    - `heat-flow.md` — AE with mutable-matrix Jacobian
+    - `m3b9-dynamics.md` — DAE with `TimeSeriesParam` fault scenario
+    - `gas-characteristics.md` — FDAE with `AliasVar` (method of
+      characteristics)
+    - `integrated-energy-system.md` — multi-domain DAE composition
+      using all three SolUtil flow solvers + the major SolMuseum
+      DAE / AE blocks via `model.add(...)`
+
+  - `README.md` — install command (symlink) and sync rule for
+    contributors.
+
+  Install on a contributor's machine:
+
+  ```sh
+  ln -sfn "$(pwd)/.claude/skills/solverz-modeling" \
+          ~/.claude/skills/solverz-modeling
+  ```
+
+  After the symlink is in place, `git pull` on a Solverz checkout
+  updates the skill content automatically — no re-install step.
+  Inside a Solverz checkout itself the skill auto-loads even without
+  the global symlink, because Claude Code reads
+  `<cwd>/.claude/skills/`.
+
+The skill is **not** bundled into the PyPI wheel — it lives only in
+the source tree. Pip-installed users who want the skill should clone
+the repo separately.
+
+The contribution guide in `.claude/skills/solverz-modeling/README.md`
+documents the sync rule for Solverz contributors: when a PR changes
+Solverz's public API, the same PR should update the relevant skill
+files. Reviewers will check both.
 
 ## 0.8.2
 
