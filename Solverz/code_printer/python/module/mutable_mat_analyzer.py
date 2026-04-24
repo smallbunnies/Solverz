@@ -69,7 +69,7 @@ class MutableMatBlockMapping:
     """
 
     __slots__ = ('n_out', 'diag_terms', 'row_scale_terms',
-                 'col_scale_terms', 'fallback_expr',
+                 'col_scale_terms', 'biscale_terms', 'fallback_expr',
                  'fallback_out_row', 'fallback_out_col', 'has_fallback')
 
     def __init__(self, n_out: int):
@@ -77,32 +77,42 @@ class MutableMatBlockMapping:
         self.diag_terms: List[Dict] = []
         self.row_scale_terms: List[Dict] = []
         self.col_scale_terms: List[Dict] = []
+        # biscale: ``Diag(u) @ Matrix @ Diag(v)`` — each nnz ``(r, c, d)``
+        # contributes ``u[r] * v[c] * d`` to output ``(r, c)``. Each entry
+        # has ``sign``, ``u_expr``, ``v_expr``, ``matrix_name``,
+        # ``out_pos``, ``src_row``, ``src_col``, ``mat_data``.
+        self.biscale_terms: List[Dict] = []
         self.fallback_expr: Optional[Expr] = None
         self.fallback_out_row: Optional[np.ndarray] = None
         self.fallback_out_col: Optional[np.ndarray] = None
         self.has_fallback: bool = False
 
 
-def _extract_sign_and_core(term: Expr) -> Tuple[int, Expr]:
-    """Return ``(sign, core)`` where ``core`` has no leading ±1 coefficient.
+def _extract_sign_and_core(term: Expr) -> Tuple[float, Expr]:
+    """Return ``(coeff, core)`` where ``core`` has no leading numeric
+    scalar and ``coeff`` is the product of all ``Integer`` / ``Rational``
+    / ``Float`` / ``Number`` factors (including ``-1``).
 
-    Handles ``-Diag(x)`` → ``(-1, Diag(x))`` and ``Mul(-1, Mat_Mul(...))`` →
-    ``(-1, Mat_Mul(...))``. A non-unit numeric coefficient like 2*Diag(x)
-    is not unwrapped — it gets absorbed into the diag term later.
+    Examples:
+    * ``-Diag(x)`` → ``(-1, Diag(x))``
+    * ``2*Diag(x)`` → ``(2, Diag(x))``
+    * ``-2 * Mat_Mul(A, B)`` → ``(-2, Mat_Mul(A, B))``
     """
+    from sympy import Number, Integer, Rational, Float
+
     if isinstance(term, Mul):
         args = list(term.args)
-        sign = 1
+        coeff: float = 1.0
         rest: List[Expr] = []
         for a in args:
-            if a == S.NegativeOne:
-                sign *= -1
+            if isinstance(a, (Integer, Rational, Float, Number)):
+                coeff = coeff * float(a)
             else:
                 rest.append(a)
         if len(rest) == 1:
-            return sign, rest[0]
-        return sign, Mul(*rest) if rest else S.One
-    return 1, term
+            return coeff, rest[0]
+        return coeff, (Mul(*rest) if rest else S.One)
+    return 1.0, term
 
 
 def _is_supported_matrix_operand(expr: Expr) -> bool:
@@ -144,6 +154,14 @@ def _unwrap_sign_and_matrix(expr: Expr) -> Tuple[int, Optional[Expr]]:
     return 1, None
 
 
+def _matrix_chain_expr(args: List[Expr]) -> Expr:
+    """Build a single constant-matrix expression from a list of
+    supported operands, unwrapping a single-item list."""
+    if len(args) == 1:
+        return args[0]
+    return Mat_Mul(*args)
+
+
 def _classify_matmul(mm: Mat_Mul) -> Optional[Tuple[str, Expr, Expr, int]]:
     """Classify a Mat_Mul as row-scale / col-scale / None.
 
@@ -151,22 +169,103 @@ def _classify_matmul(mm: Mat_Mul) -> Optional[Tuple[str, Expr, Expr, int]]:
     ``matrix_expr`` is any constant-matrix operand supported by
     :func:`_sparse_matrix_nnz` (``Para``, ``_LoopJacSelectMat``, or a
     ``Mat_Mul`` chain of constants). ``extra_sign`` ∈ {+1, −1}.
-    Returns ``None`` when the shape isn't row/col-scale.
+
+    Handles variadic ``Mat_Mul`` args so that
+    ``Mat_Mul(SelectMat, Para, Diag(v))`` (a 3-arg flat form) is
+    recognised as col-scale with ``matrix = SelectMat @ Para``.
+    Returns ``None`` for shapes with ``Diag`` on both ends (those
+    belong to :func:`_classify_matmul_biscale`).
     """
     args = list(mm.args)
+    if len(args) < 2:
+        return None
+    left_diag = args[0] if isinstance(args[0], Diag) else None
+    right_diag = args[-1] if isinstance(args[-1], Diag) else None
+
+    if left_diag is None and right_diag is None:
+        return None
+    if left_diag is not None and right_diag is not None:
+        # biscale territory
+        return None
+
+    if left_diag is not None:
+        matrix_candidate = _matrix_chain_expr(args[1:])
+        sign, matrix = _unwrap_sign_and_matrix(matrix_candidate)
+        if matrix is not None:
+            return ('row_scale', left_diag.args[0], matrix, sign)
+        return None
+    # right_diag not None
+    matrix_candidate = _matrix_chain_expr(args[:-1])
+    sign, matrix = _unwrap_sign_and_matrix(matrix_candidate)
+    if matrix is not None:
+        return ('col_scale', right_diag.args[0], matrix, sign)
+    return None
+
+
+def _classify_matmul_biscale(mm: Mat_Mul) -> Optional[Tuple[Expr, Expr, Expr, int]]:
+    """Classify a Mat_Mul as ``Diag(u) @ M @ Diag(v)`` where ``M`` is a
+    supported constant-matrix operand (``Para``, ``_LoopJacSelectMat``,
+    or a ``Mat_Mul`` chain of such).
+
+    Accepts all of:
+
+    * Flat N-arg form ``Mat_Mul(Diag(u), ..., Diag(v))``.
+    * 2-arg nested forms
+      ``Mat_Mul(Diag(u), Mat_Mul(Matrix, Diag(v)))`` /
+      ``Mat_Mul(Mat_Mul(Diag(u), Matrix), Diag(v))``.
+    * The above with a leading ``-1`` on either side wrapped as
+      ``Mul(-1, Mat_Mul(...))``.
+    """
+    def _peek(side: Expr):
+        """Unwrap ``-1 * x`` / ``c * x``, returning ``(extra_sign, x)``
+        where ``extra_sign`` is the numeric coefficient (for now only
+        ``+1``/``-1``; non-unit scalars should have been absorbed into
+        ``coeff`` by ``_extract_sign_and_core`` at the outer level)."""
+        if isinstance(side, Mul):
+            rest = [a for a in side.args if a != S.NegativeOne]
+            neg = len(side.args) - len(rest)
+            sign = -1 if neg % 2 else 1
+            if len(rest) == 1:
+                return sign, rest[0]
+        return 1, side
+
+    args = list(mm.args)
+    # Flat: Diag(u) @ <matrix chain> @ Diag(v), len(args) >= 3
+    if (len(args) >= 3
+            and isinstance(args[0], Diag)
+            and isinstance(args[-1], Diag)):
+        sign, matrix = _unwrap_sign_and_matrix(
+            _matrix_chain_expr(args[1:-1])
+        )
+        if matrix is not None:
+            return (args[0].args[0], matrix, args[-1].args[0], sign)
     if len(args) != 2:
         return None
     left, right = args
-    # Diag(var) @ (±Matrix)
+    # Diag(u) @ (±(Matrix_chain @ Diag(v)))
     if isinstance(left, Diag):
-        sign, matrix = _unwrap_sign_and_matrix(right)
-        if matrix is not None:
-            return ('row_scale', left.args[0], matrix, sign)
-    # (±Matrix) @ Diag(var)
+        inner_sign, inner = _peek(right)
+        if isinstance(inner, Mat_Mul):
+            r_args = list(inner.args)
+            if len(r_args) >= 2 and isinstance(r_args[-1], Diag):
+                sign, matrix = _unwrap_sign_and_matrix(
+                    _matrix_chain_expr(r_args[:-1])
+                )
+                if matrix is not None:
+                    return (left.args[0], matrix, r_args[-1].args[0],
+                            inner_sign * sign)
+    # (±(Diag(u) @ Matrix_chain)) @ Diag(v)
     if isinstance(right, Diag):
-        sign, matrix = _unwrap_sign_and_matrix(left)
-        if matrix is not None:
-            return ('col_scale', right.args[0], matrix, sign)
+        inner_sign, inner = _peek(left)
+        if isinstance(inner, Mat_Mul):
+            l_args = list(inner.args)
+            if len(l_args) >= 2 and isinstance(l_args[0], Diag):
+                sign, matrix = _unwrap_sign_and_matrix(
+                    _matrix_chain_expr(l_args[1:])
+                )
+                if matrix is not None:
+                    return (l_args[0].args[0], matrix, right.args[0],
+                            inner_sign * sign)
     return None
 
 
@@ -322,6 +421,45 @@ def analyze_mutable_mat_expr(expr: Expr,
                 'src_idx': np.asarray(src_idx_list, dtype=np.int64),
             })
             return
+        # Mat_Mul with a biscale shape ``Diag(u) @ M @ Diag(v)`` (tried
+        # before the row/col-scale classifier because the two-scale case
+        # is a strict superset of either single-scale case — if only one
+        # side is ``Diag``, the biscale matcher returns ``None`` and we
+        # fall through to ``_classify_matmul``).
+        if isinstance(core, Mat_Mul):
+            biscale = _classify_matmul_biscale(core)
+            if biscale is not None:
+                u_expr, matrix_expr, v_expr, extra_sign = biscale
+                sign = sign * extra_sign
+                try:
+                    mat_row, mat_col, mat_data = _sparse_matrix_nnz(
+                        matrix_expr, PARAM)
+                except Exception:
+                    fallback_pieces.append(term)
+                    return
+                out_pos_list = []
+                row_src = []
+                col_src = []
+                mat_data_filtered = []
+                for k, (r, c) in enumerate(zip(mat_row, mat_col)):
+                    out_k = pos_lookup.get((int(r), int(c)))
+                    if out_k is None:
+                        continue
+                    out_pos_list.append(out_k)
+                    row_src.append(int(r))
+                    col_src.append(int(c))
+                    mat_data_filtered.append(mat_data[k])
+                mapping.biscale_terms.append({
+                    'sign': sign,
+                    'u_expr': u_expr,
+                    'v_expr': v_expr,
+                    'matrix_name': _matrix_debug_name(matrix_expr),
+                    'out_pos': np.asarray(out_pos_list, dtype=np.int64),
+                    'src_row': np.asarray(row_src, dtype=np.int64),
+                    'src_col': np.asarray(col_src, dtype=np.int64),
+                    'mat_data': np.asarray(mat_data_filtered, dtype=np.float64),
+                })
+                return
         # Mat_Mul(Diag, Matrix) or Mat_Mul(Matrix, Diag)
         if isinstance(core, Mat_Mul):
             classification = _classify_matmul(core)
@@ -382,7 +520,9 @@ def generate_block_function_code(fn_name: str,
                                    mapping: MutableMatBlockMapping,
                                    diag_arg_names: List[str],
                                    rs_arg_names: List[str],
-                                   cs_arg_names: List[str]) -> str:
+                                   cs_arg_names: List[str],
+                                   bs_u_arg_names: List[str] = None,
+                                   bs_v_arg_names: List[str] = None) -> str:
     """Generate a @njit function that builds one mutable matrix block's
     data array.
 
@@ -422,10 +562,16 @@ def generate_block_function_code(fn_name: str,
     # Build arg list: all dense vectors first, then per-term mapping
     # arrays. No base variables needed — every term reads from a
     # pre-computed dense vector.
+    if bs_u_arg_names is None:
+        bs_u_arg_names = []
+    if bs_v_arg_names is None:
+        bs_v_arg_names = []
     args: List[str] = []
     args.extend(diag_arg_names)
     args.extend(rs_arg_names)
     args.extend(cs_arg_names)
+    args.extend(bs_u_arg_names)
+    args.extend(bs_v_arg_names)
 
     body_lines: List[str] = []
     body_lines.append(f'    data = zeros({mapping.n_out})')
@@ -436,17 +582,25 @@ def generate_block_function_code(fn_name: str,
     # ``Diag(A@x) + Diag(B@y)`` — both terms land on the same (i, i)
     # positions and must accumulate. ``data`` starts at zero, so the
     # additive update is also correct for the first term in isolation.
+    def _scale_prefix(sign: float) -> str:
+        """Return an expression prefix that scales the RHS by ``sign``:
+        ``+= X`` for +1, ``-= X`` for -1, ``+= c * X`` for any other
+        numeric coefficient."""
+        if abs(sign - 1.0) < 1e-12:
+            return '        data[{out}[i]] += '
+        if abs(sign + 1.0) < 1e-12:
+            return '        data[{out}[i]] -= '
+        return f'        data[{{out}}[i]] += {float(sign)!r} * '
+
     for ti, t in enumerate(mapping.diag_terms):
         out_name = f'_sz_mb_diag_out_{ti}'
         src_name = f'_sz_mb_diag_src_{ti}'
         args.extend([out_name, src_name])
         sign = t['sign']
         u_name = diag_arg_names[ti]
+        prefix = _scale_prefix(sign).format(out=out_name)
         body_lines.append(f'    for i in range({out_name}.shape[0]):')
-        if sign == 1:
-            body_lines.append(f'        data[{out_name}[i]] += {u_name}[{src_name}[i]]')
-        else:
-            body_lines.append(f'        data[{out_name}[i]] -= {u_name}[{src_name}[i]]')
+        body_lines.append(prefix + f'{u_name}[{src_name}[i]]')
 
     # Row-scale terms: data[out[k]] += sign * rsv[src[k]] * mat_data[k]
     for ti, t in enumerate(mapping.row_scale_terms):
@@ -456,13 +610,9 @@ def generate_block_function_code(fn_name: str,
         args.extend([out_name, src_name, dat_name])
         sign = t['sign']
         rsv_name = rs_arg_names[ti]
+        prefix = _scale_prefix(sign).format(out=out_name)
         body_lines.append(f'    for i in range({out_name}.shape[0]):')
-        if sign == 1:
-            body_lines.append(
-                f'        data[{out_name}[i]] += {rsv_name}[{src_name}[i]] * {dat_name}[i]')
-        else:
-            body_lines.append(
-                f'        data[{out_name}[i]] -= {rsv_name}[{src_name}[i]] * {dat_name}[i]')
+        body_lines.append(prefix + f'{rsv_name}[{src_name}[i]] * {dat_name}[i]')
 
     # Col-scale terms: data[out[k]] += sign * csv[src[k]] * mat_data[k]
     for ti, t in enumerate(mapping.col_scale_terms):
@@ -472,13 +622,26 @@ def generate_block_function_code(fn_name: str,
         args.extend([out_name, src_name, dat_name])
         sign = t['sign']
         csv_name = cs_arg_names[ti]
+        prefix = _scale_prefix(sign).format(out=out_name)
         body_lines.append(f'    for i in range({out_name}.shape[0]):')
-        if sign == 1:
-            body_lines.append(
-                f'        data[{out_name}[i]] += {csv_name}[{src_name}[i]] * {dat_name}[i]')
-        else:
-            body_lines.append(
-                f'        data[{out_name}[i]] -= {csv_name}[{src_name}[i]] * {dat_name}[i]')
+        body_lines.append(prefix + f'{csv_name}[{src_name}[i]] * {dat_name}[i]')
+
+    # Biscale terms: data[out[k]] += sign * u[src_row[k]] * v[src_col[k]] * mat_data[k]
+    for ti, t in enumerate(mapping.biscale_terms):
+        out_name = f'_sz_mb_bs_out_{ti}'
+        row_name = f'_sz_mb_bs_row_{ti}'
+        col_name = f'_sz_mb_bs_col_{ti}'
+        dat_name = f'_sz_mb_bs_dat_{ti}'
+        args.extend([out_name, row_name, col_name, dat_name])
+        sign = t['sign']
+        u_name = bs_u_arg_names[ti]
+        v_name = bs_v_arg_names[ti]
+        prefix = _scale_prefix(sign).format(out=out_name)
+        body_lines.append(f'    for i in range({out_name}.shape[0]):')
+        body_lines.append(
+            prefix + f'{u_name}[{row_name}[i]] '
+            f'* {v_name}[{col_name}[i]] * {dat_name}[i]'
+        )
 
     body_lines.append('    return data')
 

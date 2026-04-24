@@ -71,6 +71,36 @@ def test_sparse_matrix_nnz_select_mat():
     assert np.all(data == 1.0)
 
 
+def test_classify_matmul_biscale_nested_right():
+    """``Diag(u) @ Mat_Mul(Matrix, Diag(v))`` → biscale."""
+    from Solverz.code_printer.python.module.mutable_mat_analyzer import (
+        _classify_matmul_biscale,
+    )
+    sel = _mk_select([2, 0, 3], 3, 4)
+    u = iVar('u')
+    v = iVar('v')
+    expr = Mat_Mul(Diag(u), Mat_Mul(sel, Diag(v)))
+    result = _classify_matmul_biscale(expr)
+    assert result is not None
+    u_expr, matrix_expr, v_expr, sign = result
+    assert u_expr == u
+    assert v_expr == v
+    assert sign == 1
+
+
+def test_classify_matmul_biscale_nested_left():
+    """``Mat_Mul(Diag(u), Matrix) @ Diag(v)`` → biscale."""
+    from Solverz.code_printer.python.module.mutable_mat_analyzer import (
+        _classify_matmul_biscale,
+    )
+    P = Para('P', dim=2)
+    u = iVar('u')
+    v = iVar('v')
+    expr = Mat_Mul(Mat_Mul(Diag(u), P), Diag(v))
+    result = _classify_matmul_biscale(expr)
+    assert result is not None
+
+
 def test_sparse_matrix_nnz_select_at_para(tmp_path):
     from Solverz.equation.param import Param
     P = Para('P', dim=2)

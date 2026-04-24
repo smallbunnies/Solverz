@@ -193,6 +193,12 @@ def print_J(eqs_type: str,
                 for arg_name, t in zip(mb['cs_arg_names'], mapping.col_scale_terms):
                     body.append(Assignment(
                         iVar(arg_name, internal_use=True), t['var_expr']))
+                for arg_name, t in zip(mb['bs_u_arg_names'], mapping.biscale_terms):
+                    body.append(Assignment(
+                        iVar(arg_name, internal_use=True), t['u_expr']))
+                for arg_name, t in zip(mb['bs_v_arg_names'], mapping.biscale_terms):
+                    body.append(Assignment(
+                        iVar(arg_name, internal_use=True), t['v_expr']))
                 # (b) Build the call argument list in the order the block
                 # function expects.
                 call_args = []
@@ -201,6 +207,10 @@ def print_J(eqs_type: str,
                 for arg_name in mb['rs_arg_names']:
                     call_args.append(symbols(arg_name, real=True))
                 for arg_name in mb['cs_arg_names']:
+                    call_args.append(symbols(arg_name, real=True))
+                for arg_name in mb['bs_u_arg_names']:
+                    call_args.append(symbols(arg_name, real=True))
+                for arg_name in mb['bs_v_arg_names']:
                     call_args.append(symbols(arg_name, real=True))
                 # Mapping arrays (loaded at module-level from setting)
                 for ti in range(len(mapping.diag_terms)):
@@ -214,6 +224,11 @@ def print_J(eqs_type: str,
                     call_args.append(symbols(f'_sz_mb_{block_idx}_cs_out_{ti}', real=True))
                     call_args.append(symbols(f'_sz_mb_{block_idx}_cs_src_{ti}', real=True))
                     call_args.append(symbols(f'_sz_mb_{block_idx}_cs_dat_{ti}', real=True))
+                for ti in range(len(mapping.biscale_terms)):
+                    call_args.append(symbols(f'_sz_mb_{block_idx}_bs_out_{ti}', real=True))
+                    call_args.append(symbols(f'_sz_mb_{block_idx}_bs_row_{ti}', real=True))
+                    call_args.append(symbols(f'_sz_mb_{block_idx}_bs_col_{ti}', real=True))
+                    call_args.append(symbols(f'_sz_mb_{block_idx}_bs_dat_{ti}', real=True))
                 body.append(Assignment(
                     iVar('data', internal_use=True)[mb['addr_slice']],
                     FunctionCall(mb['fn_name'], call_args)))
@@ -350,13 +365,20 @@ def print_inner_J(var_addr: Address,
                                         for ti in range(len(mapping.row_scale_terms))]
                         cs_arg_names = [f'_sz_mb_{block_idx}_csv{ti}'
                                         for ti in range(len(mapping.col_scale_terms))]
+                        bs_u_arg_names = [f'_sz_mb_{block_idx}_bsu{ti}'
+                                          for ti in range(len(mapping.biscale_terms))]
+                        bs_v_arg_names = [f'_sz_mb_{block_idx}_bsv{ti}'
+                                          for ti in range(len(mapping.biscale_terms))]
                         block_info['fn_name'] = fn_name
                         block_info['diag_arg_names'] = diag_arg_names
                         block_info['rs_arg_names'] = rs_arg_names
                         block_info['cs_arg_names'] = cs_arg_names
+                        block_info['bs_u_arg_names'] = bs_u_arg_names
+                        block_info['bs_v_arg_names'] = bs_v_arg_names
                         block_code = generate_block_function_code(
                             fn_name, mapping,
-                            diag_arg_names, rs_arg_names, cs_arg_names)
+                            diag_arg_names, rs_arg_names, cs_arg_names,
+                            bs_u_arg_names, bs_v_arg_names)
                         mut_mat_block_funcs.append(block_code)
                         # Collect the mapping arrays for the eqn_parameter
                         for ti, t in enumerate(mapping.diag_terms):
@@ -370,6 +392,11 @@ def print_inner_J(var_addr: Address,
                             mut_mat_mappings[f'_sz_mb_{block_idx}_cs_out_{ti}'] = t['out_pos']
                             mut_mat_mappings[f'_sz_mb_{block_idx}_cs_src_{ti}'] = t['src']
                             mut_mat_mappings[f'_sz_mb_{block_idx}_cs_dat_{ti}'] = t['mat_data']
+                        for ti, t in enumerate(mapping.biscale_terms):
+                            mut_mat_mappings[f'_sz_mb_{block_idx}_bs_out_{ti}'] = t['out_pos']
+                            mut_mat_mappings[f'_sz_mb_{block_idx}_bs_row_{ti}'] = t['src_row']
+                            mut_mat_mappings[f'_sz_mb_{block_idx}_bs_col_{ti}'] = t['src_col']
+                            mut_mat_mappings[f'_sz_mb_{block_idx}_bs_dat_{ti}'] = t['mat_data']
                     mutable_matrix_blocks.append(block_info)
                     addr_by_ele_0 += jb.SpEleSize
                     continue
