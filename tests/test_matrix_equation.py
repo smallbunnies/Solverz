@@ -707,3 +707,59 @@ def test_matmul_three_arg_operand_falls_back(tmp_path):
     assert 'SolCF.csc_matvec' not in inner_body, (
         'inner_F routed a Mat_Mul(A, B, x) placeholder through the '
         'csc_matvec fast path — operand is not a clean vector')
+
+
+# --- Mat_Mul fallback diagnostic warnings (0.8.3) ---
+#
+# These tests pin the user-facing UserWarning that the module printer
+# emits whenever a ``Mat_Mul(A, x)`` placeholder is forced onto the
+# slower scipy.sparse fallback path. Each warning must (a) name the
+# placeholder, (b) print the matrix expression that broke the fast
+# path, and (c) suggest a concrete rewrite.
+#
+# Layer 1 (this section) covers ``Mat_Mul`` precompute placeholders.
+# Layer 2 (mutable Jacobian fallback) is covered separately.
+
+def test_matmul_negation_warns_with_rewrite_suggestion():
+    """``Mat_Mul(-A, x)`` is on the fallback path because ``-A`` is
+    not a bare sparse Param. The Layer 1 classifier must emit a
+    UserWarning that:
+
+    1. Names the placeholder (e.g. ``_sz_mm_0``).
+    2. Describes the actual matrix expression as a negation.
+    3. Suggests moving the negation outside Mat_Mul, i.e.
+       ``-Mat_Mul(A, x)``.
+    """
+    from Solverz.code_printer.python.module.module_printer import (
+        print_F, print_sub_inner_F)
+
+    m = Model()
+    m.x = Var('x', [0.0, 0.0])
+    m.b = Param('b', [1.0, 2.0])
+    m.A = Param('A', [[1.0, 0.5], [0.5, 1.0]], dim=2, sparse=True)
+    m.eqn = Eqn('f', Mat_Mul(-m.A, m.x) - m.b)
+
+    spf, y0 = m.create_instance()
+    spf.FormJac(y0)
+    _, precompute_info = print_sub_inner_F(spf.EQNs)
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        print_F('AE', spf.var_address, spf.PARAM, nstep=0,
+                precompute_info=precompute_info)
+
+    fb = [x for x in w
+          if issubclass(x.category, UserWarning)
+          and 'Mat_Mul placeholder' in str(x.message)
+          and 'falls back' in str(x.message)]
+    assert len(fb) >= 1, (
+        f'expected a Mat_Mul fallback warning, captured: '
+        f'{[str(x.message) for x in w]}')
+    msg = str(fb[0].message)
+    assert '_sz_mm_' in msg, \
+        f'warning should name the placeholder, got: {msg}'
+    assert '-A' in msg or 'negation' in msg.lower(), (
+        f'warning should describe the matrix expression as a '
+        f'negation, got: {msg}')
+    assert '-Mat_Mul' in msg or 'outside' in msg.lower(), (
+        f'warning should suggest moving the negation outside, got: {msg}')

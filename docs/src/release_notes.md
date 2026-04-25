@@ -2,6 +2,124 @@
 
 # Release Notes
 
+## 0.8.5
+
+LoopEqn prototype close-out: new `Set` primitive for subset
+iteration (#129), Phase J2 translator Patterns 1 / 2 / 4 landings
+(#133), safety guards (#130, #132), and a full LoopEqn
+documentation rewrite.
+
+### New
+
+- **Pyomo-style `Set` primitive** (#129). `Solverz.Set`
+  (internal class `IndexSet`) replaces the three-object
+  subset-iteration pattern — auxiliary `Param(..., dtype=int)` +
+  bounded `Idx` + every `m.Var[m.subset_param[i]]` indirection —
+  with a one-line declaration:
+
+  ```python
+  m.PVPQ = Set('PVPQ', pv_pq_arr)
+  m.Bus  = Set('Bus', nb)
+  i_p = m.PVPQ.idx('i_p')
+  j   = m.Bus.idx('j')
+  body_P = m.Vm[i_p] * Sum(m.Vm[j] * m.Gbus[i_p, j] * ..., j) + ...
+  m.P_eqn = LoopEqn('P_eqn', outer_index=i_p, body=body_P, model=m)
+  ```
+
+  The body rewriter inserts the indirect gather
+  (`m.Vm[PVPQ[i_p]]`) only when the target array is strictly
+  larger than the set — subset-aligned storage whose length equals
+  the set is indexed bare. Same indirect-outer path the sparsity
+  analyzer already handles, no engine changes required. Partial-
+  unknown Vars (Pyomo's `Var(m.PQ)` pattern) are tracked
+  separately in #136.
+
+- **`Model.add` name-collision detection** (#130). Raises
+  `ValueError` when merging a sub-model whose attribute would
+  overwrite an existing `Param` / `Var` / `Eqn` with a non-equal
+  value. Previously the clash was silent — a real IES integration
+  bug (gas- vs heat-network `pipe_from_node` parameters silently
+  overwriting each other, producing `|F| ≈ 1.5e6` residuals)
+  motivated the guard. Identical values (shared object or
+  value-equal Params like a common `Cp`) still merge without
+  error.
+
+- **LoopEqn + inline / partial-Jacobian path guard** (#132, C2
+  guard from #128). `made_numerical` and
+  `Equations.FormPartialJac` now raise `NotImplementedError` when
+  the equation system contains any `LoopEqn` instance. LoopEqn
+  kernels emit Python `for`-loops that are 3–7× slower than the
+  lambdify-vectorised legacy `Eqn` path without Numba JIT; the
+  guard redirects users to `Solverz.module_printer(..., jit=True)`,
+  which is LoopEqn's design target.
+
+### Performance
+
+- **Phase J2 translator Patterns 1 / 2 / 4** (#133 completion).
+  LoopEqn Jacobian blocks of the following shapes now land on the
+  constant-matrix fast path with zero per-Newton-iteration J cost:
+  * Pattern 1 DiagSelectTerm — `Diag(u) @ SelectMat @ Para`.
+  * Pattern 2 bilinear mixing — `Diag(u) @ Para @ Diag(v)`
+    (new **biscale** term, flat / nested / `-1`-wrapped forms).
+  * Pattern 4 Sum-KD — identity and non-identity column maps,
+    bare and indirect outer. All three cases keep
+    `is_constant_matrix_deri = True` so Value0 is baked into
+    `_data_` at module-build time.
+
+- **Pattern 3 identity-map indirect KD → DiagTerm** (#133). A
+  top-level `KD(diff, map[outer]) * Sum(...)` with identity
+  `map` (and `n_outer == n_diff`) folds into the existing
+  direct-KD `Diag(Mat_Mul(Para, iVar))` branch.
+
+- **Mutable-matrix analyzer extensions** — `_LoopJacSelectMat`
+  accepted as matrix operand alongside `Para`, including
+  `Mat_Mul(SelectMat, Para)` composites; variadic `Mat_Mul`
+  chains accepted in `_classify_matmul`;
+  `_extract_sign_and_core` strips any numeric scalar coefficient.
+
+- **Measured impact (Big IES, 8 996-DOF, Rodas3 Mode II)** —
+  wall 13.76 s vs 52.25 s for legacy (**3.80× faster**), F-eval
+  709.8 µs vs 4 348.5 µs, J-eval 4 634 µs vs 15 832 µs. Step
+  counts identical (757 accepted) confirming trajectory match.
+
+### Documentation
+
+- `docs/src/loopeqn.md` — full rewrite as a beginner walkthrough.
+  10 sections from motivation to troubleshooting; two Cookbook
+  worked examples (polar power-flow, integrated energy system)
+  instead of synthetic snippets; `Set`-based subset iteration; the
+  `module_printer(jit=True)` requirement; `LoopOde`; performance
+  numbers.
+- `docs/src/loopeqn_translator.md` (new) — developer-facing
+  appendix that defines every translator jargon term (KD, Mat_Mul,
+  Phase J1/J2/J3, CSR walker, SelectMat, biscale) at first use
+  and houses the Phase J2 coverage table, the supported-body-shape
+  table, and the not-supported list.
+- `docs/src/conf.py` — enable
+  `myst_enable_extensions = ['dollarmath', 'amsmath', 'colon_fence']`
+  so `$$...$$` and `:::{math}` blocks render typeset in `.md`
+  pages.
+- API reference gains `IndexSet` autoclass entry.
+
+### Internal
+
+- `SymbolExtractor` leaf-symbol fix — `Para` / `iVar` /
+  `iAliasVar` used as indices now register in `SymInIndex` by
+  name, so lambdified bodies that gather via a Param (e.g.
+  `iVar('Ts')[Para('fht_nl')]`) no longer raise `NameError` at
+  runtime.
+- Inline printer no longer registers `LoopEqn.NUM_EQN` or
+  `LoopEqnDiff._kernel_func_name` callables — that code path is
+  unreachable behind the guard and has been pruned.
+- Value0 shape is verified against `(n_outer, n_diff)` before
+  Pattern 4 emits its translated Param expression, preventing a
+  latent `IndexError` when a sparse-pattern row falls outside the
+  LoopEqn's equation-block range.
+
+## 0.8.4
+
+**Never released.** Content merged into 0.8.5.
+
 ## 0.8.3
 
 **Tooling-only release.** No Python source-code, test, or runtime

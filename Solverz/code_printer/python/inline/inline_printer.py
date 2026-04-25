@@ -82,7 +82,21 @@ def print_J_block(jb: JacBlock, sparse: bool) -> List:
                 stmts = [extend(iVar('row', internal_use=True), SolList(*jb.SpEqnAddr.tolist())),
                          extend(iVar('col', internal_use=True),
                                 SolList(*jb.SpVarAddr.tolist()))]
-                if jb.is_mutable_matrix:
+                if hasattr(jb, '_loop_eqn_diff'):
+                    # LoopEqn-native J block (Phase J4). The
+                    # ``LoopEqnDiff.NUM_EQN`` wraps the @njit
+                    # sparse kernel and returns a 1-D ``(nnz,)``
+                    # ndarray already in column-major ``(row,
+                    # col)`` order — the downstream ``data``
+                    # ``.extend(...)`` can consume it directly,
+                    # no fancy-indexing needed. ``SpDeriExpr`` is
+                    # a ``_LoopJacBlockCall`` sympy Function that
+                    # lambdifies (via the inline ``custom_func``
+                    # namespace set in ``made_numerical``) to a
+                    # call into the wrapped kernel.
+                    stmts.append(extend(iVar('data', internal_use=True),
+                                        jb.SpDeriExpr))
+                elif jb.is_mutable_matrix:
                     # Mutable matrix derivative: evaluate expression at runtime,
                     # then extract values at pre-determined COO positions using
                     # fancy indexing. The expression (SpDeriExpr) evaluates to a
@@ -147,6 +161,8 @@ def made_numerical(eqs: SymEquations,
     """
     factory method of numerical equations
     """
+    from Solverz.equation.equations import _guard_loopeqn_not_supported
+    _guard_loopeqn_not_supported(eqs, 'made_numerical')
     print(f"Printing numerical codes of {eqs.name}")
     eqs.FormJac(y)
     code_F = print_F(eqs.__class__.__name__,

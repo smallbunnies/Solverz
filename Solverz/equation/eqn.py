@@ -3,9 +3,11 @@ from __future__ import annotations
 from typing import Union, List, Dict, Callable
 
 import numpy as np
+import sympy as sp
 from sympy import Symbol, Expr, latex, Derivative, sympify, Function
 from sympy import lambdify as splambdify
 from sympy.abc import t, x
+from sympy.functions.special.tensor_functions import KroneckerDelta
 
 from Solverz.sym_algebra.symbols import iVar, Para, IdxVar, idx, IdxPara, iAliasVar, IdxAliasVar
 from Solverz.variable.ssymbol import Var
@@ -131,6 +133,2072 @@ class EqnDiff(Eqn):
         self.v_type = ''
 
 
+class LoopEqnDiff(EqnDiff):
+    """:class:`EqnDiff` subclass for LoopEqn Jacobian blocks whose
+    canonical diff expression does NOT reduce to a pure Solverz
+    ``Mat_Mul`` / ``Diag`` / ``Para`` arithmetic (Phase J1 / J2
+    classifier fell through).
+
+    Represents the block via a **pre-generated Python kernel
+    function** that evaluates the full dense ``(n_outer, n_diff)``
+    Jacobian block at runtime via a nested double for-loop. The
+    kernel is built by
+    :func:`Solverz.equation.loop_jac.build_loop_jac_kernel_source`
+    and reuses the F-side
+    :func:`_translate_loop_body_njit` translator for the entry
+    expression (so ``KroneckerDelta`` lowers to a Python
+    conditional, inner ``Sum``s become accumulator for-loops,
+    etc.).
+
+    Why a dedicated class
+    ---------------------
+    Parent ``EqnDiff.__init__`` calls ``Eqn.__init__`` which in
+    turn calls ``sympy.lambdify`` on the derivative expression.
+    LoopEqn Phase J3 canonical expressions contain
+    ``KroneckerDelta`` and ``Sum`` over ``sympy.Idx`` nodes that
+    sympy's ``lambdify`` cannot handle. We bypass the parent's
+    lambdify entirely and install a custom ``NUM_EQN``.
+
+    The ``RHS`` marker
+    ------------------
+    ``self.RHS`` is a sympy ``Symbol`` multiplied by the
+    ``diff_var`` iVar. Two properties matter:
+
+    1. ``diff_var`` is an ``iVar`` → appears in ``free_symbols`` →
+       ``is_constant_matrix_deri`` returns False → JacBlock marks
+       the block as *mutable*.
+    2. ``FormJac`` short-circuits the mutable-matrix re-evaluation
+       path for ``LoopEqnDiff`` instances (``isinstance`` check) —
+       it uses the already-computed ``fy[3]`` from the custom
+       ``NUM_EQN`` directly instead of re-lambdifying the marker.
+
+    Phase J3 deliberately keeps the block *dense*. Sparsity
+    pruning (only the non-zero positions across all classified
+    terms) is deferred to a future phase once we have real models
+    that benefit.
+    """
+
+    def __init__(self,
+                 name: str,
+                 diff_var,
+                 canonical,
+                 outer_idx,
+                 diff_idx,
+                 n_outer: int,
+                 n_diff: int,
+                 var_map: Dict[str, object]):
+        from Solverz.equation.loop_jac import (
+            build_loop_jac_kernel_source,
+            compute_loop_jac_sparsity,
+        )
+        from Solverz.num_api import custom_function as _SolCF
+        from Solverz.variable.ssymbol import sSymBasic
+        from Solverz.equation.param import ParamBase
+
+        # Deliberately skip ``super().__init__`` — the parent
+        # chain (EqnDiff → Eqn) calls ``self.lambdify()`` which
+        # cannot handle the sympy ``KroneckerDelta`` /
+        # ``Sum`` / ``IndexedBase`` content of ``canonical``. We
+        # install a custom NUM_EQN via ``exec`` on a hand-generated
+        # kernel source.
+
+        # Discover the Var/Param symbols referenced in the canonical
+        # expression. IndexedBase references come from ``m.var[...]``
+        # rewrites (covered by ``var_map``); bare iVar/Para nodes can
+        # appear for scalar Params. ``atoms(sp.IndexedBase)`` misses
+        # bases buried inside ``Sum`` bodies — walk via ``Indexed``
+        # nodes instead to reach them.
+        #
+        # Sparse 2-D Params are excluded from the kernel signature:
+        # their contents flow in through module-level CSR arrays
+        # (``_sz_csr_<name>_{data,indices,indptr}``) that the
+        # generated kernel references directly, and numba cannot
+        # type ``csc_array`` as a function argument. Walker Sums
+        # and point-lookup helpers both pull from the CSR arrays,
+        # so no kernel arg is needed for the sparse Param itself.
+        sym_names: set = set()
+        for idx_node in canonical.atoms(sp.Indexed):
+            base_name = idx_node.base.name
+            if base_name not in var_map:
+                continue
+            sol_obj = var_map[base_name]
+            if (isinstance(sol_obj, ParamBase)
+                    and getattr(sol_obj, 'sparse', False)
+                    and sol_obj.dim == 2):
+                continue
+            sym_names.add(base_name)
+        for s in canonical.free_symbols:
+            if isinstance(s, (iVar, Para)) and s.name in var_map:
+                sol_obj = var_map[s.name]
+                if (isinstance(sol_obj, ParamBase)
+                        and getattr(sol_obj, 'sparse', False)
+                        and sol_obj.dim == 2):
+                    continue
+                sym_names.add(s.name)
+        sorted_symbols = sorted(sym_names)
+
+        # ``name`` is the human-readable EqnDiff label like
+        # ``"Diff P_eqn w.r.t. Va"`` — not a valid Python
+        # identifier. Sanitize to ``Diff_P_eqn_wrt_Va`` so the
+        # generated ``def`` line parses.
+        sanitized = (
+            name
+            .replace('w.r.t.', 'wrt')
+            .replace('.', '_')
+            .replace(' ', '_')
+        )
+        # Compute the structural sparsity pattern BEFORE building
+        # the kernel — the kernel needs to know ``nnz`` as a
+        # compile-time literal for its ``range(nnz)`` loop.
+        sparsity_row, sparsity_col = compute_loop_jac_sparsity(
+            canonical, outer_idx, diff_idx, var_map, n_outer, n_diff,
+        )
+        self._sparsity_row = sparsity_row
+        self._sparsity_col = sparsity_col
+        self._nnz = int(sparsity_row.size)
+
+        kernel_name = f'_sz_loop_jac_kernel_{sanitized}'
+        self.kernel_source, self.helper_sources = build_loop_jac_kernel_source(
+            kernel_name, canonical, outer_idx, diff_idx,
+            self._nnz, sorted_symbols, var_map,
+        )
+
+        # exec the source into a namespace with the numpy + SolCF
+        # helpers our body translator emits. When the canonical
+        # expression references sparse 2-D Params through a walker
+        # pattern (direct or indirect outer), the translator emits
+        # ``_sz_csr_<walker>_{data,indices,indptr}`` lookups that
+        # must resolve at exec time — inject the CSR arrays for any
+        # referenced sparse 2-D Param. Point-lookup helpers (plain
+        # Python defs from ``build_loop_jac_kernel_source``) are
+        # exec'd into the same namespace so the kernel body, which
+        # may call ``_sz_csr_<walker>_point(row, col)`` for
+        # bare-indexed sparse Param accesses outside Sums, resolves
+        # them cleanly.
+        ns: Dict[str, object] = {'np': np, 'SolCF': _SolCF}
+        # Discover num_api plugins via the ``solverz.num_api`` entry
+        # point group (same path as ``Solverz.num_api.module_parser``
+        # uses for the JIT module's ``dependency.py``). Adds e.g.
+        # ``SolMF`` so LoopEqnDiff kernels referencing
+        # ``SolMF.pde.kt1_ode`` from SolMuseum PDE helpers resolve
+        # at exec time.
+        try:
+            from importlib.metadata import entry_points as _entry_points
+            for _ep in _entry_points(group='solverz.num_api'):
+                try:
+                    ns[_ep.name] = _ep.load()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        for nm, sol_obj in var_map.items():
+            if not isinstance(sol_obj, ParamBase):
+                continue
+            if not (getattr(sol_obj, 'sparse', False)
+                    and sol_obj.dim == 2):
+                continue
+            csc_val = sol_obj.v
+            if not hasattr(csc_val, 'tocsr'):
+                continue
+            csr = csc_val.tocsr()
+            ns[f'_sz_csr_{nm}_data'] = np.ascontiguousarray(
+                csr.data, dtype=float)
+            ns[f'_sz_csr_{nm}_indices'] = np.ascontiguousarray(
+                csr.indices, dtype=np.int64)
+            ns[f'_sz_csr_{nm}_indptr'] = np.ascontiguousarray(
+                csr.indptr, dtype=np.int64)
+        for helper_src in self.helper_sources:
+            exec(helper_src, ns)
+        exec(self.kernel_source, ns)
+        raw_kernel_func = ns[kernel_name]
+        raw_kernel_func._kernel_source = self.kernel_source  # debug
+
+        # Wrap the kernel to inject the sparsity arrays automatically
+        # so ``eval_diffs(*args)`` at FormJac / Newton time doesn't
+        # have to thread the extra ``row_arr`` / ``col_arr`` params
+        # through ``obtain_eqn_args``. Inline path: closure. JIT
+        # module path: the module printer re-generates the wrapper
+        # Assignment to pass the module-level row/col constants
+        # explicitly in the ``J_`` wrapper.
+        _row_arr = self._sparsity_row
+        _col_arr = self._sparsity_col
+
+        def _kernel_wrapper(*args, _raw=raw_kernel_func,
+                             _r=_row_arr, _c=_col_arr):
+            return _raw(*args, _r, _c)
+
+        _kernel_wrapper._kernel_source = self.kernel_source
+        kernel_func = _kernel_wrapper
+
+        # Build SYMBOLS dict matching the kernel's arg list order.
+        # Each entry maps name → Solverz sympy symbol (iVar / Para).
+        self.SYMBOLS: Dict[str, sp.Symbol] = {}
+        for nm in sorted_symbols:
+            sol_obj = var_map[nm]
+            if isinstance(sol_obj, sSymBasic):
+                self.SYMBOLS[nm] = sol_obj.symbol
+            elif isinstance(sol_obj, ParamBase):
+                self.SYMBOLS[nm] = Para(sol_obj.name, dim=sol_obj.dim)
+
+        # Attributes the ``Eqn``/``EqnDiff``/``FormJac`` machinery
+        # reads. Most mirror what the parent ``__init__`` would set.
+        self.name = name
+        self.LHS = Derivative(Function('F'), diff_var)
+
+        # Marker RHS is a sympy ``Function`` application of the
+        # kernel function. When the inline J printer lambdifies the
+        # mutable-matrix block via ``MutableMatJacData``, it emits
+        # ``SolCF.mutable_mat_fallback_extract(<kernel_name>(...),
+        # rows, cols)`` — the kernel is looked up by name from the
+        # lambdify namespace, which ``made_numerical`` populates
+        # with ``{<kernel_name>: kernel_func}`` (alongside the F-side
+        # ``_sz_loop_<name>`` registration).
+        #
+        # Two properties matter for downstream classification:
+        # 1. The Function application's free symbols include every
+        #    Solverz iVar/Para arg, so ``is_constant_matrix_deri``
+        #    sees iVars → mutable.
+        # 2. ``FormJac`` still short-circuits the mutable
+        #    re-lambdify path via ``isinstance(ed, LoopEqnDiff)``
+        #    because creating a fresh ``Eqn('_MutMatJb_...', RHS)``
+        #    would fail to resolve the kernel at lambdify time
+        #    (the custom func dict isn't threaded into that path).
+        kernel_call_args = [self.SYMBOLS[nm] for nm in sorted_symbols]
+        self.RHS = _LoopJacBlockCall(
+            sp.Symbol(kernel_name), *kernel_call_args
+        )
+        self.mixed_matrix_vector = False
+        self.NUM_EQN = kernel_func
+        self.derivatives: Dict[str, EqnDiff] = dict()
+
+        # EqnDiff-specific attributes.
+        self.diff_var = diff_var
+        self.diff_var_name = (
+            diff_var.name0 if isinstance(diff_var, IdxVar)
+            else diff_var.name
+        )
+        self.var_idx = None
+        self.var_idx_func = None
+        self.dim = -1
+        self.v_type = ''
+
+        # Phase J3 LoopEqn-specific metadata — module printer reads
+        # these to emit the kernel source as a @njit function.
+        self.canonical = canonical
+        self.outer_idx = outer_idx
+        self.diff_idx = diff_idx
+        self.n_outer = n_outer
+        self.n_diff = n_diff
+        self._loop_var_map = dict(var_map)
+        self._kernel_func_name = kernel_name
+
+
+def Idx(name: str, n: int = None):
+    """Create a sympy :class:`sympy.Idx` for :class:`LoopEqn` body
+    construction — a thin shortcut so users don't need to
+    ``import sympy as sp`` just to grab one index symbol.
+
+    Parameters
+    ----------
+    name : str
+        The index label.
+    n : int, optional
+        If given, the index is bounded to ``[0, n - 1]`` (sympy stores
+        this as ``.lower`` / ``.upper``). :func:`Sum` and
+        :class:`LoopEqn` can then pick up the range automatically:
+
+        >>> i = Idx('i', 3)
+        >>> Sum(m.G[i, j] * m.ux[j], j)  # no explicit range
+        >>> m.eqn = LoopEqn('eqn', outer_index=i, body=body, model=m)
+        # n_outer auto-inferred from i.upper - i.lower + 1 = 3
+
+        Without ``n`` the result is an unbounded ``sp.Idx`` and
+        :func:`Sum` / :class:`LoopEqn` require explicit range / n_outer.
+    """
+    if n is None:
+        return sp.Idx(name)
+    return sp.Idx(name, int(n))
+
+
+def Sum(expr, dummy, n: int = None):
+    """Range-aware shortcut for :class:`sympy.Sum` used by
+    :class:`LoopEqn` bodies. Three call forms:
+
+    1. ``Sum(expr, j, n)`` → ``sp.Sum(expr, (j, 0, n - 1))`` — the
+       most common case. ``n`` is an int.
+    2. ``Sum(expr, j)`` where ``j = Idx('j', n)`` is a bounded
+       ``sp.Idx`` → ``sp.Sum(expr, (j, j.lower, j.upper))``.
+    3. ``Sum(expr, (j, lo, hi))`` → passthrough to ``sp.Sum`` (legacy
+       sympy tuple form).
+
+    Raises ``ValueError`` if neither ``n`` nor a bounded ``Idx`` is
+    available.
+    """
+    if isinstance(dummy, tuple):
+        return sp.Sum(expr, dummy)
+    if n is not None:
+        return sp.Sum(expr, (dummy, 0, int(n) - 1))
+    # Bounded Idx case — sympy exposes .lower / .upper on Idx nodes
+    # whose second __new__ argument was an int.
+    lower = getattr(dummy, 'lower', None)
+    upper = getattr(dummy, 'upper', None)
+    if lower is not None and upper is not None:
+        return sp.Sum(expr, (dummy, lower, upper))
+    raise ValueError(
+        f"Sum(expr, {dummy!r}): need an explicit ``n`` (for the "
+        f"shortcut form ``Sum(expr, j, n)``) or a bounded Idx "
+        f"(created via ``Idx('j', n)`` so the range is carried on "
+        f"the index itself)."
+    )
+
+
+# Module-level counter used to generate unique param names for the
+# auxiliary ``Idx`` symbols produced by :meth:`IndexSet.idx`. Sharing
+# the counter across all ``IndexSet`` instances avoids collisions
+# when two calls to ``IndexSet.idx('i')`` happen to reuse the same
+# name.
+_INDEX_SET_IDX_COUNTER = [0]
+
+
+class IndexSet:
+    """Named set of integer indices used as the outer iteration range
+    of a :class:`LoopEqn` / :class:`LoopOde`.
+
+    Pyomo's ``Set`` primitive inspired the API. Two construction forms:
+
+    * Identity range — ``Set('Nodes', n)`` where ``n`` is a positive
+      ``int``. The set is the full range ``[0, n)``. The translator
+      emits a plain ``for i in range(n):`` loop; no auxiliary Param is
+      stored.
+    * Explicit subset — ``Set('PVPQ', values)`` where ``values`` is a
+      1-D integer sequence (``np.ndarray``, ``list``, ``tuple``, or
+      ``range`` — anything ``np.asarray(..., dtype=int)`` can eat).
+      The values must be non-negative and duplicate-free. An internal
+      ``Param`` named after the set is created lazily when the set is
+      registered on a :class:`Model` so the generated kernel can read
+      ``for _i in range(len(values)): i = set_param[_i]``.
+
+    The set exposes four attributes the LoopEqn machinery consumes:
+
+    * :attr:`size` — length of the set.
+    * :attr:`is_identity` — True when values are ``[0, len)`` so the
+      direct-outer (no Param) fast path can be used.
+    * :attr:`param` — the auxiliary 1-D int ``Param`` for a non-identity
+      set; ``None`` for an identity set. Lazily created when
+      :meth:`_register` is called by ``Model.__setattr__``.
+    * :attr:`values` — the underlying ``np.ndarray`` of indices.
+
+    Examples
+    --------
+    Identity range (equivalent to ``Idx('i', n)`` + explicit ``n_outer``)::
+
+        m.Bus = Set('Bus', nb)
+        i = m.Bus.idx('i')
+        m.eqn = LoopEqn('eqn', outer=m.Bus, body=body, model=m)
+
+    Explicit subset (replaces the ``Param + Idx + indirect-access``
+    pattern)::
+
+        m.PVPQ = Set('PVPQ', pv_pq_array)
+        i = m.PVPQ.idx('i')
+        m.eqn = LoopEqn('eqn', outer=m.PVPQ, body=m.Vm[i], model=m)
+    """
+
+    def __init__(self, name: str, values):
+        if not isinstance(name, str) or not name:
+            raise ValueError("IndexSet name must be a non-empty string")
+        self.name = name
+
+        # Identity range: Set('X', n) where n is an int.
+        if isinstance(values, int):
+            if values <= 0:
+                raise ValueError(
+                    f"IndexSet({name!r}, {values}): size must be positive"
+                )
+            self._values = np.arange(values, dtype=np.int64)
+            self._is_identity = True
+        else:
+            arr = np.asarray(values).reshape(-1)
+            if arr.size == 0:
+                raise ValueError(
+                    f"IndexSet({name!r}): empty value sequence"
+                )
+            if not np.issubdtype(arr.dtype, np.integer):
+                # Accept float arrays whose entries happen to be
+                # integral, as long as the round-trip is exact. Users
+                # often build index arrays via ``np.concatenate`` which
+                # upcasts to float when any input was floating.
+                if not np.all(arr == np.floor(arr)):
+                    raise TypeError(
+                        f"IndexSet({name!r}): values must be integers"
+                    )
+                arr = arr.astype(np.int64)
+            else:
+                arr = arr.astype(np.int64, copy=False)
+            if (arr < 0).any():
+                raise ValueError(
+                    f"IndexSet({name!r}): negative values not allowed"
+                )
+            if len(np.unique(arr)) != arr.size:
+                raise ValueError(
+                    f"IndexSet({name!r}): duplicate values not allowed "
+                    f"(the set must be injective into the target "
+                    f"variable's index space)."
+                )
+            self._values = arr
+            # Identity iff values == [0, len).
+            self._is_identity = bool(
+                np.array_equal(arr, np.arange(arr.size, dtype=np.int64))
+            )
+        self._param = None  # populated lazily for non-identity sets
+
+    @property
+    def size(self) -> int:
+        return int(self._values.size)
+
+    @property
+    def is_identity(self) -> bool:
+        return self._is_identity
+
+    @property
+    def values(self) -> np.ndarray:
+        return self._values
+
+    @property
+    def param(self):
+        """The auxiliary 1-D int :class:`Param` that stores the set's
+        values at runtime. Materialised lazily on first access so body
+        rewriters can reference it without waiting for ``Model.add``.
+
+        Identity full-range sets (``values == arange(size)``) still
+        receive a Param — at the API layer ``is_identity`` only tells
+        the translator "no gather needed when the target is the same
+        size", but small-identity sets used as subsets of a larger
+        target (e.g. ``Ref = Set('Ref', [0])`` indexing a 30-bus
+        Var) still need the Param at runtime to emit the gather.
+        """
+        if self._param is None:
+            from Solverz.equation.param import Param
+            self._param = Param(self.name, self._values, dtype=int)
+        return self._param
+
+    def idx(self, name: str) -> sp.Idx:
+        """Produce a bounded ``sympy.Idx`` sized to this set.
+
+        Body authors use the returned ``Idx`` exactly as they would a
+        bare ``Idx(name, n)`` — the body rewriter detects that the
+        ``Idx`` came from a non-identity set and transparently wraps
+        every ``Var`` / ``Param`` access with the set's gather Param.
+        """
+        if not isinstance(name, str) or not name:
+            raise ValueError("IndexSet.idx requires a non-empty name")
+        i = sp.Idx(name, self.size)
+        # Tag the Idx so the rewriter can find its parent set. We stash
+        # the tag on a module-level registry keyed by the Idx's
+        # ``name``-and-bounds fingerprint — sympy Idx objects with the
+        # same name and bounds compare equal, so using the name alone
+        # is enough to round-trip here.
+        _IDX_SET_TAGS[(str(i), int(i.lower), int(i.upper))] = self
+        return i
+
+    def __repr__(self) -> str:
+        kind = 'range' if self._is_identity else 'subset'
+        return f"IndexSet({self.name!r}, {kind}, size={self.size})"
+
+
+# Registry mapping ``(idx_name, lower, upper)`` → the ``IndexSet`` that
+# produced the Idx via :meth:`IndexSet.idx`. Consulted by
+# :func:`_rewrite_solverz_body` to detect non-identity sets and wrap
+# their accesses with the set's gather Param.
+_IDX_SET_TAGS: Dict[Tuple[str, int, int], 'IndexSet'] = {}
+
+
+def _lookup_index_set(idx_expr: sp.Expr):
+    """Return the :class:`IndexSet` that produced ``idx_expr`` via
+    :meth:`IndexSet.idx`, or ``None`` when ``idx_expr`` is a plain
+    ``sp.Idx`` not associated with a set.
+    """
+    if not isinstance(idx_expr, sp.Idx):
+        return None
+    lower = getattr(idx_expr, 'lower', None)
+    upper = getattr(idx_expr, 'upper', None)
+    if lower is None or upper is None:
+        return None
+    try:
+        key = (str(idx_expr), int(lower), int(upper))
+    except (TypeError, ValueError):
+        return None
+    return _IDX_SET_TAGS.get(key)
+
+
+def _desugar_set_idx(index_expr, var_map, model, target_len=None):
+    """When ``index_expr`` is a bounded ``sp.Idx`` produced by
+    :meth:`IndexSet.idx` for a *non-identity* set, wrap it as
+    ``sp.IndexedBase(set_name)[index_expr]`` so the rest of the
+    LoopEqn pipeline sees the familiar indirect-outer shape
+    (``m.V[map[i]]``). Identity sets and plain Idxs pass through
+    unchanged.
+
+    ``target_len`` is the size of the array being indexed (the first
+    axis of a 2-D Param, or the length of a 1-D Var/Param). When the
+    target is subset-aligned (``target_len == iset.size``) we leave the
+    index bare — the user allocated storage directly over the subset
+    and doesn't want a gather.
+
+    Side-effect: records the set's auxiliary Param in ``var_map`` so
+    the generated kernel signature receives it. The Param is also
+    pulled out of its parent :class:`IndexSet` by
+    :meth:`Model.create_instance` which recognises IndexSet attributes
+    and registers their ``.param`` in ``param_dict`` automatically.
+    """
+    # Only single-atom Idx is interesting; Indexed/Add/Mul index
+    # expressions pass through (they're already the user's explicit
+    # indirect form).
+    if not isinstance(index_expr, sp.Idx):
+        return index_expr
+    iset = _lookup_index_set(index_expr)
+    if iset is None:
+        return index_expr
+    # Subset-aligned target: user already stored exactly ``iset.size``
+    # values (e.g. ``Vm_pinned`` of length 6 indexed by a 6-element
+    # pin set). Use the bare Idx — indirection would read out of bounds.
+    if target_len is not None and target_len == iset.size:
+        return index_expr
+    # Identity sets only wrap when the target is strictly larger than
+    # the set (e.g. a ``Ref = Set('Ref', [0])`` of size 1 indexing a
+    # 30-bus Var — the set is "identity in its own value space" but
+    # still a *subset* of the target). Identity sets whose ``param``
+    # is None must first materialise one for the gather to have a
+    # runtime operand.
+    if iset.is_identity and (target_len is None
+                              or target_len == iset.size):
+        return index_expr
+    if iset.name not in var_map:
+        var_map[iset.name] = iset.param
+    return sp.IndexedBase(iset.name)[index_expr]
+
+
+def _target_first_axis_len(sol_obj):
+    """Return ``sol_obj.value.shape[0]`` (or ``.v.shape[0]`` for
+    Params / Vars that expose the array under ``.v``). Used by the
+    body rewriter to decide whether a set-tagged Idx should be
+    gathered through the set's Param or passed through bare."""
+    if sol_obj is None:
+        return None
+    arr = None
+    for attr in ('value', 'v'):
+        val = getattr(sol_obj, attr, None)
+        if val is not None:
+            arr = val
+            break
+    if arr is None:
+        return None
+    try:
+        import numpy as _np
+        return int(_np.asarray(arr).shape[0])
+    except Exception:
+        return None
+
+
+def _rewrite_solverz_body(body, model):
+    """Rewrite Solverz ``IdxVar``/``IdxPara`` nodes inside a LoopEqn
+    body to their ``sympy.IndexedBase`` equivalents, and return the
+    rewritten body together with an auto-built ``var_map``.
+
+    The user-facing motivation is that writing
+
+        body = m.ix_pin[i] - sp.Sum(m.G[i, j] * m.ux[j], (j, 0, n-1))
+
+    is much nicer than
+
+        ux_sym = sp.IndexedBase('ux')
+        G_sym  = sp.IndexedBase('G')
+        ...
+        body = ix_pin_sym[i] - sp.Sum(G_sym[i, j] * ux_sym[j], (j, 0, n-1))
+
+    plus a ``var_map`` dict mapping each string back to a Solverz
+    symbol. Both of the above should produce identical downstream code.
+    The second form is what the LoopEqn translator actually understands
+    (because Solverz ``IdxVar``/``IdxPara`` don't interoperate with
+    ``sp.Sum.doit()`` / ``.subs()`` / ``.diff()``), so we convert the
+    first form to the second at construction time.
+
+    Parameters
+    ----------
+    body : sympy.Expr
+        The user's body, possibly containing Solverz ``IdxVar``/
+        ``IdxPara`` references created via ``m.ux[j]`` / ``m.G[i, j]``.
+        Already-sympy ``IndexedBase`` accesses pass through unchanged.
+    model : Model
+        The containing :class:`Model`, used to look up each referenced
+        name via ``getattr(model, name)``. The returned object must be
+        a Solverz ``Var`` or ``ParamBase``.
+
+    Returns
+    -------
+    new_body : sympy.Expr
+        The body with every Solverz ``IdxVar``/``IdxPara`` replaced by
+        ``sp.IndexedBase(name0)[index_or_indices]``.
+    var_map : Dict[str, object]
+        Maps each referenced ``name0`` → Solverz ``Var``/``Param``
+        object pulled from ``model``.
+    """
+    from Solverz.sym_algebra.symbols import IdxVar, IdxPara, iVar, Para
+    from Solverz.variable.ssymbol import Var
+    from Solverz.equation.param import ParamBase
+
+    var_map: Dict[str, object] = {}
+
+    def _resolve(name: str):
+        """Look up a name in the model and validate its type.
+
+        Caches into ``var_map`` so a given name resolves once.
+        """
+        if name in var_map:
+            return var_map[name]
+        sol_obj = getattr(model, name, None)
+        if sol_obj is None:
+            raise ValueError(
+                f"LoopEqn body references symbol {name!r} but "
+                f"``model`` has no attribute by that name. Make "
+                f"sure you set ``m.{name} = Var/Param(...)`` "
+                f"before constructing the LoopEqn."
+            )
+        if not isinstance(sol_obj, (Var, ParamBase)):
+            raise TypeError(
+                f"LoopEqn body references {name!r} which resolves "
+                f"to a {type(sol_obj).__name__} on the model — "
+                f"expected a Solverz ``Var`` or ``Param``."
+            )
+        var_map[name] = sol_obj
+        return sol_obj
+
+    def walk(expr):
+        # Solverz ``IdxVar`` / ``IdxPara`` may hand us a plain Python
+        # ``int`` / ``float`` as the index (e.g. ``m.Ts_slack[0]``).
+        # Coerce those to sympy scalars up-front so the rest of the
+        # walker can uniformly assume sympy ``Basic`` objects.
+        if isinstance(expr, (int, float)):
+            return sp.sympify(expr)
+        if isinstance(expr, (IdxVar, IdxPara)):
+            name = expr.name0
+            target_obj = _resolve(name)  # populate var_map and validate
+            target_len = _target_first_axis_len(target_obj)
+            # ``IdxSymBasic.index`` is either a single sympy Expr / Idx
+            # (1-D access) or a tuple (2-D access). Recurse so any
+            # inner Solverz ``IdxVar`` / ``IdxPara`` used as part of
+            # the index (e.g. ``m.ux[m.node_idx[i]]`` for a subset-of-
+            # nodes LoopEqn) also gets rewritten to ``IndexedBase``.
+            raw_idx = expr.index
+            if isinstance(raw_idx, tuple):
+                new_idx = tuple(
+                    _desugar_set_idx(walk(x), var_map, model,
+                                     target_len if k == 0 else None)
+                    for k, x in enumerate(raw_idx)
+                )
+            else:
+                new_idx = _desugar_set_idx(walk(raw_idx), var_map,
+                                            model, target_len)
+            return sp.IndexedBase(name)[new_idx]
+
+        # Bare Solverz ``iVar`` / ``Para`` (non-indexed) — e.g. a
+        # scalar parameter like ``m.Cp`` referenced without
+        # ``[i]``. The underlying symbol is still a sympy ``Symbol``
+        # subclass, so we leave it in the tree as-is, but we MUST
+        # register it in ``var_map`` so it flows into ``SYMBOLS`` and
+        # the generated function receives it as a positional arg.
+        # Without this, the body would reference an undefined local.
+        #
+        # **Scalar Param handling**: Solverz's ``Param(name, 4182.0)``
+        # stores ``.v`` as a shape-(1,) ``numpy.ndarray`` (via
+        # ``Array(scalar_value, dim=1)``). If we emit a bare ``Cp``
+        # reference and the body is ``Cp / 1e6 * np.abs(min[i])``,
+        # the multiplication broadcasts to shape (1,), and then
+        # ``out[i] = <shape (1,) array>`` raises
+        # ``ValueError: setting an array element with a sequence``
+        # under numpy ≥ 1.25 / hard-error under 2.x. Detect
+        # length-1 Params at rewrite time and substitute with
+        # ``IndexedBase(name)[0]`` so the translator emits
+        # ``Cp[0]`` — a numpy scalar. Downstream arithmetic stays
+        # scalar and the assignment works.
+        if isinstance(expr, (iVar, Para)):
+            name = expr.name
+            sol_obj = _resolve(name)
+            if (isinstance(sol_obj, ParamBase)
+                    and sol_obj.v is not None):
+                v_arr = np.asarray(sol_obj.v)
+                if v_arr.ndim >= 1 and v_arr.size == 1:
+                    return sp.IndexedBase(name)[0]
+            return expr
+
+        # NOTE: sympy marks ``Indexed`` nodes as ``is_Atom == True``
+        # even though they have sub-expressions (the base and the
+        # index expression). Check ``isinstance(expr, sp.Indexed)``
+        # BEFORE the ``is_Atom`` short-circuit so native
+        # ``sp.IndexedBase('Tsp_all')[off + k]`` references in a
+        # LoopEqn body still get their base name registered in
+        # ``var_map`` — otherwise the generated kernel omits
+        # ``Tsp_all`` from its argument list and the call fails
+        # with ``NameError: 'Tsp_all' is not defined`` at runtime.
+        if isinstance(expr, sp.Indexed):
+            # Already a native sympy IndexedBase access; the user may
+            # have mixed native and Solverz styles. Register the base
+            # name in var_map if the model has a matching attribute.
+            name = expr.base.name
+            target_len = None
+            if hasattr(model, name):
+                if name not in var_map:
+                    _resolve(name)
+                target_len = _target_first_axis_len(var_map.get(name))
+            # Recurse into the indices too — the user might build a
+            # native-sympy outer with a Solverz-indexed inner (weird
+            # but legal) and we want the same uniform rewrite.
+            new_indices = tuple(
+                _desugar_set_idx(walk(ix), var_map, model,
+                                 target_len if k == 0 else None)
+                for k, ix in enumerate(expr.indices)
+            )
+            return expr.base[new_indices if len(new_indices) > 1
+                             else new_indices[0]]
+
+        if expr.is_Atom:
+            return expr
+
+        if isinstance(expr, sp.Sum):
+            # Recurse into the summand; leave the (dummy, lo, hi) tuple
+            # alone. sympy's Sum constructor accepts the walked body
+            # plus the original limits.
+            walked_body = walk(expr.args[0])
+            return sp.Sum(walked_body, *expr.args[1:])
+
+        # Generic tree walk for Add / Mul / Pow / Function / ...
+        new_args = [walk(arg) for arg in expr.args]
+        return expr.func(*new_args)
+
+    new_body = walk(body)
+    if not var_map:
+        raise ValueError(
+            "LoopEqn: could not find any Solverz IdxVar / IdxPara / "
+            "sympy IndexedBase references in the body — at least one "
+            "Var / Param reference is required. If you meant to use "
+            "the legacy sympy IndexedBase style, pass ``var_map`` "
+            "instead of ``model``."
+        )
+    return new_body, var_map
+
+
+class LoopEqn(Eqn):
+    r"""
+    Equation declared as a parameterised scalar template that prints to
+    a Python ``for``-loop in the generated ``inner_F`` / ``inner_J``.
+
+    The motivation: SolMuseum's network modules (``eps_network``,
+    ``heat_network``, ``gas_network``) write per-bus / per-node
+    equations using Python for-loops that emit ``2 * n_bus`` (or more)
+    scalar :class:`Eqn` objects. Each scalar Eqn becomes its own
+    ``inner_F<N>`` sub-function, and on the IES benchmark the resulting
+    Numba LLVM compile time dominates the warm-up phase. ``LoopEqn``
+    expresses the same thing as a SINGLE Eqn whose body is a scalar
+    template parameterised by an outer index ``i``; the printer then
+    emits ONE ``inner_F<N>`` containing a ``for i in range(n_outer):``
+    loop. One sub-function instead of ``n_outer``.
+
+    Substrate
+    ---------
+    Internally, the body is rewritten as a sympy expression built from
+    :class:`sympy.IndexedBase`, :class:`sympy.Idx`, :class:`sympy.Sum`.
+    Solverz's own :class:`IdxVar` / :class:`IdxPara` are opaque to
+    sympy's ``subs`` / ``Sum.doit()`` / ``diff``, so we can't use them
+    verbatim — LoopEqn walks the body once at construction and rewrites
+    any Solverz ``IdxVar`` / ``IdxPara`` into the corresponding
+    :class:`sympy.IndexedBase` form. The user is free to write either:
+
+    1. **Native Solverz syntax** (recommended): ``m.G[i, j]`` and
+       ``m.ux[j]`` directly inside the body, and pass ``model=m`` so
+       LoopEqn can look up each name in the Model to resolve sparsity
+       / dim / value info.
+    2. **Explicit sympy syntax** (legacy): declare
+       ``G_sym = sp.IndexedBase('G')`` etc., build the body out of
+       those, and pass a ``var_map={'G': m.G, ...}`` dict mapping each
+       IndexedBase name to a Solverz ``Var``/``Param``.
+
+    Both styles produce the same internal representation. Native
+    syntax is terser and avoids the bookkeeping trap of forgetting to
+    add an entry to ``var_map`` when adding a new reference.
+
+    Parameters
+    ----------
+    name : str
+        Equation name.
+    outer_index : sympy.Idx
+        The outer loop index. Each row of the residual is the body
+        evaluated at one value of ``outer_index``.
+    n_outer : int
+        Range of the outer loop. The residual block has size
+        ``n_outer``.
+    body : sympy.Expr
+        A scalar sympy expression built either from
+        ``sympy.IndexedBase`` (+ ``var_map``) or from Solverz
+        ``IdxVar`` / ``IdxPara`` (+ ``model``). May involve the
+        ``outer_index``, inner ``sympy.Sum`` over auxiliary ``Idx``
+        symbols, and arithmetic.
+    model : Model, optional
+        When the body uses Solverz ``IdxVar`` / ``IdxPara``, pass the
+        containing :class:`Model` so LoopEqn can resolve each
+        ``name0`` back to a real ``Var`` / ``Param`` (needed for
+        sparsity detection and CSR pre-computation). Mutually
+        exclusive with ``var_map``.
+    var_map : Dict[str, sSymBasic], optional
+        Legacy API. Maps each ``sympy.IndexedBase`` name in ``body``
+        to the corresponding Solverz ``Var`` / ``Param`` instance.
+        Mutually exclusive with ``model``.
+
+    Examples
+    --------
+    Native Solverz syntax (preferred)::
+
+        m.ux = Var('ux', np.ones(nb))
+        m.uy = Var('uy', np.zeros(nb))
+        m.G = Param('G', csc_array(G_dense), dim=2, sparse=True)
+        m.B = Param('B', csc_array(B_dense), dim=2, sparse=True)
+        m.ix_pin = Param('ix_pin', ix_pin)
+
+        i, j = sp.Idx('i'), sp.Idx('j')
+        body = (m.ix_pin[i]
+                - sp.Sum(m.G[i, j] * m.ux[j], (j, 0, nb - 1))
+                + sp.Sum(m.B[i, j] * m.uy[j], (j, 0, nb - 1)))
+
+        m.ix_inj = LoopEqn(
+            'ix_inj',
+            outer_index=i, n_outer=nb,
+            body=body,
+            model=m,
+        )
+
+    Legacy ``var_map`` API (still supported)::
+
+        ux_sym = sp.IndexedBase('ux')
+        G_sym = sp.IndexedBase('G')
+        body = sp.Sum(G_sym[i, j] * ux_sym[j], (j, 0, nb - 1))
+        m.ix_inj = LoopEqn(
+            'ix_inj',
+            outer_index=i, n_outer=nb,
+            body=body,
+            var_map={'ux': m.ux, 'G': m.G},
+        )
+
+    The generated ``inner_F`` for either form is a single function
+    containing one Python ``for i in range(nb):`` loop, replacing the
+    ``2 * nb`` scalar sub-functions the original loop pattern would
+    emit.
+    """
+
+    def __init__(self,
+                 name: str,
+                 outer_index=None,
+                 body=None,
+                 n_outer: int = None,
+                 var_map: Dict[str, object] = None,
+                 model=None,
+                 outer=None):
+        if not isinstance(name, str):
+            raise ValueError("Equation name must be string!")
+        # ``outer=IndexSet`` is an optional forward declaration of the set
+        # the outer index belongs to. When given, it must be consistent
+        # with ``outer_index`` (if that Idx was produced by a Set, the
+        # Set must match). When ``outer_index`` is omitted, ``outer=``
+        # is a convenience that synthesises one via ``outer.idx(...)``.
+        if outer is not None:
+            if not isinstance(outer, IndexSet):
+                raise TypeError(
+                    f"outer= must be an IndexSet, got "
+                    f"{type(outer).__name__}"
+                )
+            if outer_index is None:
+                outer_index = outer.idx(f'_outer_{outer.name}')
+            else:
+                tagged = _lookup_index_set(outer_index)
+                if tagged is not None and tagged is not outer:
+                    raise ValueError(
+                        f"LoopEqn: outer_index was produced by Set "
+                        f"{tagged.name!r} but outer= points to a "
+                        f"different Set {outer.name!r}."
+                    )
+            if n_outer is None:
+                n_outer = outer.size
+            elif n_outer != outer.size:
+                raise ValueError(
+                    f"LoopEqn: n_outer={n_outer} contradicts "
+                    f"outer={outer!r}.size={outer.size}"
+                )
+        # When ``outer_index`` itself came from an IndexSet and
+        # ``outer=`` was not supplied, still auto-infer ``n_outer``
+        # from the set's size so the two declaration styles are
+        # interchangeable.
+        if outer_index is not None and n_outer is None:
+            tagged = _lookup_index_set(outer_index)
+            if tagged is not None:
+                n_outer = tagged.size
+        if body is None:
+            raise ValueError("LoopEqn: body is required")
+        if not isinstance(outer_index, sp.Idx):
+            raise TypeError(
+                f"outer_index must be a sympy.Idx, got {type(outer_index).__name__}"
+            )
+        # Auto-infer n_outer from a bounded outer_index
+        # (created via ``Idx('i', n)`` — sympy stores n-1 as upper).
+        if n_outer is None:
+            upper = getattr(outer_index, 'upper', None)
+            lower = getattr(outer_index, 'lower', None)
+            if upper is not None and lower is not None:
+                n_outer = int(upper) - int(lower) + 1
+            else:
+                raise ValueError(
+                    "LoopEqn: ``n_outer`` is required unless "
+                    "``outer_index`` is a bounded Idx (create via "
+                    "``Idx('i', n)``) so the range can be auto-"
+                    "inferred from ``.lower`` / ``.upper``."
+                )
+        if not isinstance(n_outer, int) or n_outer < 1:
+            raise ValueError(
+                f"n_outer must be a positive int, got {n_outer!r}"
+            )
+        if var_map is not None and model is not None:
+            raise ValueError(
+                "LoopEqn: pass either ``var_map`` (legacy sympy "
+                "IndexedBase style) or ``model`` (native Solverz "
+                "IdxVar/IdxPara style), not both."
+            )
+        if var_map is None and model is None:
+            raise ValueError(
+                "LoopEqn: one of ``var_map`` or ``model`` is required "
+                "so we can resolve each IndexedBase / IdxVar back to "
+                "a Solverz Var/Param object."
+            )
+
+        # If ``model`` is given, walk the body, rewrite Solverz
+        # ``IdxVar``/``IdxPara`` → ``sp.IndexedBase(name0)[index]``, and
+        # auto-build the var_map by looking up each referenced name in
+        # the model's ``__dict__``. The rewritten body is a pure
+        # sympy-IndexedBase expression the rest of LoopEqn already
+        # understands.
+        if model is not None:
+            body, var_map = _rewrite_solverz_body(body, model)
+
+        if not isinstance(var_map, dict) or not var_map:
+            raise ValueError("var_map must be a non-empty dict")
+
+        # Bypass the parent ``Eqn.__init__`` because:
+        #   * ``sympify(sSym2Sym(body))`` would happily store the body
+        #     as RHS, but
+        #   * ``self.lambdify()`` calls ``sympy.lambdify(..., body)``
+        #     which raises ``PrintMethodNotImplementedError`` on
+        #     ``Sum`` over ``Idx`` (sympy's NumPyPrinter cannot print
+        #     ``Idx``). We provide a custom ``NUM_EQN`` instead.
+        self.name = name
+        self.LHS = sp.S.Zero
+        self.RHS = body  # store as-is; the printer walks it
+        self.outer_index = outer_index
+        self.n_outer = n_outer
+        self.body = body
+        self.var_map = dict(var_map)
+
+        # Build SYMBOLS — what the model assembler uses to discover
+        # the Var / Param dependencies of this equation. Maps the
+        # underlying-symbol-name to the Solverz internal Symbol
+        # (iVar / Para). Sorted for determinism (matches what the
+        # parent ``obtain_symbols`` does).
+        from Solverz.variable.ssymbol import sSymBasic
+        from Solverz.equation.param import ParamBase
+        symbols_dict = {}
+        for indexed_base_name, sol_obj in self.var_map.items():
+            if isinstance(sol_obj, sSymBasic):
+                symbols_dict[sol_obj.name] = sol_obj.symbol
+            elif isinstance(sol_obj, ParamBase):
+                # ParamBase exposes its sympy symbol as ``.sym`` (or
+                # equivalent). We look up by name from the model.
+                para_sym = Para(sol_obj.name, dim=sol_obj.dim)
+                para_sym._solverz_dtype = getattr(sol_obj, 'dtype', float)
+                symbols_dict[sol_obj.name] = para_sym
+            else:
+                raise TypeError(
+                    f"var_map entry {indexed_base_name!r} must be a "
+                    f"Solverz Var or Param, got {type(sol_obj).__name__}"
+                )
+        self.SYMBOLS = {key: symbols_dict[key]
+                        for key in sorted(symbols_dict)}
+
+        # No Mat_Mul in the body — LoopEqn expresses everything via
+        # sympy IndexedBase + Sum, NOT via Solverz Mat_Mul.
+        self.mixed_matrix_vector = False
+
+        # Pre-scan the body for sparse 2-D ``Param``s used as
+        # ``M[outer_index, dummy]`` walkers inside a ``Sum``. For each
+        # detected walker, freeze its CSR decomposition — the
+        # translator emits code that walks these arrays instead of
+        # iterating the full dense column range (which would (a) force
+        # the user to densify the sparse Param and (b) iterate zeros
+        # in the inner loop).
+        self._sparse_csr = self._collect_sparse_walkers()
+
+        # Custom numerical evaluator (bypasses sympy.lambdify).
+        self.NUM_EQN = self._build_num_eqn()
+
+        self.derivatives: Dict[str, EqnDiff] = dict()
+
+    def _classify_walker_row(
+        self, walker_name: str, row_idx: sp.Expr, outer_name: str
+    ) -> sp.Expr:
+        """Validate the row-index expression of a sparse walker and
+        return a canonical ``row_expr`` to store on the walker info.
+
+        Two forms are accepted:
+
+        1. **Direct outer** — ``row_idx`` is the LoopEqn's outer
+           ``sp.Idx`` (``row_expr == row_idx``). Row of the CSR walk is
+           the loop counter itself.
+        2. **Indirect outer** — ``row_idx`` is an ``Indexed`` whose
+           base is a 1-D integer ``Param`` and whose sole index is the
+           LoopEqn outer index. Row is looked up as ``P[outer]`` at
+           the start of each outer iteration.
+
+        Any other shape raises ``NotImplementedError``.
+        """
+        from Solverz.equation.param import ParamBase
+
+        if isinstance(row_idx, sp.Idx) and str(row_idx) == outer_name:
+            return row_idx
+
+        if isinstance(row_idx, sp.Indexed):
+            base = row_idx.base.name
+            if base not in self.var_map:
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: sparse walker row index "
+                    f"{row_idx} references unknown Param {base!r} — "
+                    f"indirect outer walkers need the row-map Param "
+                    f"to be registered in the model."
+                )
+            map_param = self.var_map[base]
+            if not isinstance(map_param, ParamBase):
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: sparse walker row index "
+                    f"{row_idx} must be indexed through a ``Param``, "
+                    f"got {type(map_param).__name__}."
+                )
+            if map_param.dim != 1:
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: sparse walker row-map "
+                    f"Param {base!r} must have dim=1, got dim={map_param.dim}."
+                )
+            if len(row_idx.indices) != 1:
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: sparse walker row-map "
+                    f"access must be {base}[outer_idx]; got {row_idx}."
+                )
+            if (not isinstance(row_idx.indices[0], sp.Idx)
+                    or str(row_idx.indices[0]) != outer_name):
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: sparse walker row-map "
+                    f"{base!r} must be indexed exactly by the outer "
+                    f"index {outer_name!r}; got {row_idx}."
+                )
+            return row_idx
+
+        raise NotImplementedError(
+            f"LoopEqn {self.name!r}: sparse 2-D Param {walker_name!r} "
+            f"row index must be either the outer index {outer_name!r} "
+            f"or ``<int_param>[{outer_name}]`` for indirect-outer "
+            f"walkers; got {row_idx}."
+        )
+
+    def _collect_sparse_walkers(self) -> Dict[str, Dict[str, np.ndarray]]:
+        """Scan the LoopEqn body for sparse 2-D ``Param``s in
+        ``M[outer_index, dummy]`` positions inside a ``Sum``, and
+        pre-compute the CSR decomposition for each.
+
+        Returns a dict ``{param_name: {'data', 'indices', 'indptr'}}``
+        of contiguous numpy arrays suitable for both Python closure
+        capture (inline path) and numba-compatible module globals
+        (JIT path).
+
+        Enforces the Phase 1 constraints:
+
+        - A sparse 2-D ``Param`` referenced anywhere in the body must
+          be accessed *only* as ``M[outer_index, dummy]`` inside a
+          ``Sum``. Any other access pattern raises
+          ``NotImplementedError`` (we'd need different CSR plumbing to
+          support partial-row / transposed / out-of-Sum accesses).
+        - A single ``Sum`` body may contain at most ONE sparse 2-D
+          ``Param``. Multiple sparse walkers sharing the same
+          skeleton ("Case B") is Phase 2 work. Split into separate
+          ``Sum``s, one per sparse walker.
+        - The ``Sum``'s ``(dummy, lo, hi)`` range must span the full
+          column extent of the walker (``lo == 0`` and
+          ``hi == n_cols - 1``). Partial inner ranges with sparse
+          walkers are not yet supported because the rewritten loop
+          iterates stored non-zeros, not the user's range.
+        """
+        from Solverz.equation.param import ParamBase
+
+        sparse_names = {
+            nm for nm, obj in self.var_map.items()
+            if isinstance(obj, ParamBase)
+            and getattr(obj, 'sparse', False)
+            and obj.dim == 2
+        }
+        if not sparse_names:
+            return {}
+
+        outer_name = self.outer_index.name
+        walkers: Dict[str, Dict[str, np.ndarray]] = {}
+
+        # First pass: collect walker assignments from each Sum body.
+        # A walker access is either
+        #   1. direct:   M[outer_index, dummy]     — row == outer
+        #   2. indirect: M[P[outer_index], dummy]  — row == P[outer]
+        # where P is a 1-D int Param mapping the LoopEqn's outer
+        # position onto a "real" row of M. Case 2 shows up when the
+        # LoopEqn only iterates a subset of buses (e.g. PV+PQ in a
+        # polar power flow) but still needs to walk the full
+        # connectivity of the admittance matrix M.
+        seen_in_sum: Dict[str, Dict] = {}
+        for sum_node in self.body.atoms(sp.Sum):
+            dummy, lo, hi = sum_node.args[1]
+            dummy_name = dummy.name
+            inner = sum_node.args[0]
+
+            sum_sparse_refs: Dict[str, sp.Expr] = {}
+            for idx_node in inner.atoms(sp.Indexed):
+                base = idx_node.base.name
+                if base not in sparse_names:
+                    continue
+                indices = idx_node.indices
+                if len(indices) != 2:
+                    raise NotImplementedError(
+                        f"LoopEqn {self.name!r}: sparse 2-D Param "
+                        f"{base!r} accessed with {len(indices)} "
+                        f"indices — expected exactly 2"
+                    )
+                row_idx = indices[0]
+                col_idx = indices[1]
+                if str(col_idx) != dummy_name:
+                    raise NotImplementedError(
+                        f"LoopEqn {self.name!r}: sparse 2-D Param "
+                        f"{base!r} column index inside the ``Sum`` over "
+                        f"{dummy_name!r} must be the sum dummy itself, "
+                        f"got {col_idx}. Non-walker access to sparse "
+                        f"2-D Params is not yet supported."
+                    )
+                row_expr = self._classify_walker_row(
+                    base, row_idx, outer_name)
+                sum_sparse_refs[base] = row_expr
+
+            if not sum_sparse_refs:
+                continue
+            if len(sum_sparse_refs) > 1:
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: ``Sum`` body contains "
+                    f"{sorted(sum_sparse_refs)} — multiple sparse "
+                    f"2-D Params sharing the same inner skeleton "
+                    f"(\"Case B\") is not yet supported. Split into "
+                    f"separate ``Sum``s, one per sparse walker."
+                )
+            walker_name = next(iter(sum_sparse_refs))
+            row_expr = sum_sparse_refs[walker_name]
+            param_obj = self.var_map[walker_name]
+            n_cols = param_obj.v.shape[1]
+            if int(lo) != 0 or int(hi) != n_cols - 1:
+                raise NotImplementedError(
+                    f"LoopEqn {self.name!r}: ``Sum`` over {dummy_name!r} "
+                    f"with range ({int(lo)}, {int(hi)}) does not span "
+                    f"the full column extent ({n_cols}) of sparse "
+                    f"walker {walker_name!r}. Partial-column sparse "
+                    f"walkers are not yet supported."
+                )
+            seen_in_sum[walker_name] = {
+                'param': param_obj,
+                'row_expr': row_expr,
+            }
+
+        # Second pass: every sparse 2-D Param referenced at all in the
+        # body must appear only through the Sum walker pattern. Catch
+        # bare/outer-Sum accesses here.
+        referenced = set()
+        for idx_node in self.body.atoms(sp.Indexed):
+            if idx_node.base.name in sparse_names:
+                referenced.add(idx_node.base.name)
+        missing = referenced - set(seen_in_sum.keys())
+        if missing:
+            raise NotImplementedError(
+                f"LoopEqn {self.name!r}: sparse 2-D Params "
+                f"{sorted(missing)} are referenced outside a "
+                f"``Sum(..., (dummy, 0, n-1))`` walker, or with a "
+                f"non-matching access pattern. Every sparse 2-D "
+                f"Param must appear only as the walker of a ``Sum`` "
+                f"over its full column range."
+            )
+
+        # Materialise CSR arrays.
+        for walker_name, info in seen_in_sum.items():
+            param_obj = info['param']
+            csc = param_obj.v
+            if not hasattr(csc, 'tocsr'):
+                raise TypeError(
+                    f"LoopEqn {self.name!r}: sparse 2-D Param "
+                    f"{walker_name!r} has sparse=True but .v is not a "
+                    f"scipy sparse object (type={type(csc).__name__})"
+                )
+            csr = csc.tocsr()
+            walkers[walker_name] = {
+                'data': np.ascontiguousarray(csr.data, dtype=float),
+                'indices': np.ascontiguousarray(csr.indices, dtype=np.int64),
+                'indptr': np.ascontiguousarray(csr.indptr, dtype=np.int64),
+                'row_expr': info['row_expr'],
+            }
+        return walkers
+
+    def _build_num_eqn(self) -> Callable:
+        """Generate a Python callable that evaluates the LoopEqn body.
+
+        The callable accepts the Var/Param values as positional
+        arguments in lex-sorted SYMBOLS order (matching what
+        ``Eqn.NUM_EQN`` would expect from ``sympy.lambdify``) and
+        returns a 1D numpy array of length ``self.n_outer``.
+
+        Shares the same translator as :meth:`print_njit_source` (the
+        explicit-accumulator prelude approach), so sparse CSR walking
+        kicks in automatically when the body references a sparse 2-D
+        ``Param`` in an inner-``Sum`` ``[outer, dummy]`` position. The
+        inline path makes the per-walker CSR arrays available as the
+        generated function's module-level globals via the ``exec``
+        namespace — no explicit args needed.
+        """
+        arg_names = sorted(self.SYMBOLS.keys())
+        outer_idx_name = self.outer_index.name
+
+        state = {
+            'acc_counter': 0,
+            'prelude': [],
+            'var_map': self.var_map,
+            'outer_name': outer_idx_name,
+            'sparse_walker_ctx': None,
+        }
+        body_expr = _translate_loop_body_njit(self.body, state)
+
+        indent = '    '
+        inner_indent = indent * 2
+        lines = [
+            f"def _loop_eqn_func({', '.join(arg_names)}):",
+            f"{indent}out = np.empty({self.n_outer})",
+            f"{indent}for {outer_idx_name} in range({self.n_outer}):",
+        ]
+        for stmt in state['prelude']:
+            lines.append(f"{inner_indent}{stmt}")
+        lines.append(f"{inner_indent}out[{outer_idx_name}] = {body_expr}")
+        lines.append(f"{indent}return out")
+        source = '\n'.join(lines) + '\n'
+
+        # ``SolCF`` is the Solverz custom-function namespace
+        # (``Solverz.num_api.custom_function``) used by Solverz's
+        # ``_numpycode`` methods for non-numpy primitives, e.g.
+        # ``SolCF.Heaviside`` — the numba-friendly heaviside helper.
+        # The inline path here must expose it by the same name so a
+        # LoopEqn body that references ``heaviside(...)`` resolves
+        # at eval time.
+        #
+        # Downstream num_api plugins registered via the
+        # ``solverz.num_api`` entry-point group (e.g. SolMuseum
+        # publishing ``SolMF``) are also injected so LoopEqn bodies
+        # can reference ``SolPde`` subclasses like
+        # ``SolMF.pde.kt1_ode`` via the SolPde ``_numpycode``
+        # fallback in ``_translate_loop_body_njit``. Identical
+        # discovery path as ``Solverz/num_api/module_parser.py``.
+        from Solverz.num_api import custom_function as _SolCF
+        ns: Dict[str, object] = {'np': np, 'SolCF': _SolCF}
+        try:
+            from importlib.metadata import entry_points as _entry_points
+            for _ep in _entry_points(group='solverz.num_api'):
+                try:
+                    ns[_ep.name] = _ep.load()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Inject pre-computed CSR arrays as module-level globals so the
+        # generated ``for _sz_kk ... in range(_sz_csr_<M>_indptr[i], ...)``
+        # loop resolves them at call time. No need to plumb them through
+        # the function signature — the generated body looks them up via
+        # the exec namespace's ``__globals__``.
+        for walker_name, csr in self._sparse_csr.items():
+            ns[f'_sz_csr_{walker_name}_data'] = csr['data']
+            ns[f'_sz_csr_{walker_name}_indices'] = csr['indices']
+            ns[f'_sz_csr_{walker_name}_indptr'] = csr['indptr']
+        exec(source, ns)
+        func = ns['_loop_eqn_func']
+        # Stash the source for debugging
+        func._loopeqn_source = source  # type: ignore[attr-defined]
+        return func
+
+    def njit_arg_names(self) -> List[str]:
+        """Lex-sorted Var/Param names this LoopEqn's ``inner_F<N>``
+        actually receives as arguments in the JIT module path.
+
+        Sparse 2-D ``Param``s used as CSR walkers are EXCLUDED — their
+        CSR arrays (``_sz_csr_<M>_data`` / ``_sz_csr_<M>_indices`` /
+        ``_sz_csr_<M>_indptr``) are injected as module-level constants
+        via ``mut_mat_mappings`` at render time, and the generated
+        body references them by those fixed names rather than
+        receiving them through the call signature.
+
+        This matters because scipy ``csc_array`` objects are not
+        understood by Numba — the wrapper ``F_`` would have to
+        decompose each sparse Param anyway, and we prefer to bind the
+        CSR view once at module load time rather than re-unpack on
+        every Newton call.
+        """
+        return [nm for nm in sorted(self.SYMBOLS.keys())
+                if nm not in self._sparse_csr]
+
+    def print_njit_source(self, func_name: str) -> str:
+        """Return Numba-compatible Python source for an ``inner_F<N>``
+        sub-function that evaluates this LoopEqn.
+
+        Used by the module printer (``module_printer(jit=True)`` path).
+        Numba's ``@njit`` does not support generator expressions, so
+        each ``sympy.Sum`` in the body is hoisted into an explicit
+        accumulator variable that is initialised inside the outer loop
+        and incremented by an explicit inner ``for`` loop.
+
+        The generated function takes this LoopEqn's
+        :meth:`njit_arg_names` (sparse 2-D Params excluded — see that
+        method's docstring) and returns a 1-D ndarray of length
+        ``n_outer``. The call site in ``print_eqn_assignment`` matches
+        this arg list exactly.
+
+        Sparse walker support
+        ---------------------
+        When ``self._sparse_csr`` is non-empty, the translator emits
+        ``_sz_csr_<M>_data``/``_indices``/``_indptr`` references that
+        the module printer must make available at module level (via
+        ``mut_mat_mappings`` in :mod:`module_generator`). Those
+        references resolve to pre-computed CSR arrays of the
+        ``Param``'s CSC value, loaded once at module import time.
+
+        Raises ``NotImplementedError`` for nested ``Sum``s — the inner
+        Sum's accumulator would need to reset on each iteration of the
+        outer Sum's dummy, which the linear prelude approach does not
+        express. SolMuseum's network modules don't (currently) need
+        nested Sums; if a real use case appears, the right answer is
+        to emit explicit nested ``for`` loops.
+        """
+        arg_names = self.njit_arg_names()
+        outer_name = self.outer_index.name
+        n_outer = self.n_outer
+
+        state = {
+            'acc_counter': 0,
+            'prelude': [],
+            'var_map': self.var_map,
+            'outer_name': outer_name,
+            'sparse_walker_ctx': None,
+        }
+        body_expr = _translate_loop_body_njit(self.body, state)
+
+        indent = '    '
+        inner_indent = indent * 2
+        lines = [
+            f"def {func_name}({', '.join(arg_names)}):",
+            f"{indent}out = np.empty({n_outer})",
+            f"{indent}for {outer_name} in range({n_outer}):",
+        ]
+        for stmt in state['prelude']:
+            lines.append(f"{inner_indent}{stmt}")
+        lines.append(f"{inner_indent}out[{outer_name}] = {body_expr}")
+        lines.append(f"{indent}return out")
+        return '\n'.join(lines) + '\n'
+
+    def derive_derivative(self):
+        """Compute per-Var Jacobian blocks symbolically via the
+        Phase J1 canonicalize → classify pipeline.
+
+        For each ``var_map`` entry that is a Solverz :class:`Var`
+        (Params are skipped — they're constants from the model's POV),
+        we differentiate the body w.r.t. ``IndexedBase[k]`` for a fresh
+        index ``k``. The raw sympy result is then:
+
+        1. **Canonicalized** (:func:`canonicalize_kronecker`): Sum
+           linearity + manual ``KroneckerDelta`` collapse, **never**
+           calling ``Sum.doit()``. Collapsing is needed because the
+           raw diff result is a ``Sum`` with a ``KroneckerDelta``
+           factor inside, and ``.doit()`` fails in two ways:
+           - for ``δ(k, j)`` with ``j`` the sum dummy, it does the
+             right thing (collapse), but
+           - for ``δ(k, i)`` with ``i`` the *outer* index (not the
+             dummy), it unrolls the bounded Sum into ``n`` explicit
+             terms, destroying the template form we want to preserve.
+           The canonicalizer splits summand-by-summand and handles
+           both cases correctly.
+        2. **Classified** (:func:`loop_jac_to_solverz_expr`):
+           translate the canonical form back to a Solverz expression
+           that the standard ``JacBlock`` path understands. Phase J1
+           recognises only constant shapes:
+
+           - ``KroneckerDelta(outer, k)`` → ``_LoopJacEye(n_outer)``
+             (identity block, e.g. ``∂(ix[i])/∂ix[k]``).
+           - ``Indexed(Param, outer, k)`` or ``Indexed(Param, k, outer)``
+             for a 2-D ``Param`` → ``Para(name, dim=2)``.
+           - ``Add`` / ``Mul`` of the above — ``V_in - V_out``,
+             ``-G``, ``-V_in + V_out``, …
+
+           Anything else raises ``NotImplementedError`` and is
+           reserved for Phase J2 (``DiagTerm`` / ``RowScaleTerm`` /
+           ``ColScaleTerm`` / ``BilinearEntry``).
+        """
+        from Solverz.variable.ssymbol import Var
+        from Solverz.equation.loop_jac import (
+            canonicalize_kronecker,
+            loop_jac_to_solverz_expr,
+        )
+
+        # Fresh derivative index. Use a name unlikely to collide with
+        # any Idx the user put in their body.
+        k = sp.Idx('_sz_loop_dk')
+
+        for indexed_base_name, sol_obj in self.var_map.items():
+            if not isinstance(sol_obj, Var):
+                continue  # skip Params
+
+            var_iVar = sol_obj.symbol
+            target_base = sp.IndexedBase(indexed_base_name)
+            target_slot = target_base[k]
+
+            # Raw sympy diff — deliberately NO ``.doit()``.
+            raw_deriv = sp.diff(self.body, target_slot)
+            if is_zero(raw_deriv):
+                continue
+
+            canonical = canonicalize_kronecker(
+                raw_deriv, self.outer_index, k
+            )
+            if is_zero(canonical):
+                continue
+
+            n_diff = sol_obj.value.shape[0]
+            try:
+                sz_expr = loop_jac_to_solverz_expr(
+                    canonical, self.outer_index, k,
+                    self.n_outer, self.var_map,
+                    n_diff=n_diff,
+                )
+            except NotImplementedError:
+                # Phase J3 fallback: the Phase J1/J2 classifier
+                # couldn't express this block as a pure Solverz
+                # Diag / Mat_Mul / Para combination. Fall back to
+                # a dense LoopEqnDiff that evaluates the canonical
+                # expression element-by-element via a generated
+                # double for-loop kernel. Covers bilinear / trig
+                # patterns like polar PF.
+                #
+                ed = LoopEqnDiff(
+                    name=f'Diff {self.name} w.r.t. {var_iVar.name}',
+                    diff_var=var_iVar,
+                    canonical=canonical,
+                    outer_idx=self.outer_index,
+                    diff_idx=k,
+                    n_outer=self.n_outer,
+                    n_diff=n_diff,
+                    var_map=self.var_map,
+                )
+                self.derivatives[var_iVar.name] = ed
+                continue
+
+            ed = EqnDiff(
+                name=f'Diff {self.name} w.r.t. {var_iVar.name}',
+                eqn=sz_expr,
+                diff_var=var_iVar,
+            )
+            self.derivatives[var_iVar.name] = ed
+
+
+class _LoopJacBlockScatter(Function):
+    """Sympy ``Function`` node whose ``_numpycode`` emits fancy
+    indexing into a LoopEqn kernel's dense block result:
+
+        ``<block_var>[<row_sym>, <col_sym>]``
+
+    Used by the JIT module printer's ``print_J`` wrapper — the
+    kernel runs first and stores its ``(n_outer, n_diff)`` result
+    in a local variable, then this scatter node emits the
+    fancy-index Assignment that writes the ``(row_arr, col_arr)``
+    positions of the dense result into ``_data_[addr_slice]``.
+
+    We can't use ``sympy.Indexed`` for this because sympy's
+    ``Assignment._check_args`` tries to infer the shape of
+    ``Indexed`` RHSs by reading the index range bounds — and our
+    row/col ``Symbol``s are plain unbounded symbols pointing at
+    module-level constant arrays, so the shape lookup raises.
+    A custom ``Function`` with a direct ``_numpycode`` bypasses
+    the shape inference entirely.
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        return None
+
+    def _numpycode(self, printer, **kwargs):
+        block_var = printer._print(self.args[0])
+        row = printer._print(self.args[1])
+        col = printer._print(self.args[2])
+        return f'{block_var}[{row}, {col}]'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class _LoopJacBlockCall(Function):
+    """Sympy ``Function`` node that lambdifies to a call into a
+    pre-registered LoopEqn Jacobian block kernel.
+
+    First argument is a ``Symbol`` whose name matches the kernel
+    function's sanitized identifier (registered in the inline
+    ``made_numerical`` custom_func dict, or emitted as a top-level
+    ``def`` in the JIT module). Remaining arguments are the Solverz
+    ``iVar``/``Para`` symbols the kernel consumes, in the order the
+    kernel's ``def`` line expects. Sympy's printer uses the
+    ``_numpycode`` method below to emit a plain Python function
+    call string — at runtime the call resolves via the lambdify
+    namespace (or module-level import in the JIT path).
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        # Don't auto-simplify; keep the application intact so the
+        # printer can intercept it.
+        return None
+
+    def _numpycode(self, printer, **kwargs):
+        kernel_name = str(self.args[0])
+        call_args = [printer._print(a) for a in self.args[1:]]
+        return f'{kernel_name}({", ".join(call_args)})'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class _LoopJacEye(Function):
+    """Sympy ``Function`` node that prints to ``np.eye(n)``.
+
+    Emitted by :func:`Solverz.equation.loop_jac.loop_jac_to_solverz_expr`
+    whenever a LoopEqn derivative simplifies to
+    ``KroneckerDelta(outer_index, k)``, which happens when a ``Var``
+    appears as an outer-indexed term in the body (e.g.
+    ``ix[i] - sum_j (G[i, j] * ux[j])`` from the SolMuseum
+    ``eps_network.mdl(dyn=True)`` rectangular current balance — the
+    block ``∂F[i]/∂ix[k] = δ_{i,k}`` is the identity matrix).
+
+    Has no free symbols, so the standard ``Eqn.lambdify`` /
+    ``Eqn.NUM_EQN`` machinery wraps it as ``lambda: np.eye(n)``.
+    ``JacBlock``'s ``is_constant_matrix_deri`` check classifies it as
+    a constant-matrix block (zero free symbols), so ``inner_J``
+    reduces to ``return _data_`` with the identity baked in at
+    module-build time.
+    """
+
+    @classmethod
+    def eval(cls, n):
+        # Don't auto-simplify; we want a Function application that the
+        # printer can intercept.
+        return None
+
+    def _numpycode(self, printer, **kwargs):
+        n_arg = self.args[0]
+        return f'np.eye({printer._print(n_arg)})'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+class _LoopJacSelectMat(Function):
+    """Sympy ``Function`` node that prints to a sparse selection matrix.
+
+    Emitted by :func:`Solverz.equation.loop_jac.loop_jac_to_solverz_expr`
+    whenever a LoopEqn derivative produces
+    ``KroneckerDelta(diff_idx, map_param[outer_idx])`` — an indirect
+    diagonal (a.k.a. selection / permutation operator).  Row *i* of
+    the ``(n_outer, n_diff)`` matrix has a single 1 at column
+    ``col_map[i]``.
+
+    Arguments: ``_LoopJacSelectMat(col_map_tuple, n_outer, n_diff)``
+    where *col_map_tuple* is a sympy ``Tuple`` of integer column
+    indices.
+
+    Has no free symbols → classified as constant by
+    ``is_constant_matrix_deri`` → baked into ``_data_`` at module-
+    build time, zero per-iteration cost.
+    """
+
+    @classmethod
+    def eval(cls, col_map_tuple, n_outer, n_diff):
+        return None
+
+    def _numpycode(self, printer, **kwargs):
+        col_map, n_outer, n_diff = self.args
+        cols = list(col_map.args)
+        n_o = int(n_outer)
+        n_d = int(n_diff)
+        # Emit inline code that builds a csc_array.
+        # COO format: (data, (row, col)) where row[i]=i, col[i]=col_map[i].
+        return (
+            f'__import__("scipy.sparse", fromlist=["csc_array"])'
+            f'.csc_array('
+            f'(__import__("numpy").ones({n_o}, dtype=__import__("numpy").float64), '
+            f'(__import__("numpy").arange({n_o}, dtype=__import__("numpy").int64), '
+            f'__import__("numpy").array({[int(c) for c in cols]}, dtype=__import__("numpy").int64))), '
+            f'shape=({n_o}, {n_d}))'
+        )
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+    def _lambdacode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+def _translate_loop_body(expr) -> str:
+    """Recursively translate a sympy expression to a Python expression
+    string. Supports the subset needed for ``LoopEqn`` bodies:
+
+    - ``sympy.Add``, ``sympy.Mul``, ``sympy.Pow`` — arithmetic
+    - ``sympy.Sum(body, (j, lo, hi))`` — rewritten as
+      ``sum((body) for j in range(lo, hi+1))``
+    - ``sympy.Indexed(IndexedBase('G'), i, j)`` — left as ``G[i, j]``
+      (the IndexedBase name resolves to a numpy-array argument at
+      eval time)
+    - ``sympy.Idx`` / ``sympy.Symbol`` — emit as the bare name
+    - ``sympy.Integer`` / ``sympy.Float`` / ``sympy.Number`` — emit as
+      the literal value
+
+    Everything else raises ``NotImplementedError`` — the test driver
+    catches this and surfaces the unsupported node type so we can
+    extend the translator.
+    """
+    if isinstance(expr, sp.Sum):
+        if len(expr.args) < 2 or len(expr.args[1]) != 3:
+            raise NotImplementedError(
+                f"LoopEqn body translator only supports single-index "
+                f"Sum with explicit (dummy, lo, hi); got {expr}"
+            )
+        inner_body = expr.args[0]
+        dummy, lo, hi = expr.args[1]
+        body_code = _translate_loop_body(inner_body)
+        return (
+            f"sum(({body_code}) "
+            f"for {dummy.name} in range({int(lo)}, {int(hi) + 1}))"
+        )
+    if isinstance(expr, sp.Add):
+        parts = [_translate_loop_body(a) for a in expr.args]
+        return "(" + " + ".join(parts) + ")"
+    if isinstance(expr, sp.Mul):
+        parts = [_translate_loop_body(a) for a in expr.args]
+        return "(" + " * ".join(parts) + ")"
+    if isinstance(expr, sp.Pow):
+        base = _translate_loop_body(expr.args[0])
+        exp = _translate_loop_body(expr.args[1])
+        return f"({base} ** {exp})"
+    if isinstance(expr, sp.Indexed):
+        base_name = expr.base.name
+        index_strs = [_translate_loop_body(idx) for idx in expr.indices]
+        return f"{base_name}[{', '.join(index_strs)}]"
+    if isinstance(expr, sp.Idx):
+        return expr.name
+    if isinstance(expr, sp.Symbol):
+        return expr.name
+    if isinstance(expr, sp.Integer):
+        # Integer literals must stay int in the generated Python
+        # source — numpy 2.x rejects float scalars as array
+        # indices, and ``Cp[0]`` / ``indices[_sz_kk]`` show up in
+        # both the body (scalar Param element access) and the
+        # sparse-walker inner loop.
+        return str(int(expr))
+    if isinstance(expr, (sp.Float, sp.Rational)):
+        return str(float(expr))
+    if isinstance(expr, int):
+        return str(expr)
+    if isinstance(expr, float):
+        return str(expr)
+    raise NotImplementedError(
+        f"LoopEqn body translator does not yet handle "
+        f"{type(expr).__name__}: {expr!r}"
+    )
+
+
+def _find_sum_sparse_walker(sum_node, var_map, outer_name):
+    """Return ``(walker_name, walker_param, row_expr)`` if the ``Sum``
+    body has exactly one sparse 2-D ``Param`` whose column index is
+    the sum dummy and whose row index is either the outer index or
+    ``P[outer]`` for some 1-D int ``Param`` ``P``; ``None`` otherwise.
+
+    Mirrors the logic in :meth:`LoopEqn._collect_sparse_walkers` but
+    operates on a single ``Sum`` node for the per-Sum per-call check
+    the translator needs. The stricter invariants (no non-walker
+    sparse access anywhere in the body, full-column range, 1-D int
+    Param for indirect row map) are enforced at ``LoopEqn.__init__``
+    time, so this helper can trust that any sparse Param it finds is
+    already a valid walker and just needs to recover the ``row_expr``
+    so the translator can emit the right CSR row lookup.
+    """
+    from Solverz.equation.param import ParamBase
+
+    dummy, _lo, _hi = sum_node.args[1]
+    dummy_name = dummy.name
+    inner = sum_node.args[0]
+    found = None
+    for idx_node in inner.atoms(sp.Indexed):
+        base = idx_node.base.name
+        obj = var_map.get(base)
+        if not isinstance(obj, ParamBase):
+            continue
+        if not (getattr(obj, 'sparse', False) and obj.dim == 2):
+            continue
+        indices = idx_node.indices
+        if len(indices) != 2 or str(indices[1]) != dummy_name:
+            continue
+        row_idx = indices[0]
+        # Direct outer: row is the outer index itself.
+        if isinstance(row_idx, sp.Idx) and str(row_idx) == outer_name:
+            row_expr = row_idx
+        elif (isinstance(row_idx, sp.Indexed)
+              and len(row_idx.indices) == 1
+              and isinstance(row_idx.indices[0], sp.Idx)
+              and str(row_idx.indices[0]) == outer_name):
+            # Indirect outer: row = <map_param>[outer]. Validation
+            # that map_param is a 1-D int Param already happened in
+            # _collect_sparse_walkers.
+            row_expr = row_idx
+        else:
+            continue
+        if found is None:
+            found = (base, obj, row_expr)
+        elif found[0] != base:
+            return None
+    return found
+
+
+def _translate_loop_body_njit(expr, state) -> str:
+    """Numba-compatible body translator shared by the inline
+    ``_build_num_eqn`` path and the JIT ``print_njit_source`` path.
+
+    Numba's ``@njit`` does not accept generator expressions, and the
+    inline path also benefits from the same explicit-accumulator shape
+    (consistent code, single translator to maintain). Each ``sympy.Sum``
+    in the body is hoisted into an explicit accumulator variable that is
+    initialised inside the outer loop and incremented by an explicit
+    inner ``for`` loop; the for-loop statements are appended to
+    ``state['prelude']`` and the accumulator's name is returned in place
+    of the ``Sum`` expression.
+
+    Parameters
+    ----------
+    expr : sympy.Expr
+        Sub-expression to translate.
+    state : dict
+        Mutable walker state. Must contain:
+
+        - ``acc_counter`` (int — increments per ``Sum`` encountered)
+        - ``prelude`` (list[str] — accumulator + for-loop statements)
+        - ``var_map`` (dict — IndexedBase-name → Var/Param, for sparse
+          walker detection)
+        - ``outer_name`` (str — the LoopEqn outer index name, used to
+          recognise the walker access pattern ``M[outer, dummy]``)
+        - ``sparse_walker_ctx`` (None or dict with ``base_name`` and
+          ``kk_var``; when set, any ``Indexed`` node whose base matches
+          ``base_name`` is rewritten to ``_sz_csr_<base>_data[kk_var]``)
+
+    Sparse walker rewrite
+    ---------------------
+    When a ``Sum``'s body contains a sparse 2-D ``Param`` accessed as
+    ``M[outer, dummy]``, the Sum is rewritten from::
+
+        _sz_loop_acc_N = 0.0
+        for j in range(0, n_cols):
+            _sz_loop_acc_N += <body with M[i, j], ux[j], ...>
+
+    to::
+
+        _sz_loop_acc_N = 0.0
+        for _sz_kk_N in range(_sz_csr_M_indptr[i], _sz_csr_M_indptr[i + 1]):
+            j = _sz_csr_M_indices[_sz_kk_N]
+            _sz_loop_acc_N += <body with M[i,j] → _sz_csr_M_data[_sz_kk_N],
+                              ux[j] → ux[j] (j is still in scope)>
+
+    i.e. the outer loop iterates CSR row ``i`` directly, visiting only
+    stored non-zeros of ``M``. Co-dummy-accesses like ``ux[j]`` stay
+    literal because ``j`` is still a live variable bound to the current
+    column index.
+
+    Notes
+    -----
+    Nested ``Sum``s (Sum inside the body of another Sum) are rejected:
+    the inner Sum's accumulator would need to reset on each iteration
+    of the outer Sum's dummy, which the linear ``prelude`` approach
+    does not capture. SolMuseum's network modules don't currently use
+    nested Sums; if a real use case appears, the right answer is to
+    emit a properly nested for-loop block instead of the flat prelude.
+    """
+    if isinstance(expr, sp.Sum):
+        if len(expr.args) < 2 or len(expr.args[1]) != 3:
+            raise NotImplementedError(
+                f"LoopEqn njit body translator only supports single-"
+                f"index Sum with explicit (dummy, lo, hi); got {expr}"
+            )
+        inner_body = expr.args[0]
+        if inner_body.has(sp.Sum):
+            raise NotImplementedError(
+                f"LoopEqn njit body translator: nested Sum (Sum "
+                f"inside the body of another Sum) is not yet "
+                f"supported; got {expr}"
+            )
+        dummy, lo, hi = expr.args[1]
+
+        # Detect sparse walker for this Sum.
+        walker = _find_sum_sparse_walker(expr, state['var_map'],
+                                         state['outer_name'])
+
+        acc_idx = state['acc_counter']
+        state['acc_counter'] += 1
+        acc_name = f"_sz_loop_acc_{acc_idx}"
+
+        if walker is None:
+            # Dense path — identical to the original behaviour.
+            inner_expr_code = _translate_loop_body_njit(inner_body, state)
+            state['prelude'].append(f"{acc_name} = 0.0")
+            state['prelude'].append(
+                f"for {dummy.name} in range({int(lo)}, {int(hi) + 1}):"
+            )
+            state['prelude'].append(f"    {acc_name} += {inner_expr_code}")
+            return acc_name
+
+        # Sparse-walker path.
+        walker_name, _walker_param, row_expr = walker
+        kk_name = f"_sz_kk_{acc_idx}"
+        row_name = f"_sz_row_{acc_idx}"
+
+        # Push the sparse walker context so inner ``M[row_expr, dummy]``
+        # references rewrite to ``_sz_csr_<M>_data[kk]``. Restore on
+        # exit even though there's no chance of exception here — the
+        # next sibling Sum must see a clean context.
+        prev_ctx = state['sparse_walker_ctx']
+        state['sparse_walker_ctx'] = {
+            'base_name': walker_name,
+            'kk_var': kk_name,
+        }
+        try:
+            inner_expr_code = _translate_loop_body_njit(inner_body, state)
+        finally:
+            state['sparse_walker_ctx'] = prev_ctx
+
+        # Decide whether the CSR row is the outer index directly
+        # (``row_expr`` is a bare ``sp.Idx`` matching the outer loop
+        # variable) or an indirect lookup via a 1-D int ``Param``
+        # (``row_expr`` is an ``Indexed`` ``map_param[outer_idx]``).
+        # In the indirect case we materialise the row to a local
+        # variable once and then reuse it for both ``indptr`` bounds
+        # — numba's type inference keeps this as an int64 scalar.
+        if isinstance(row_expr, sp.Idx):
+            row_code = row_expr.name
+            state['prelude'].append(f"{acc_name} = 0.0")
+        else:
+            row_code = row_name
+            map_name = row_expr.base.name
+            state['prelude'].append(
+                f"{row_name} = {map_name}[{state['outer_name']}]"
+            )
+            state['prelude'].append(f"{acc_name} = 0.0")
+        state['prelude'].append(
+            f"for {kk_name} in range("
+            f"_sz_csr_{walker_name}_indptr[{row_code}], "
+            f"_sz_csr_{walker_name}_indptr[{row_code} + 1]"
+            f"):"
+        )
+        state['prelude'].append(
+            f"    {dummy.name} = _sz_csr_{walker_name}_indices[{kk_name}]"
+        )
+        state['prelude'].append(f"    {acc_name} += {inner_expr_code}")
+        return acc_name
+
+    if isinstance(expr, sp.Add):
+        parts = [_translate_loop_body_njit(a, state) for a in expr.args]
+        return "(" + " + ".join(parts) + ")"
+    if isinstance(expr, sp.Mul):
+        delta_factors = []
+        other_factors = []
+        for a in expr.args:
+            if isinstance(a, KroneckerDelta):
+                delta_factors.append(a)
+            else:
+                other_factors.append(a)
+        if delta_factors and other_factors:
+            other_parts = [_translate_loop_body_njit(a, state)
+                           for a in other_factors]
+            other_code = " * ".join(other_parts)
+            conds = []
+            for d in delta_factors:
+                ac = _translate_loop_body_njit(d.args[0], state)
+                bc = _translate_loop_body_njit(d.args[1], state)
+                conds.append(f"{ac} == {bc}")
+            cond_code = " and ".join(conds)
+            return f"(({other_code}) if {cond_code} else 0.0)"
+        parts = [_translate_loop_body_njit(a, state) for a in expr.args]
+        return "(" + " * ".join(parts) + ")"
+    if isinstance(expr, sp.Pow):
+        base = _translate_loop_body_njit(expr.args[0], state)
+        exp = _translate_loop_body_njit(expr.args[1], state)
+        return f"({base} ** {exp})"
+    if isinstance(expr, KroneckerDelta):
+        # ``KroneckerDelta(a, b)`` appears in J-side canonical
+        # expressions when the delta's second argument is NOT the
+        # sum dummy (e.g. ``δ(i, k)`` where ``i`` is the outer index
+        # and ``k`` is the diff index). Emit a Python conditional —
+        # valid both for pure Python (inline path) and ``@njit``
+        # (module path). For J-side kernels both operand names are
+        # loop variables in scope (``outer_name`` and the diff
+        # index name), so the comparison resolves at runtime.
+        #
+        # Integer (``1`` / ``0``) instead of float (``1.0`` /
+        # ``0.0``) so callers can build *integer-valued* index
+        # expressions like ``Tsp_all[off + k - 1 + 2 *
+        # KroneckerDelta(k, 0)]`` to clamp out-of-range stencil
+        # accesses at boundary cells without introducing a float
+        # index that numpy refuses. Downstream arithmetic with the
+        # float bodies of ``sp.Sum`` / ``sp.Mul`` still promotes to
+        # float as needed via Python's own int→float coercion.
+        a_code = _translate_loop_body_njit(expr.args[0], state)
+        b_code = _translate_loop_body_njit(expr.args[1], state)
+        return f"(1 if {a_code} == {b_code} else 0)"
+    if isinstance(expr, sp.Indexed):
+        base_name = expr.base.name
+        ctx = state.get('sparse_walker_ctx')
+        if ctx is not None and base_name == ctx['base_name']:
+            # Rewrite sparse walker access to a CSR data load. Index
+            # correctness (must be [outer, dummy]) is guaranteed by
+            # ``_collect_sparse_walkers`` at __init__ time.
+            return f"_sz_csr_{base_name}_data[{ctx['kk_var']}]"
+        # Point access to a sparse 2-D Param *outside* any walker.
+        # Common when the canonical Jacobian collapses a ``δ(j, k)``
+        # inside ``Sum(..., j)`` into the point ``M[row, k]``. Numba
+        # cannot type ``csc_array`` function arguments, so rewrite
+        # this to a module-level ``@njit`` scalar-lookup helper and
+        # record the walker name so the caller (LoopEqnDiff.__init__
+        # or the module_printer) emits the helper definition.
+        var_map = state.get('var_map')
+        if (var_map is not None and len(expr.indices) == 2):
+            from Solverz.equation.param import ParamBase
+            sol_obj = var_map.get(base_name)
+            if (isinstance(sol_obj, ParamBase)
+                    and getattr(sol_obj, 'sparse', False)
+                    and sol_obj.dim == 2):
+                row_code = _translate_loop_body_njit(
+                    expr.indices[0], state)
+                col_code = _translate_loop_body_njit(
+                    expr.indices[1], state)
+                state.setdefault('sparse_point_helpers', set()).add(
+                    base_name)
+                return (f"_sz_csr_{base_name}_point("
+                        f"{row_code}, {col_code})")
+        index_strs = [_translate_loop_body_njit(idx, state)
+                      for idx in expr.indices]
+        return f"{base_name}[{', '.join(index_strs)}]"
+    if isinstance(expr, sp.Idx):
+        return expr.name
+    if isinstance(expr, sp.Symbol):
+        return expr.name
+    if isinstance(expr, sp.Integer):
+        # Integer literals must stay int in the generated Python
+        # source — numpy 2.x rejects float scalars as array
+        # indices, and ``Cp[0]`` / ``indices[_sz_kk]`` show up in
+        # both the body (scalar Param element access) and the
+        # sparse-walker inner loop.
+        return str(int(expr))
+    if isinstance(expr, (sp.Float, sp.Rational)):
+        return str(float(expr))
+    if isinstance(expr, int):
+        return str(expr)
+    if isinstance(expr, float):
+        return str(expr)
+    # Sympy / Solverz function nodes — trig, exp / log, abs, sign,
+    # heaviside, arctan2, etc. Matches the numpy backends Solverz's
+    # own ``_numpycode`` methods emit (see
+    # ``Solverz/sym_algebra/functions.py``), so the LoopEqn-generated
+    # code uses the same symbols numba already imports at module level.
+    if isinstance(expr, sp.Function):
+        fname = expr.func.__name__
+        mapped = _FUNCTION_NUMPY_MAP.get(fname)
+        if mapped is not None:
+            args_code = [_translate_loop_body_njit(a, state)
+                         for a in expr.args]
+            return f"{mapped}({', '.join(args_code)})"
+        # Fallback for Solverz / SolMuseum function nodes that carry
+        # their own ``_numpycode`` method (e.g. ``SolPde`` subclasses
+        # like ``kt1_ode``, ``kt2_ode``, ``minmod``, ``switch_minmod``
+        # from SolMuseum — every instance emits
+        # ``SolMF.pde.<classname>(<args>)``). Delegate to that method
+        # via a minimal printer whose ``_print`` just recurses back
+        # into this body translator so each argument is rewritten
+        # with the current ``state`` (Indexed ``[outer, inner]``
+        # walker context, ``_sz_loop_dk`` diff index handling, etc.).
+        if hasattr(expr, '_numpycode'):
+            class _MinimalPrinter:
+                def _print(self, arg, **_kwargs):
+                    return _translate_loop_body_njit(arg, state)
+
+            try:
+                return expr._numpycode(_MinimalPrinter())
+            except Exception:
+                pass
+    raise NotImplementedError(
+        f"LoopEqn njit body translator does not yet handle "
+        f"{type(expr).__name__}: {expr!r}"
+    )
+
+
+# Map sympy / Solverz ``Function`` node ``.func.__name__`` → the
+# numpy (or ``SolCF``) call the LoopEqn translator emits. Names are
+# chosen to match what Solverz's existing ``_numpycode`` methods in
+# ``Solverz/sym_algebra/functions.py`` already emit so generated
+# modules / the inline exec namespace both have the callable in scope.
+_FUNCTION_NUMPY_MAP = {
+    # sympy standard
+    'sin': 'np.sin',
+    'cos': 'np.cos',
+    'tan': 'np.tan',
+    'asin': 'np.arcsin',
+    'acos': 'np.arccos',
+    'atan': 'np.arctan',
+    'exp': 'np.exp',
+    'log': 'np.log',
+    'sqrt': 'np.sqrt',
+    # sympy Abs; Solverz re-exports under the same class name.
+    'Abs': 'np.abs',
+    # Solverz-specific names (``Solverz.sym_algebra.functions``).
+    'ln': 'np.log',
+    'Sign': 'np.sign',
+    'atan2': 'np.arctan2',
+    # Heaviside needs Solverz's numba-friendly custom helper, not
+    # ``np.heaviside`` (which takes an explicit second argument).
+    'heaviside': 'SolCF.Heaviside',
+    'Heaviside': 'SolCF.Heaviside',
+}
+
+
 class Ode(Eqn):
     r"""
     The class for ODE reading
@@ -147,6 +2215,89 @@ class Ode(Eqn):
                  f,
                  diff_var: Union[iVar, IdxVar, Var]):
         super().__init__(name, f)
+        diff_var = sSym2Sym(diff_var)
+        self.diff_var = diff_var
+        self.LHS = Derivative(diff_var, t)
+
+
+class LoopOde(LoopEqn, Ode):
+    r"""
+    A LoopEqn whose residual is the time derivative of a contiguous
+    state-Var slice, i.e. an Ode with a scalar-template body.
+
+    .. math::
+
+         \frac{\mathrm{d}y[i]}{\mathrm{d}t} = f(i,\, y,\, \text{params})
+         \quad\text{for}\ i = 0, \ldots, n_{\text{outer}} - 1
+
+    where ``y`` (``diff_var``) is a length-``n_outer`` Var slice and
+    the body ``f`` is a scalar sympy expression parameterised by the
+    LoopEqn ``outer_index``.
+
+    Compared to :class:`LoopEqn`, ``LoopOde``:
+
+    1. Overrides ``LHS`` to ``sp.Derivative(diff_var, t)`` so the
+       rest of Solverz's DAE assembly (``eqn_dict`` partitioning
+       into ``f_list`` vs ``g_list``, mass-matrix construction,
+       ``eval_lhs``) sees it as an ``Ode`` and routes it to the
+       differential-equation side of the state vector.
+    2. Participates in the ``LoopEqn`` module-printer dispatch via
+       the existing ``isinstance(eqn, LoopEqn)`` branch, so it
+       emits exactly ONE ``inner_F<N>`` sub-function with a
+       Python ``for`` loop instead of one per state-cell (or per
+       per-pipe ``Ode`` as the legacy heat-PDE pattern does). The
+       residual vector returned by that sub-function is written to
+       ``_F_[diff_var_state_slice]`` through the standard
+       ``print_eqn_assignment_with_precompute`` path.
+
+    Multi-inheritance from ``LoopEqn`` *and* ``Ode`` (``Eqn`` is the
+    shared base) gives ``isinstance`` checks on both the
+    ``LoopEqn``-specific module-printer path and the
+    ``Ode``-specific DAE-split path the right answer. MRO puts
+    ``LoopEqn`` before ``Ode``, so ``LoopEqn.__init__`` is what
+    runs first; we then manually overwrite ``LHS`` and attach
+    ``diff_var``.
+
+    Parameters
+    ----------
+    name : str
+        Equation name (same as LoopEqn).
+    outer_index : sympy.Idx
+        Scalar-template outer loop index.
+    body : sympy.Expr
+        Scalar body expression (same semantics as LoopEqn).
+    diff_var : iVar / IdxVar / Var
+        The state-Var slice being differentiated in time. Its
+        runtime length must match ``n_outer``.
+    model, var_map, n_outer : same as LoopEqn.
+    """
+
+    def __init__(self,
+                 name: str,
+                 outer_index=None,
+                 body=None,
+                 diff_var: Union[iVar, IdxVar, Var] = None,
+                 n_outer: int = None,
+                 model=None,
+                 var_map=None,
+                 outer=None):
+        # Defer to LoopEqn.__init__ for all the body rewriting,
+        # var_map inference, sparse-walker collection, SYMBOLS
+        # assembly, and NUM_EQN building. After it returns, ``self``
+        # is a fully-functional LoopEqn with ``self.LHS == S.Zero``.
+        LoopEqn.__init__(self,
+                         name=name,
+                         outer_index=outer_index,
+                         body=body,
+                         n_outer=n_outer,
+                         model=model,
+                         var_map=var_map,
+                         outer=outer)
+        # Overwrite ``LHS`` with the time-derivative expression so
+        # Solverz treats ``self`` like any other ``Ode`` during DAE
+        # partitioning. ``diff_var`` is stashed for ``eval_lhs`` and
+        # the mass-matrix builder to pull out the right state-Var
+        # slice length.
         diff_var = sSym2Sym(diff_var)
         self.diff_var = diff_var
         self.LHS = Derivative(diff_var, t)

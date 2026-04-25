@@ -459,3 +459,52 @@ def test_hvp_printer():
     np.testing.assert_allclose(HVP(np.array([1, 2]), dict(), np.array([1, 1])).toarray(),
                                np.array([[2.71828183, -0.90929743],
                                          [0., 2.]]))
+
+
+def test_made_numerical_rejects_loopeqn():
+    """Guard (#132): inline ``made_numerical`` must refuse LoopEqn systems —
+    running its Python for-loops at interpreter speed is 3-7x slower
+    than the lambdify-vectorised legacy path, so LoopEqn should only
+    go through ``module_printer(jit=True)``.
+    """
+    import sympy as sp
+    from Solverz import LoopEqn, Model, Param, Var, made_numerical
+
+    m = Model()
+    m.x = Var('x', np.zeros(3))
+    m.b = Param('b', np.array([1.0, 2.0, 3.0]))
+    i = sp.Idx('i')
+    x_sym = sp.IndexedBase('x')
+    b_sym = sp.IndexedBase('b')
+    m.eqn_loop = LoopEqn('eqn_loop',
+                         outer_index=i, n_outer=3,
+                         body=x_sym[i] - b_sym[i],
+                         var_map={'x': m.x, 'b': m.b})
+    spf, y0 = m.create_instance()
+    with pytest.raises(NotImplementedError, match='LoopEqn'):
+        made_numerical(spf, y0, sparse=True)
+    with pytest.raises(NotImplementedError, match='LoopEqn'):
+        made_numerical(spf, y0, sparse=False)
+
+
+def test_form_partial_jac_rejects_loopeqn():
+    """Guard (#132 / deferred C2 from #128): ``FormPartialJac`` must
+    refuse LoopEqn systems — its sparsity contract doesn't match
+    ``LoopEqnDiff.NUM_EQN``'s flat 1-D nnz return format.
+    """
+    import sympy as sp
+    from Solverz import LoopEqn, Model, Param, Var
+
+    m = Model()
+    m.x = Var('x', np.zeros(3))
+    m.b = Param('b', np.array([1.0, 2.0, 3.0]))
+    i = sp.Idx('i')
+    x_sym = sp.IndexedBase('x')
+    b_sym = sp.IndexedBase('b')
+    m.eqn_loop = LoopEqn('eqn_loop',
+                         outer_index=i, n_outer=3,
+                         body=x_sym[i] - b_sym[i],
+                         var_map={'x': m.x, 'b': m.b})
+    spf, y0 = m.create_instance()
+    with pytest.raises(NotImplementedError, match='LoopEqn'):
+        spf.FormPartialJac(y0)

@@ -29,6 +29,24 @@ Functions
 
 .. autoclass:: Solverz.sym_algebra.functions.ln
 
+Equations
+---------
+
+.. autoclass:: Solverz.equation.eqn.Eqn
+
+.. autoclass:: Solverz.equation.eqn.Ode
+
+.. autoclass:: Solverz.equation.eqn.LoopEqn
+
+.. autoclass:: Solverz.equation.eqn.LoopOde
+
+.. autoclass:: Solverz.equation.eqn.IndexSet
+   :members:
+
+.. autofunction:: Solverz.equation.eqn.Idx
+
+.. autofunction:: Solverz.equation.eqn.Sum
+
 Utilities
 ---------
 

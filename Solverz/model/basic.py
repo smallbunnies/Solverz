@@ -62,6 +62,16 @@ class Model:
                 nstep = 1 if nstep is None else nstep
                 self.alias_dict[key] = value
                 nstep = np.max([nstep, value.step])
+            else:
+                # IndexSet attributes carry an auxiliary 1-D int Param
+                # that the generated kernel needs whenever the body
+                # rewriter emitted a gather through this set. Register
+                # the Param only when the set actually materialised
+                # one (i.e. a body ended up using ``set_param[i]``);
+                # set._param stays None when no gather was needed.
+                from Solverz.equation.eqn import IndexSet
+                if isinstance(value, IndexSet) and value._param is not None:
+                    self.param_dict[key] = value._param
 
         if any([isinstance(arg, Ode) for arg in self.eqn_dict.values()]):
             if nstep is not None:
@@ -119,10 +129,57 @@ class Model:
 
     def add(self, m):
         if isinstance(m, Model):
-            self.__dict__.update(m.__dict__)
+            self._merge_with_collision_check(m.__dict__)
         elif isinstance(m, (Var, ParamBase, Eqn, Ode)):
-            self.__dict__[m.name] = m
+            self._merge_with_collision_check({m.name: m})
         elif isinstance(m, dict):
-            self.__dict__.update(m)
+            self._merge_with_collision_check(m)
         else:
             raise ValueError(f"Unknown element type {type(m)}")
+
+    def _merge_with_collision_check(self, incoming: dict):
+        collisions = []
+        for key, new_val in incoming.items():
+            if key in self.__dict__:
+                existing = self.__dict__[key]
+                if not _values_considered_equal(existing, new_val):
+                    collisions.append((key, existing, new_val))
+        if collisions:
+            lines = [
+                f"  - {k!r}: existing={type(old).__name__} vs incoming={type(new).__name__}"
+                for k, old, new in collisions
+            ]
+            raise ValueError(
+                "Model.add() would overwrite the following attribute(s) with "
+                "differing values — rename one side or share the same object:\n"
+                + "\n".join(lines)
+            )
+        self.__dict__.update(incoming)
+
+
+def _values_considered_equal(a, b) -> bool:
+    """True when Model.add can safely skip the collision for key shared by two attribute dicts.
+
+    Identity first (shared objects like a global ``Cp`` Param), then value-level
+    equality for ParamBase / numpy arrays / plain containers. On any comparison
+    failure, return False so the collision is reported.
+    """
+    if a is b:
+        return True
+    if isinstance(a, ParamBase) and isinstance(b, ParamBase):
+        if a.name != b.name or a.dim != b.dim or getattr(a, 'sparse', False) != getattr(b, 'sparse', False):
+            return False
+        try:
+            return bool(np.array_equal(np.asarray(a.v), np.asarray(b.v)))
+        except Exception:
+            return False
+    try:
+        eq = (a == b)
+    except Exception:
+        return False
+    if isinstance(eq, np.ndarray):
+        return bool(eq.all())
+    try:
+        return bool(eq)
+    except Exception:
+        return False

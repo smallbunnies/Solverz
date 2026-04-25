@@ -11,7 +11,7 @@ from sympy import Symbol, Integer, Expr, Number as SymNumber
 from scipy.sparse import csc_array, coo_array
 # from cvxopt import spmatrix, matrix
 
-from Solverz.equation.eqn import Eqn, Ode, EqnDiff
+from Solverz.equation.eqn import Eqn, Ode, EqnDiff, LoopEqn
 from Solverz.equation.param import ParamBase, Param, IdxParam, TimeSeriesParam
 from Solverz.sym_algebra.symbols import iVar, idx, IdxVar, Para, iAliasVar
 from Solverz.sym_algebra.functions import Slice, Mat_Mul, Diag, SpDiag
@@ -19,7 +19,7 @@ from Solverz.variable.variables import Vars
 from Solverz.utilities.address import Address, combine_Address
 from Solverz.utilities.type_checker import is_integer
 from Solverz.num_api.Array import Array
-from Solverz.equation.jac import Jac, JacBlock
+from Solverz.equation.jac import Jac, JacBlock, is_constant_matrix_deri
 from Solverz.utilities.miscellaneous import rearrange_list
 
 
@@ -68,7 +68,8 @@ class Equations:
                 # this is not fully initialize of Parameters, please use param_initializer
                 self.PARAM[symbol_.name] = Param(symbol_.name,
                                                  value=symbol_.value,
-                                                 dim=symbol_.dim)
+                                                 dim=symbol_.dim,
+                                                 dtype=getattr(symbol_, '_solverz_dtype', float))
             elif isinstance(symbol_, iAliasVar):
                 self.PARAM[symbol_.name] = Param(symbol_.name,
                                                  value=symbol_.value,
@@ -173,6 +174,8 @@ class Equations:
 
         Fy_list = self.Fy(y, self.a.object_list, self.var_address.object_list)
 
+        from Solverz.equation.eqn import LoopEqnDiff
+
         for fy in Fy_list:
             EqnName = fy[0]
             EqnAddr = self.a[EqnName]
@@ -185,30 +188,90 @@ class Equations:
             args = self.obtain_eqn_args(DiffVarEqn, y, 0)
             DiffVarValue = Array(DiffVarEqn.NUM_EQN(*args), dim=1)
 
-            # Mutable-matrix-block detection. This predicate MUST match
-            # ``JacBlock.is_mutable_matrix`` in ``jac.py:167-169`` exactly
-            # — FormJac picks Value0 here and JacBlock picks the
-            # downstream codegen path from the *same* flag, so any
-            # divergence between the two locations would produce blocks
-            # whose Value0 sparsity pattern disagreed with the kernel the
-            # code generator then emitted (e.g. a flat-start ``Diag(x)``
-            # Value0 would collapse to empty while the scatter-add loop
-            # expected a full diagonal).
+            # LoopEqn Phase J3 fast-path: if the EqnDiff is a
+            # ``LoopEqnDiff``, its ``NUM_EQN`` already evaluates the
+            # full 2-D Jacobian block via a pre-generated dense
+            # kernel. We skip the mutable-matrix re-lambdify loop
+            # (which tries to substitute ``Diag → SpDiag`` and
+            # perturb the vars — that rewrite doesn't apply to
+            # LoopEqn's sympy-IndexedBase canonical expression,
+            # and the marker ``RHS`` wouldn't lambdify cleanly
+            # anyway). Instead we re-evaluate the kernel with
+            # perturbed variable samples to capture the full
+            # sparsity union at Value0, same as the existing path.
             #
-            # Criterion (same as JacBlock): the derivative is
-            # matrix-valued AND its symbolic form is not a plain
-            # ``Para`` / ``-Para``. We probe "matrix-valued" from the
-            # already-evaluated ``fy[3]`` (either a ``csc_array`` from
-            # a sparse expression or an ndarray with ``ndim == 2`` from
-            # a dense one).
+            # Note: FormJac's earlier ``args`` is for a temporary
+            # ``DiffVarEqn`` carrying only the diff var. The
+            # LoopEqnDiff kernel needs its own SYMBOLS args — we
+            # obtain them via ``obtain_eqn_args(fy[2], y)``.
+            if isinstance(fy[2], LoopEqnDiff):
+                loop_args = self.obtain_eqn_args(fy[2], y)
+                rng = np.random.default_rng(seed=20260414)
+                perturbed_args = []
+                for symbol, arg in zip(fy[2].SYMBOLS.values(), loop_args):
+                    if symbol.name in y.var_list:
+                        perturbed_args.append(rng.random(arg.shape) + 1.0)
+                    else:
+                        perturbed_args.append(arg)
+                # Call the sparse kernel — returns a 1-D ``(nnz,)``
+                # ndarray in the same (column-major) order as
+                # ``(_sparsity_row, _sparsity_col)``.
+                sparse_data = np.asarray(
+                    fy[2].NUM_EQN(*perturbed_args), dtype=float
+                )
+
+                row_arr = fy[2]._sparsity_row
+                col_arr = fy[2]._sparsity_col
+                if row_arr.size > 0:
+                    Value0 = csc_array(
+                        (sparse_data, (row_arr, col_arr)),
+                        shape=(fy[2].n_outer, fy[2].n_diff),
+                    )
+                else:
+                    Value0 = csc_array((fy[2].n_outer, fy[2].n_diff))
+
+                jb = JacBlock(EqnName,
+                              EqnAddr,
+                              DiffVar,
+                              DiffVarValue,
+                              VarAddr,
+                              DeriExpr,
+                              Value0)
+                # Side-channel reference so ``print_inner_J``
+                # (module printer) can fetch the pre-generated
+                # kernel source, its function name, and its
+                # sorted arg list without re-walking the RHS
+                # marker.
+                jb._loop_eqn_diff = fy[2]
+                self.jac.add_block(EqnName, DiffVar, jb)
+                continue
+
+            # Mutable-matrix-block detection. This predicate MUST match
+            # ``JacBlock.is_mutable_matrix`` exactly — FormJac picks
+            # Value0 here and JacBlock picks the downstream codegen path
+            # from the *same* flag, so any divergence between the two
+            # locations would produce blocks whose Value0 sparsity
+            # pattern disagreed with the kernel the code generator then
+            # emitted (e.g. a flat-start ``Diag(x)`` Value0 would
+            # collapse to empty while the scatter-add loop expected a
+            # full diagonal). Both locations call
+            # :func:`is_constant_matrix_deri` from ``jac.py`` to keep
+            # the predicate single-sourced.
+            #
+            # Criterion: the derivative is matrix-valued AND its
+            # symbolic form depends on at least one state variable. We
+            # probe "matrix-valued" from the already-evaluated
+            # ``fy[3]`` (either a ``csc_array`` from a sparse
+            # expression or an ndarray with ``ndim == 2`` from a dense
+            # one).
             fy_value = fy[3]
             fy_is_matrix = (
                 isinstance(fy_value, csc_array)
                 or (isinstance(fy_value, np.ndarray) and fy_value.ndim == 2)
             )
-            deri_is_para = (isinstance(DeriExpr, Para)
-                            or isinstance(-DeriExpr, Para))
-            is_mutable_matrix_block = fy_is_matrix and not deri_is_para
+            is_mutable_matrix_block = (
+                fy_is_matrix and not is_constant_matrix_deri(DeriExpr)
+            )
             # For such blocks we MUST use sps.diags (not np.diagflat) so
             # that Value0's sparsity pattern captures ALL structural
             # non-zeros (union of each term's pattern), independently of
@@ -260,6 +323,7 @@ class Equations:
                        y,
                        eqn_list: List[str] = None,
                        var_list: List[str] = None):
+        _guard_loopeqn_not_supported(self, 'FormPartialJac')
 
         def is_sublist(sub, main):
             n = len(sub)
@@ -333,11 +397,31 @@ class Equations:
         return np.sum(np.array(list(self.esize.values())))
 
     def is_param_defined(self, param: str) -> bool:
+        """Return True iff ``param`` is referenced by any equation's
+        ``SYMBOLS`` set — i.e. the numerical code generator will
+        actually pass its value to some ``NUM_EQN`` call.
 
+        Auto-decomposition fields (``_data``, ``_indices``,
+        ``_indptr``, ``_shape0`` created by ``Model.create_instance``
+        for every sparse 2-D ``Param`` to feed ``Mat_Mul``'s
+        ``csc_matvec`` fast path) are ALSO recognised as defined
+        whenever the *base* Param is used — otherwise a LoopEqn
+        that walks the Param via its own CSR decomposition (and
+        doesn't reference the auto-decomposed flat arrays in any
+        ``Mat_Mul``) would trigger a spurious
+        "Parameter X_data not defined in equations!" warning, and
+        CI runs with ``filterwarnings = error`` would fail. These
+        fields are carried for the Mat_Mul fast path; they're
+        harmlessly unused by other consumers.
+        """
         if param in self.SYMBOLS:
             return True
-        else:
-            return False
+        for suffix in ('_data', '_indices', '_indptr', '_shape0'):
+            if param.endswith(suffix):
+                base = param[:-len(suffix)]
+                if base in self.SYMBOLS:
+                    return True
+        return False
 
     with warnings.catch_warnings():
         warnings.simplefilter("once")
@@ -830,3 +914,25 @@ class DAE(Equations):
             return f"DAE {self.name} with addresses uninitialized"
         else:
             return f"DAE {self.name} ({self.eqn_size}×{self.vsize})"
+
+
+def _guard_loopeqn_not_supported(eqs, caller: str) -> None:
+    """Raise when an equation system that contains any ``LoopEqn`` is fed
+    into an inline / partial-Jacobian code path.
+
+    LoopEqn is designed for the numba JIT module_printer: its F/J
+    kernels are emitted as explicit Python ``for``-loops that depend on
+    Numba for speed, and ``LoopEqnDiff.NUM_EQN`` returns flat 1-D nnz
+    data that only the sparse ``FormJac`` path understands. Running
+    either the inline printer or ``FormPartialJac`` on a LoopEqn model
+    therefore silently produces wrong output or Python-interpreter-speed
+    code (issue #132; C2 guard from #128).
+    """
+    offenders = [n for n, e in eqs.EQNs.items() if isinstance(e, LoopEqn)]
+    if offenders:
+        raise NotImplementedError(
+            f"{caller} does not support LoopEqn. Offending equations: "
+            f"{offenders}. LoopEqn is designed for the Numba-JIT module "
+            f"printer path; use Solverz.module_printer(..., jit=True) "
+            f"instead. See issue #132."
+        )

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any, Set, Tuple
 
 import numpy as np
-from sympy import Function
+import sympy as sp
+from sympy import Function, IndexedBase, Mul, S
 from Solverz.code_printer.python.utilities import *
 from Solverz.code_printer.python.module.mutable_mat_analyzer import (
     analyze_mutable_mat_expr,
@@ -191,6 +193,12 @@ def print_J(eqs_type: str,
                 for arg_name, t in zip(mb['cs_arg_names'], mapping.col_scale_terms):
                     body.append(Assignment(
                         iVar(arg_name, internal_use=True), t['var_expr']))
+                for arg_name, t in zip(mb['bs_u_arg_names'], mapping.biscale_terms):
+                    body.append(Assignment(
+                        iVar(arg_name, internal_use=True), t['u_expr']))
+                for arg_name, t in zip(mb['bs_v_arg_names'], mapping.biscale_terms):
+                    body.append(Assignment(
+                        iVar(arg_name, internal_use=True), t['v_expr']))
                 # (b) Build the call argument list in the order the block
                 # function expects.
                 call_args = []
@@ -199,6 +207,10 @@ def print_J(eqs_type: str,
                 for arg_name in mb['rs_arg_names']:
                     call_args.append(symbols(arg_name, real=True))
                 for arg_name in mb['cs_arg_names']:
+                    call_args.append(symbols(arg_name, real=True))
+                for arg_name in mb['bs_u_arg_names']:
+                    call_args.append(symbols(arg_name, real=True))
+                for arg_name in mb['bs_v_arg_names']:
                     call_args.append(symbols(arg_name, real=True))
                 # Mapping arrays (loaded at module-level from setting)
                 for ti in range(len(mapping.diag_terms)):
@@ -212,9 +224,22 @@ def print_J(eqs_type: str,
                     call_args.append(symbols(f'_sz_mb_{block_idx}_cs_out_{ti}', real=True))
                     call_args.append(symbols(f'_sz_mb_{block_idx}_cs_src_{ti}', real=True))
                     call_args.append(symbols(f'_sz_mb_{block_idx}_cs_dat_{ti}', real=True))
+                for ti in range(len(mapping.biscale_terms)):
+                    call_args.append(symbols(f'_sz_mb_{block_idx}_bs_out_{ti}', real=True))
+                    call_args.append(symbols(f'_sz_mb_{block_idx}_bs_row_{ti}', real=True))
+                    call_args.append(symbols(f'_sz_mb_{block_idx}_bs_col_{ti}', real=True))
+                    call_args.append(symbols(f'_sz_mb_{block_idx}_bs_dat_{ti}', real=True))
                 body.append(Assignment(
                     iVar('data', internal_use=True)[mb['addr_slice']],
                     FunctionCall(mb['fn_name'], call_args)))
+            elif mb.get('mode') == 'loop_eqn':
+                # LoopEqn-native path (Phase J4). Kernel calls are
+                # now emitted INSIDE ``inner_J`` itself by
+                # ``print_inner_J`` so the whole assembly lives in
+                # a single ``@njit`` compilation unit. Nothing to
+                # do in the ``J_`` wrapper — the returned ``data``
+                # from ``inner_J`` already holds the block values.
+                pass
             else:
                 # Fallback: scipy sparse fancy indexing
                 body.append(Assignment(
@@ -259,6 +284,58 @@ def print_inner_J(var_addr: Address,
             jac_constant = jb.IsDeriNumber
 
             if jb.DeriType == 'matrix':
+                # LoopEqn-native J block path (Phase J3.3). The
+                # JacBlock carries a reference to its source
+                # LoopEqnDiff via ``_loop_eqn_diff``, which owns a
+                # pre-generated dense kernel function source. We
+                # emit the kernel as a top-level @njit function
+                # (via ``mut_mat_block_funcs``) and record a block
+                # descriptor for ``print_J`` to render the wrapper
+                # call + fancy-index Assignment.
+                if hasattr(jb, '_loop_eqn_diff'):
+                    ed = jb._loop_eqn_diff
+                    block_idx = len(mutable_matrix_blocks)
+                    kernel_fn_name = f'_sz_loop_jac_kernel_{block_idx}'
+                    # Emit any scalar CSR point-lookup helpers the
+                    # kernel body references, each as its own
+                    # ``mut_mat_block_funcs`` entry so module_generator
+                    # prepends its own ``@njit(cache=True)``. Dedup
+                    # helpers by name across LoopEqnDiff instances —
+                    # the helper body is value-independent (keyed on
+                    # Param name and module-global CSR arrays), so
+                    # emitting it once per sparse Param is enough.
+                    for helper_src in getattr(ed, 'helper_sources', []):
+                        if helper_src in mut_mat_block_funcs:
+                            continue
+                        mut_mat_block_funcs.append(helper_src)
+                    # Rename the kernel function (it was
+                    # generated with the sanitized EqnDiff name at
+                    # LoopEqnDiff construction time — that name
+                    # would collide with the inline path's
+                    # closure kernel in an odd edge case, and the
+                    # module-local indexed name is cleaner).
+                    block_source = ed.kernel_source.replace(
+                        ed._kernel_func_name, kernel_fn_name
+                    )
+                    mut_mat_block_funcs.append(block_source)
+
+                    row_key = f'_sz_loop_jac_row_{block_idx}'
+                    col_key = f'_sz_loop_jac_col_{block_idx}'
+                    mut_mat_mappings[row_key] = jb.CooRow.astype(np.int64)
+                    mut_mat_mappings[col_key] = jb.CooCol.astype(np.int64)
+
+                    mutable_matrix_blocks.append({
+                        'addr_slice': addr_by_ele,
+                        'mode': 'loop_eqn',
+                        'block_idx': block_idx,
+                        'kernel_fn_name': kernel_fn_name,
+                        'kernel_symbols': sorted(ed.SYMBOLS.keys()),
+                        'row_key': row_key,
+                        'col_key': col_key,
+                    })
+                    addr_by_ele_0 += jb.SpEleSize
+                    continue
+
                 if jb.is_mutable_matrix:
                     # Mutable matrix derivative: analyze the expression into
                     # typed terms (diag / row_scale / col_scale), generate a
@@ -288,13 +365,20 @@ def print_inner_J(var_addr: Address,
                                         for ti in range(len(mapping.row_scale_terms))]
                         cs_arg_names = [f'_sz_mb_{block_idx}_csv{ti}'
                                         for ti in range(len(mapping.col_scale_terms))]
+                        bs_u_arg_names = [f'_sz_mb_{block_idx}_bsu{ti}'
+                                          for ti in range(len(mapping.biscale_terms))]
+                        bs_v_arg_names = [f'_sz_mb_{block_idx}_bsv{ti}'
+                                          for ti in range(len(mapping.biscale_terms))]
                         block_info['fn_name'] = fn_name
                         block_info['diag_arg_names'] = diag_arg_names
                         block_info['rs_arg_names'] = rs_arg_names
                         block_info['cs_arg_names'] = cs_arg_names
+                        block_info['bs_u_arg_names'] = bs_u_arg_names
+                        block_info['bs_v_arg_names'] = bs_v_arg_names
                         block_code = generate_block_function_code(
                             fn_name, mapping,
-                            diag_arg_names, rs_arg_names, cs_arg_names)
+                            diag_arg_names, rs_arg_names, cs_arg_names,
+                            bs_u_arg_names, bs_v_arg_names)
                         mut_mat_block_funcs.append(block_code)
                         # Collect the mapping arrays for the eqn_parameter
                         for ti, t in enumerate(mapping.diag_terms):
@@ -308,6 +392,11 @@ def print_inner_J(var_addr: Address,
                             mut_mat_mappings[f'_sz_mb_{block_idx}_cs_out_{ti}'] = t['out_pos']
                             mut_mat_mappings[f'_sz_mb_{block_idx}_cs_src_{ti}'] = t['src']
                             mut_mat_mappings[f'_sz_mb_{block_idx}_cs_dat_{ti}'] = t['mat_data']
+                        for ti, t in enumerate(mapping.biscale_terms):
+                            mut_mat_mappings[f'_sz_mb_{block_idx}_bs_out_{ti}'] = t['out_pos']
+                            mut_mat_mappings[f'_sz_mb_{block_idx}_bs_row_{ti}'] = t['src_row']
+                            mut_mat_mappings[f'_sz_mb_{block_idx}_bs_col_{ti}'] = t['src_col']
+                            mut_mat_mappings[f'_sz_mb_{block_idx}_bs_dat_{ti}'] = t['mat_data']
                     mutable_matrix_blocks.append(block_info)
                     addr_by_ele_0 += jb.SpEleSize
                     continue
@@ -334,6 +423,30 @@ def print_inner_J(var_addr: Address,
                 code_sub_inner_J_blocks.append(pycode(fd1, fully_qualified_modules=False))
                 count += 1
             addr_by_ele_0 += jb.SpEleSize
+
+    # Move ``loop_eqn`` block kernel calls INSIDE ``inner_J`` so the
+    # whole assembly happens inside a single ``@njit`` compilation
+    # unit. Each kernel is itself ``@njit``-decorated, so the call
+    # is inlined by numba at JIT time — no Python/numba boundary
+    # crossing per kernel call at runtime. Row / col arrays are
+    # module-level numpy globals (``_sz_loop_jac_row_<N>`` /
+    # ``_sz_loop_jac_col_<N>``), which numba accepts via global
+    # capture when the function is compiled.
+    for mb in mutable_matrix_blocks:
+        if mb.get('mode') != 'loop_eqn':
+            continue
+        kernel_args = [symbols(nm, real=True)
+                       for nm in mb['kernel_symbols']]
+        row_sym = symbols(mb['row_key'], real=True)
+        col_sym = symbols(mb['col_key'], real=True)
+        body.append(Assignment(
+            iVar('_data_', internal_use=True)[mb['addr_slice']],
+            FunctionCall(
+                mb['kernel_fn_name'],
+                kernel_args + [row_sym, col_sym],
+            ),
+        ))
+
     temp = iVar('_data_', internal_use=True)
     body.extend([Return(temp)])
     fd = FunctionDefinition.from_FunctionPrototype(fp, body)
@@ -345,7 +458,7 @@ def print_inner_J(var_addr: Address,
             'mut_mat_mappings': mut_mat_mappings}
 
 
-def _classify_matmul_placeholders(precompute_info, PARAM):
+def _classify_matmul_placeholders(precompute_info, PARAM, emit_warnings=False):
     """Classify every extracted ``Mat_Mul`` placeholder into fast /
     fallback and compute which ``Para`` symbols the fallback code
     path still needs to have loaded in the ``F_`` wrapper.
@@ -492,7 +605,79 @@ def _classify_matmul_placeholders(precompute_info, PARAM):
                         if isinstance(s, Para):
                             fallback_symbols.add(s.name)
 
+    if emit_warnings:
+        _emit_l1_fallback_warnings(all_triples, fast_candidates, PARAM)
+
     return fast_info, fallback_names, fallback_symbols
+
+
+def _classify_l1_fallback_reason(mat, op, PARAM):
+    """Identify which Layer 1 fallback shape this ``(matrix_arg,
+    operand_arg)`` pair hits and return ``(reason, expression_str,
+    suggestion)`` for the user-facing diagnostic warning.
+
+    Each return triple is consumed by ``_emit_l1_fallback_warnings``
+    to format a multi-line ``UserWarning`` body. The classification is
+    deliberately deterministic and shape-based — no symbolic
+    rewriting — so users see the *exact* expression that broke the
+    fast path next to the suggested rewrite.
+    """
+    # Negation: Mat_Mul(-A, x) where A is a sparse dim=2 Para.
+    if isinstance(mat, Mul):
+        if len(mat.args) >= 2 and mat.args[0] == S.NegativeOne:
+            rest = mat.args[1:]
+            if len(rest) == 1 and isinstance(rest[0], Para):
+                inner = rest[0]
+                p = PARAM.get(inner.name)
+                if (p is not None
+                        and getattr(p, 'dim', 0) == 2
+                        and getattr(p, 'sparse', False)):
+                    return (
+                        f"matrix operand is `-{inner.name}` (negation of a "
+                        f"sparse Param), not a bare Param",
+                        f"-{inner.name}",
+                        f"-Mat_Mul({inner.name}, <operand>) — move the "
+                        f"negation outside Mat_Mul",
+                    )
+
+    # Generic fallback (not yet specialised — covered by later tests).
+    return (
+        "matrix operand is not a bare sparse `dim=2` Param",
+        str(mat),
+        "rewrite the matrix expression so the matrix argument is a "
+        "bare sparse `dim=2` Param",
+    )
+
+
+def _emit_l1_fallback_warnings(all_triples, fast_candidates, PARAM):
+    """Emit one ``UserWarning`` per Mat_Mul fallback placeholder.
+
+    Skips placeholders whose matrix is a dense ``dim=2`` Param —
+    those are already covered by ``_warn_dense_matmul_params`` in
+    ``equations.py``, which fires at ``FormJac`` time and applies
+    equally to inline mode (where Layer 1 / Layer 2 fallback
+    distinctions don't exist).
+    """
+    for name, mat, op in all_triples:
+        if name in fast_candidates:
+            continue
+        # Skip dense dim=2 Param — already warned by _warn_dense_matmul_params.
+        if isinstance(mat, Para):
+            p = PARAM.get(mat.name)
+            if (p is not None
+                    and getattr(p, 'dim', 0) == 2
+                    and not getattr(p, 'sparse', False)):
+                continue
+        reason, expression_str, suggestion = _classify_l1_fallback_reason(
+            mat, op, PARAM)
+        warnings.warn(
+            f"Mat_Mul placeholder {name!r} falls back to scipy.sparse "
+            f"SpMV (slower than the @njit csc_matvec fast path).\n"
+            f"  Reason: {reason}\n"
+            f"  Expression: Mat_Mul({expression_str}, <operand>)\n"
+            f"  Suggested rewrite: {suggestion}",
+            UserWarning, stacklevel=4
+        )
 
 
 def print_F(eqs_type: str,
@@ -530,8 +715,13 @@ def print_F(eqs_type: str,
     # see :func:`_classify_matmul_placeholders`). ``fallback_symbols``
     # names every ``Para`` that the wrapper must still materialise so
     # the scipy SpMV in a fallback precompute can execute correctly.
+    #
+    # ``emit_warnings=True`` is set here (not in ``print_inner_F`` or
+    # ``print_J``) so each fallback placeholder produces exactly one
+    # ``UserWarning`` per render, not three. ``print_F`` is the first
+    # function to call the classifier in ``render_modules``.
     _, fallback_names, fallback_symbols = _classify_matmul_placeholders(
-        precompute_info, PARAM)
+        precompute_info, PARAM, emit_warnings=True)
 
     # Drop sparse dim=2 ``Para`` wrapper loads that are (a) not
     # referenced by any fallback scipy SpMV **and** (b) not in
@@ -687,6 +877,15 @@ def print_eqn_assignment_with_precompute(EQNs, EqnAddr, precompute_info):
     from the info dict (which has sparse matrices removed and placeholders
     appended for Mat_Mul equations). For non-Mat_Mul equations, args fall
     back to eqn.SYMBOLS.values() — exactly the original behavior.
+
+    ``LoopEqn`` with sparse walkers is a second special case: its
+    sparse 2-D Params are NOT in ``inner_F``'s local scope (they're
+    loaded in the ``F_`` wrapper's scope but excluded from
+    ``param_list`` by ``print_param(..., include_sparse_in_list=False)``),
+    so the call site must omit them from the argument list. The
+    ``inner_F<N>`` sub-function's signature (emitted by
+    ``print_sub_inner_F``) matches this pruned list exactly by using
+    :meth:`LoopEqn.njit_arg_names`.
     """
     eqn_declaration = []
     _F_ = iVar('_F_', internal_use=True)
@@ -697,6 +896,10 @@ def print_eqn_assignment_with_precompute(EQNs, EqnAddr, precompute_info):
         eqn = EQNs[eqn_name]
         if eqn.mixed_matrix_vector:
             sub_args = [symbols(a.name, real=True) for a in eqn_info['args']]
+        elif isinstance(eqn, LoopEqn):
+            # Exclude sparse walker Params (they're module-level CSR
+            # constants, not call arguments).
+            sub_args = [eqn.SYMBOLS[nm] for nm in eqn.njit_arg_names()]
         else:
             # Preserve original behavior for non-matrix equations
             sub_args = list(eqn.SYMBOLS.values())
@@ -737,6 +940,29 @@ def print_sub_inner_F(EQNs: Dict[str, Eqn]):
     global_mm_counter = [0]
     count = 0
     for eqn_name, eqn in EQNs.items():
+        # LoopEqn path: pycode cannot translate ``Sum`` over ``Idx``,
+        # so we emit a hand-built source string with explicit nested
+        # ``for`` loops (Numba-friendly) instead of going through the
+        # AST + pycode pipeline. Args are the same lex-sorted SYMBOLS
+        # the dispatcher emits via ``print_eqn_assignment``.
+        if isinstance(eqn, LoopEqn):
+            # Use njit_arg_names so sparse walker Params are excluded
+            # from the sub-function's signature. Their CSR arrays are
+            # pulled from module-level constants injected via
+            # ``mut_mat_mappings`` by ``render_modules``.
+            arg_names = eqn.njit_arg_names()
+            args = [symbols(v, real=True) for v in arg_names]
+            code_blocks.append(eqn.print_njit_source(f'inner_F{count}'))
+            precompute_info.append({
+                'eqn_name': eqn_name,
+                'new_rhs': eqn.RHS,
+                'matmuls': [],
+                'args': args,
+                'matrix_symbols_removed': set(eqn._sparse_csr.keys()),
+            })
+            count += 1
+            continue
+
         # Fast path: non-Mat_Mul equation — original behavior, no changes.
         if not eqn.mixed_matrix_vector:
             args = [symbols(v, real=True) for v in eqn.SYMBOLS.keys()]

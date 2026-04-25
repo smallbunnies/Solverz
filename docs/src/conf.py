@@ -46,6 +46,17 @@ source_suffix = {
     '.md': 'markdown',
 }
 
+# ``myst_parser`` parses .md pages but treats ``$...$`` / ``$$...$$``
+# blocks as literal text unless ``dollarmath`` is enabled. ``amsmath``
+# lets authors use ``\begin{align}``-style environments inside
+# ``$$...$$``; ``colon_fence`` supports the ``:::{math}``/``:::``
+# fenced form used across the Solverz Cookbook.
+myst_enable_extensions = [
+    'dollarmath',
+    'amsmath',
+    'colon_fence',
+]
+
 mathjax3_config = {
     "tex": {
         "inlineMath": [['\\(', '\\)']],
