@@ -188,22 +188,28 @@ class TimeSeriesParam(Param):
         if t is None:
             return self.v
 
+        if self.index is None:
+            # No-index path: contract is a 1-D ndarray. Both
+            # ``interp1d(scalar t).reshape((-1,))`` and
+            # ``v_series[-1:]`` (a slice that keeps the leading axis)
+            # are 1-D, so we return them directly.
+            if t < self.tend:
+                return self.vt(t).reshape((-1,))
+            return self.v_series[-1:]
+
+        # Index path: keep ``vt`` in its natural rank so it aligns with
+        # ``temp[self.index]``'s slot — scalar index ↔ 0-D value,
+        # array index ↔ 1-D value. numpy 2.4's strict rule against
+        # ``a[scalar] = arr_of_size_1`` is what forced the split (the
+        # old code reshaped to ``(-1,)`` unconditionally and tripped
+        # the rule for the common ``index=int`` + 1-D ``v_series`` case).
         if t < self.tend:
-            # input of interp1d is zero-dimensional, we need to reshape
-            # [0] is to eliminate the numpy DeprecationWarning in m3b9 test: Conversion of an array with ndim > 0 to a scalar is
-            # deprecated, and will error in the future, which should be resolved.
-            vt = self.vt(t).reshape((-1,))
+            vt = self.vt(t)
         else:
-            vt = self.v_series[-1:]
-
-        if self.index is not None:
-            temp = self.v.copy()
-
-            temp[self.index] = vt
-
-            return temp
-        else:
-            return vt
+            vt = self.v_series[-1]
+        temp = self.v.copy()
+        temp[self.index] = vt
+        return temp
 
     def __repr__(self):
         return f"TimeSeriesParam: {self.name} value: {self.v}"
