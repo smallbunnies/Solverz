@@ -236,7 +236,8 @@ class Equations:
                               DiffVarValue,
                               VarAddr,
                               DeriExpr,
-                              Value0)
+                              Value0,
+                              PARAM=self.PARAM)
                 # Side-channel reference so ``print_inner_J``
                 # (module printer) can fetch the pre-generated
                 # kernel source, its function name, and its
@@ -270,7 +271,8 @@ class Equations:
                 or (isinstance(fy_value, np.ndarray) and fy_value.ndim == 2)
             )
             is_mutable_matrix_block = (
-                fy_is_matrix and not is_constant_matrix_deri(DeriExpr)
+                fy_is_matrix
+                and not is_constant_matrix_deri(DeriExpr, PARAM=self.PARAM)
             )
             # For such blocks we MUST use sps.diags (not np.diagflat) so
             # that Value0's sparsity pattern captures ALL structural
@@ -313,7 +315,8 @@ class Equations:
                           DiffVarValue,
                           VarAddr,
                           DeriExpr,
-                          Value0)
+                          Value0,
+                          PARAM=self.PARAM)
             self.jac.add_block(EqnName, DiffVar, jb)
 
         self.jac.shape = np.array([self.eqn_size, self.vsize], dtype=int)
@@ -378,7 +381,8 @@ class Equations:
                           DiffVarValue,
                           VarAddr,
                           DeriExpr,
-                          Value0)
+                          Value0,
+                          PARAM=self.PARAM)
             jac.add_block(EqnName, DiffVar, jb)
 
         eqn_start = self.a[eqn_list[0]].start
