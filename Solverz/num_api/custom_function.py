@@ -91,14 +91,29 @@ def switch(*args):
 
 @njit(cache=True)
 def Saturation(x, xmin, xmax):
-    x = np.asarray(x).reshape((-1,))
-    return np.clip(x, xmin, xmax)
+    # np.minimum / np.maximum are element-wise and shape-preserving
+    # under Numba @njit: scalar input -> scalar output, ndarray input
+    # -> ndarray output. The previous ``np.asarray(x).reshape((-1,))``
+    # path forced a 1-D array return even for scalar input, which
+    # made the function unusable inside ``LoopEqn`` bodies: the
+    # rendered ``out[i] = ... Saturation(scalar) ...`` becomes
+    # ``out[i] = <1-D array>``, which Numba's nopython mode rejects
+    # as an invalid setitem signature. The new implementation
+    # preserves scalar-ness, so both scalar Eqn and LoopEqn bodies
+    # JIT cleanly without losing array semantics for callers that
+    # do pass arrays.
+    return np.minimum(xmax, np.maximum(xmin, x))
 
 
 @njit(cache=True)
 def In(x, xmin, xmax):
-    x = np.asarray(x).reshape((-1,))
-    return np.bitwise_and(x >= xmin, x <= xmax).astype(np.int32)
+    # Shape-preserving sibling of :func:`Saturation`'s derivative
+    # (returns 1 inside ``[xmin, xmax]``, 0 outside). The previous
+    # ``np.asarray(x).reshape((-1,))`` path forced a 1-D return even
+    # for scalar input, which made the function unusable inside the
+    # ``LoopEqn`` Jacobian kernels. ``np.where`` is element-wise and
+    # preserves input shape under Numba ``@njit``.
+    return np.where((x >= xmin) & (x <= xmax), np.int32(1), np.int32(0))
 
 
 @njit(cache=True)
