@@ -120,11 +120,11 @@ pip install Solverz
  
  In Chinese
  
- [1] 俞睿智,顾伟,陆帅,张苏涵,徐一骏.面向综合能源系统的开源高性能仿真建模工具开发[J/OL].中国电机工程学报,1-12[2025-05-29]. https://doi.org/10.13334/j.0258-8013.pcsee.242788.
+ [1] 俞睿智,顾伟,陆帅,张苏涵,徐一骏.面向综合能源系统的开源高性能仿真建模工具开发[J].中国电机工程学报,2026,46(9):3654-3665.DOI:10.13334/j.0258-8013.pcsee.242788.
 
  In English
 
- [1] R. Yu, W. Gu, S. Lu, S. Zhang, and Y. Xu, "Development of an Open-Source High-Performance Simulation Modeling Tool for Integrated  Energy Systems," Proceedings of the CSEE, May 2025, Advance online publication, doi: 10.13334/j.0258-8013.pcsee.242788.
+ [1] R. Yu, W. Gu, S. Lu, S. Zhang, Y. Xu and R. Wang, "Efficient and Generic Co-simulation Framework for Integrated Energy Systems with Renewable Energy Penetration," 2026 IEEE PES International Meeting (PES IM), Hong Kong, Hong Kong, 2026, pp. 1-5, doi: 10.1109/PESIM67009.2026.11439048.
 
 
  
