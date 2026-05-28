@@ -43,6 +43,9 @@ def nr_method(eqn: nAE,
     p = eqn.p
     df = eqn.F(y, p)
     stats.nfeval += 1
+    # Reuse the KLU symbolic ordering across iterations: the Jacobian pattern
+    # is fixed, so only its values change between Newton steps.
+    cache = KLUCache()
 
     # main loop
     while np.max(np.abs(df)) > tol:
@@ -53,7 +56,7 @@ def nr_method(eqn: nAE,
 
         stats.nstep += 1
 
-        y = y - solve(eqn.J(y, p), df)
+        y = y - solve(eqn.J(y, p), df, cache=cache)
         stats.nJeval += 1
         stats.ndecomp += 1
         stats.nsolve += 1

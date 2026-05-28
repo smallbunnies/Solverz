@@ -10,7 +10,7 @@ from numba import njit
 
 from Solverz.equation.equations import DAE
 from Solverz.num_api.num_eqn import nDAE, nAE
-from Solverz.solvers.laesolver import lu_decomposition
+from Solverz.solvers.laesolver import lu_decomposition, KLUCache, resolve_backend
 from Solverz.solvers.nlaesolver import nr_method
 from Solverz.solvers.option import Opt
 from Solverz.solvers.parser import dae_io_parser

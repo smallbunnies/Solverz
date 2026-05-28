@@ -118,6 +118,8 @@ def Rodas(dae: nDAE,
 
     M = dae.M
     p = dae.p
+    linsolver = resolve_backend(getattr(opt, 'linsolver', None))
+    klu_cache = KLUCache() if linsolver == 'klu' else None
     done = False
     reject = 0
     while not done:
@@ -156,7 +158,8 @@ def Rodas(dae: nDAE,
         stats.nfeval = stats.nfeval + 1
 
         try:
-            lu = lu_decomposition(M - dt * rparam.gamma * J)
+            lu = lu_decomposition(M - dt * rparam.gamma * J,
+                                  backend=linsolver, cache=klu_cache)
         except RuntimeError:
             break
         stats.ndecomp = stats.ndecomp + 1
