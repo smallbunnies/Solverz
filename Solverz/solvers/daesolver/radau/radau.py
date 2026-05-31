@@ -32,6 +32,7 @@ from scipy.sparse.linalg import splu
 from Solverz.solvers.daesolver.utilities import (
     nDAE, Opt, dae_io_parser, Stats, daesol, DaeIc, getyp0, tqdm,
 )
+from Solverz.solvers.laesolver import lu_decomposition, model_cache
 
 from Solverz.solvers.daesolver.radau import param as P
 
@@ -303,10 +304,10 @@ def Radau(dae: nDAE,
         alpha_dt = ALPHA / h
         beta_dt = BETA / h
         try:
-            LU1 = splu((J_cache - gamma_dt * M).tocsc())
+            LU1 = lu_decomposition((J_cache - gamma_dt * M).tocsc(), cache=model_cache(dae))
             cscale = alpha_dt + 1j * beta_dt
             Wc = (J_cache.astype(complex) - cscale * M.astype(complex)).tocsc()
-            LU2 = splu(Wc)
+            LU2 = lu_decomposition(Wc)  # complex -> auto superlu fallback
             stats.ndecomp += 2
         except Exception:
             h *= 0.25

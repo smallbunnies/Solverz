@@ -11,17 +11,18 @@ from Solverz.utilities.type_checker import is_vector, is_scalar, is_integer, is_
 from Solverz.sym_algebra.functions import Diag, Ones
 
 
-def is_constant_matrix_deri(deri_expr: Expr) -> bool:
+def is_constant_matrix_deri(deri_expr: Expr, PARAM=None) -> bool:
     """Return True iff a matrix-valued ``DeriExpr`` is constant
     between Newton iterations.
 
     A Jacobian block is constant if its symbolic expression does NOT
     depend on any state variable (``iVar`` / ``IdxVar`` / ``iAliasVar``
-    / ``IdxAliasVar``). When this is the case the block's data can be
-    computed once at module-build time, baked into ``setting["data"]``,
-    and loaded as ``_data_`` at runtime — no per-iteration re-evaluation
-    needed. Both ``inner_J`` and the ``J_`` wrapper become trivial for
-    such blocks.
+    / ``IdxAliasVar``) AND does NOT contain any ``TimeSeriesParam``
+    factor. When this is the case the block's data can be computed
+    once at module-build time, baked into ``setting["data"]``, and
+    loaded as ``_data_`` at runtime — no per-iteration re-evaluation
+    needed. Both ``inner_J`` and the ``J_`` wrapper become trivial
+    for such blocks.
 
     Recognised constant cases:
 
@@ -39,14 +40,50 @@ def is_constant_matrix_deri(deri_expr: Expr) -> bool:
     mutable. ``iAliasVar`` (FDAE time-step alias) is included because
     although it is constant *within* a single Newton solve, it changes
     between time steps and the Jacobian must be re-evaluated.
+
+    ``TimeSeriesParam`` handling
+    ---------------------------
+    A ``TimeSeriesParam`` is a runtime-mutable Param whose value comes
+    from ``p["name"].get_v_t(t)`` at each F/J evaluation. Its symbolic
+    form is a bare ``Para`` (it inherits from ``Param``), so checking
+    free-symbol *types* alone would erroneously classify any DeriExpr
+    that mixes a plain ``Para`` with a ``TimeSeriesParam``-multiplied
+    factor as constant. The Jacobian would then be **baked at module
+    build time** with the TimeSeriesParam evaluated at its default
+    profile (typically zero) and **never updated at runtime**. F
+    would correctly reflect the time-varying parameter via
+    ``get_v_t(t)``; J would silently stay frozen — a dangerous
+    correctness regression that masks fault Jacobians on any
+    short-circuit / leak / step-change simulation. To prevent this,
+    pass the ``PARAM`` dict and the predicate walks
+    ``deri_expr.free_symbols`` to flag any ``Para`` whose corresponding
+    entry in ``PARAM`` is a ``TimeSeriesParam``. Callers that do not
+    have PARAM available may omit it; the function is then permissive
+    on TimeSeriesParam (preserves the old behaviour for code paths
+    that never multiply Vars by TimeSeriesParam factors).
     """
+    from Solverz.equation.param import TimeSeriesParam
+
     if isinstance(deri_expr, Para):
+        if PARAM is not None:
+            p = PARAM.get(deri_expr.name)
+            if isinstance(p, TimeSeriesParam):
+                return False
         return True
     if isinstance(-deri_expr, Para):
+        neg = -deri_expr
+        if PARAM is not None:
+            p = PARAM.get(neg.name)
+            if isinstance(p, TimeSeriesParam):
+                return False
         return True
     for s in deri_expr.free_symbols:
         if isinstance(s, (iVar, IdxVar, iAliasVar, IdxAliasVar)):
             return False
+        if PARAM is not None and isinstance(s, Para):
+            p = PARAM.get(s.name)
+            if isinstance(p, TimeSeriesParam):
+                return False
     return True
 
 SolVar = Union[iVar, IdxVar]
@@ -135,7 +172,8 @@ class JacBlock:
                  DiffVarValue,
                  VarAddr,
                  DeriExpr: Expr,
-                 Value0: np.ndarray | PyNumber):
+                 Value0: np.ndarray | PyNumber,
+                 PARAM=None):
         """
         var_addr is the address of the non-indexed variable. Fox example, if the diff_var is x[0], then the
         var_addr is the address of x. JacBlock will parse the address of x[0]
@@ -210,7 +248,14 @@ class JacBlock:
         # Mutable: DeriExpr depends on at least one state variable (e.g. diag(e) @ G
         #          from a Mat_Mul-with-Var Jacobian) — must re-evaluate each step.
         if DeriType == 'matrix':
-            self.is_mutable_matrix = not is_constant_matrix_deri(self.DeriExpr)
+            # PARAM is threaded in so the predicate can distinguish
+            # plain Para (constant) from TimeSeriesParam (must be
+            # re-evaluated each step). Without PARAM the predicate is
+            # permissive on TimeSeriesParam — callers should always
+            # pass PARAM when one is available.
+            self.is_mutable_matrix = not is_constant_matrix_deri(
+                self.DeriExpr, PARAM=PARAM
+            )
         else:
             self.is_mutable_matrix = False
 

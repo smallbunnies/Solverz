@@ -25,7 +25,8 @@ class Opt:
                  normcontrol=False,
                  numJac=False,
                  max_it=100,
-                 profile=False):
+                 profile=False,
+                 linsolver=None):
         self.atol = atol
         self.rtol = rtol
         self.f_savety = f_savety
@@ -49,3 +50,7 @@ class Opt:
         self.numJac = numJac
         self.max_it = max_it
         self.profile = profile
+        # None -> use the global selection (set_linsolver / linsolver context
+        # manager / SOLVERZ_LINSOLVER, default 'klu'); 'klu' or 'superlu' to
+        # override this solve. 'klu' degrades to 'superlu' when libklu is absent.
+        self.linsolver = linsolver

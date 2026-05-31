@@ -253,9 +253,58 @@ def loop_jac_to_solverz_expr(expr: sp.Expr,
       with arbitrary ``h`` (e.g. ``cos(Va[i] - Va[k])``) — requires
       a LoopEqn-native per-entry scatter kernel.
     - Fully dense bilinear blocks with no ``Param`` carrier.
+
+    ``TimeSeriesParam`` guard
+    -------------------------
+    If any of ``expr``'s ``Para`` factors corresponds to a
+    ``TimeSeriesParam`` in ``var_map``, the function raises
+    ``NotImplementedError`` to force the caller to fall through to
+    the LoopEqnDiff dense-kernel path (which generates dynamic
+    code that re-evaluates the Param's value via ``get_v_t(t)``
+    at every J call).
+
+    Without this guard, expressions like ``-Gbus - Diag(G_shunt)``
+    (the rectangular EPS current-injection Jacobian with a
+    fault-injection ``G_shunt`` TimeSeriesParam) would translate
+    cleanly into a Solverz ``Diag``/``Para`` expression. The
+    expression's free symbols are all ``Para``, so
+    ``is_constant_matrix_deri`` (even with the PARAM-aware fix)
+    must still walk every Para to detect TimeSeriesParam — but
+    the mutable-matrix block path emits a fallback warning for
+    bare-matrix terms like ``-Gbus`` and **silently produces no
+    runtime kernel** for the slot. The result is a J that
+    freezes at the build-time TimeSeriesParam value (zero) and
+    silently mismatches F at every fault-event integration step.
+    Forcing the LoopEqnDiff path here avoids the mutable-matrix
+    classifier entirely.
     """
     from Solverz.equation.eqn import _LoopJacEye
-    from Solverz.equation.param import ParamBase
+    from Solverz.equation.param import ParamBase, TimeSeriesParam
+
+    # TimeSeriesParam guard: if any symbol in the canonical expression
+    # corresponds to a TimeSeriesParam in ``var_map``, refuse
+    # translation and force the LoopEqnDiff dense-kernel fallback.
+    # The check is by *name* (not ``isinstance(sym, Para)``) because
+    # canonicalize_kronecker returns sympy Symbols rather than
+    # Solverz Para objects — the original ``m.G_shunt`` Para enters
+    # the body, but ``sp.diff`` walks rebuild the free-symbol set
+    # from sympy Symbol primitives.
+    # Also walk ``Indexed`` bases — the symbol set may include
+    # ``Indexed`` nodes whose base name we want to check.
+    candidate_names = {s.name for s in expr.free_symbols if hasattr(s, 'name')}
+    for idx_node in expr.atoms(sp.Indexed):
+        candidate_names.add(idx_node.base.name)
+    for nm in candidate_names:
+        sol_obj = var_map.get(nm)
+        if isinstance(sol_obj, TimeSeriesParam):
+            raise NotImplementedError(
+                f"LoopEqn J translator: expression contains "
+                f"TimeSeriesParam {nm!r}. The mutable-matrix "
+                f"classifier cannot keep this term alive at runtime "
+                f"(it bakes it at module-build value). Falling back "
+                f"to LoopEqnDiff so the kernel re-evaluates the "
+                f"Param via get_v_t(t) every J call."
+            )
 
     # Top-level: distribute Add. Each addend is classified and
     # translated independently; the result is reassembled with sp.Add.

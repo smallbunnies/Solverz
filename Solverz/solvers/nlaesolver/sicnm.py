@@ -5,6 +5,7 @@ from Solverz.solvers.daesolver.rodas.param import Rodas_param
 from scipy.sparse import eye_array as speye
 from scipy.sparse.linalg import splu, spsolve_triangular
 from scipy.sparse import csc_array, block_array
+from Solverz.solvers.laesolver import lu_decomposition, model_cache
 from Solverz.solvers.parser import dae_io_parser
 from Solverz.solvers.solution import daesol
 
@@ -182,7 +183,7 @@ def sicnm(ae: nAE,
                 # full decomposition
                 tilde_J = block_array([[ZERO, EYE], [Hvp + J, J]])
                 tilde_E = M - dt * rparam.gamma * tilde_J
-                lu = splu(tilde_E)
+                lu = lu_decomposition(tilde_E, cache=model_cache(ae))
         except RuntimeError:
             stats.succeed = False
             break
