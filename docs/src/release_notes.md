@@ -2,6 +2,32 @@
 
 # Release Notes
 
+## 0.8.7
+
+Built-in Radau IIA(5) DAE solver.
+
+### New
+
+- **`Radau` — 3-stage 5th-order Radau IIA fully-implicit Runge-Kutta
+  DAE integrator.** Ported from SciML's `RadauIIA5`
+  (`OrdinaryDiffEqFIRK`) and adapted to Solverz's `nDAE` API.
+  Stiffly accurate (`y_{n+1} = y_n + Z_3`), with simplified Newton
+  iteration in the W-coordinate system that decouples each step into
+  one real and one complex sparse LU factorisation. Adaptive step
+  size uses the Hairer / SciML predictive (Gustafsson) controller.
+  Exposed as `Solverz.Radau`.
+
+  ```python
+  from Solverz import Radau, Opt
+  sol = Radau(ndae, [0.0, 20.0], y0, Opt(rtol=1e-6, atol=1e-9))
+  ```
+
+  Suitable for stiff or oscillatory DAEs that need higher order than
+  `Rodas`. Dense output and terminal/non-terminal event detection
+  both run on the Radau IIA(5) collocation polynomial, so event
+  times are resolved to machine precision regardless of how large
+  the controller lets `h` grow on smooth trajectories.
+
 ## 0.8.6
 
 Mat_Mul fallback diagnostic warnings (#125). When a `Mat_Mul`

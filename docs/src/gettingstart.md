@@ -331,6 +331,7 @@ Below is an overview of the built-in solvers.
 1. `backward_euler()` the [backward Euler method](https://en.wikipedia.org/wiki/Backward_Euler_method).
 2. `implicit_trapezoid()` the [implicit trapezoidal method](https://en.wikipedia.org/wiki/Trapezoidal_rule_(differential_equations)).
 3. `Rodas()` the stiffly accurate Rosenbrock method with adaptive step size, dense output and event detection. One can use it the same as the Ode-series solvers in Matlab. This is the most stable solver in Solverz.
+4. `Radau()` the 3-stage 5th-order Radau IIA fully-implicit Runge-Kutta method, ported from SciML's `RadauIIA5`. Stiffly accurate; recommended for stiff or oscillatory DAEs that need higher order than `Rodas`.
 
 The detailed usage of these solvers can be found in [api reference](https://docs.solverz.org/reference/index.html).
 

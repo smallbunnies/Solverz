@@ -80,4 +80,6 @@ DAE solver
 
 .. autofunction:: Solverz.solvers.daesolver.rodas.Rodas
 
+.. autofunction:: Solverz.solvers.daesolver.radau.Radau
+
 .. autofunction:: Solverz.solvers.daesolver.ode15s.ode15s
