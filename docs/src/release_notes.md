@@ -2,9 +2,11 @@
 
 # Release Notes
 
-## 0.8.7
+## 0.9.0
 
-Built-in Radau IIA(5) DAE solver.
+Built-in Radau IIA(5) DAE solver, SuiteSparse KLU as the default sparse
+linear-solver backend, and a silent-correctness fix for LoopEqn
+Jacobians that multiply a Var by a `TimeSeriesParam`.
 
 ### New
 
@@ -27,6 +29,40 @@ Built-in Radau IIA(5) DAE solver.
   both run on the Radau IIA(5) collocation polynomial, so event
   times are resolved to machine precision regardless of how large
   the controller lets `h` grow on smooth trajectories.
+
+### Changed
+
+- **SuiteSparse KLU is now the default sparse-LU backend.** Newton /
+  Rosenbrock / BDF solves factor sparse Jacobians through a pure-Python
+  ctypes binding to SuiteSparse KLU, with scipy SuperLU as the automatic
+  fallback when `libklu` is missing or the matrix is complex or dense.
+  KLU is roughly a factor of two faster than SuperLU on power-system /
+  IEGS network Jacobians and needs no build step. Override per solve
+  with `Opt(linsolver='superlu')`, for a script with
+  `set_linsolver('superlu')`, for a block with `with linsolver('superlu'):`,
+  or globally with `SOLVERZ_LINSOLVER=superlu`. KLU requires SuiteSparse
+  installed (`brew install suite-sparse` or
+  `conda install -c conda-forge suitesparse`). To reproduce older
+  SuperLU-only results exactly, force SuperLU, since KLU can change
+  adaptive step sequences at the tolerance level.
+
+### Fixed
+
+- **LoopEqn Jacobian silently baked `TimeSeriesParam` contributions.**
+  The matrix-derivative constant classifier in the LoopEqn Jacobian
+  pipeline (`is_constant_matrix_deri`) did not inspect whether a `Para`
+  free symbol was a `TimeSeriesParam`. Any LoopEqn body multiplying a
+  `Var` by a `TimeSeriesParam` factor (e.g. a short-circuit
+  `G_shunt[i] * ux[i]` term) produced a Jacobian whose `F_` correctly
+  evaluated `get_v_t(t)` but whose `J_` froze at the build-time
+  `TimeSeriesParam` value and never updated, corrupting every
+  short-circuit / leak / valve-trip / step-change simulation built that
+  way. The classifier is now `TimeSeriesParam`-aware, and
+  `loop_jac_to_solverz_expr` falls through to a per-cell dynamic kernel
+  that re-evaluates the `TimeSeriesParam` every `J` call.
+- **`Saturation` / `In` now preserve input shape under `@njit`.** The
+  Numba-compiled forms could return a scalar for a length-1 vector
+  input; they now return an array matching the input shape.
 
 ## 0.8.6
 
