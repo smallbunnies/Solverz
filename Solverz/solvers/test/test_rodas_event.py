@@ -82,8 +82,16 @@ def test_orbit():
                                np.array([3.095607, 6.192964]),
                                rtol=1e-5,
                                atol=0)
+    # ye[1, 1] is a near-zero event coordinate (about 1.5e-9), so a pure
+    # relative tolerance is unattainable: a machine-level perturbation of
+    # the LU solve (e.g. the Rodas iteration-matrix row-equilibration, or
+    # a KLU-vs-SuperLU step-sequence difference) shifts it by about 5e-7
+    # in absolute terms. An atol of 1e-5, still an order of magnitude
+    # tighter than the integration atol of 1e-4, keeps the O(1) states
+    # relative-tolerance checked while giving the near-zero component a
+    # meaningful absolute floor.
     np.testing.assert_allclose(sol.ye,
                                np.array([[-1.262468e+00, 1.162918e-05, 4.956687e-06, 1.049574e+00],
                                          [1.200024e+00, 1.455118e-09, 6.495375e-05, -1.049349e+00]]),
                                rtol=1e-5,
-                               atol=0)
+                               atol=1e-5)

@@ -2,6 +2,12 @@
 
 # Release Notes
 
+## 0.9.1
+
+### Fixed
+
+- **`Rodas` produced `NaN` on tightly-coupled, ill-conditioned DAEs.** The Rosenbrock iteration matrix `M - dt * gamma * J` was factored without scaling. On systems whose blocks span very different magnitudes, such as an IEGS model coupling a gas subsystem in Pa with an EPS subsystem in per-unit through an algebraic link, the matrix was ill-conditioned enough that the LU factorization returned values around `1e100` and the integration filled with `NaN`. The iteration matrix is now row-equilibrated by `1 / max|row|` before the LU, matching the BDF `perf_lu` path, and each stage right-hand side is scaled by the same factor so every stage solution is unchanged. This restores a well-conditioned solve on the coupled DAEs while leaving well-scaled problems numerically identical to within row-scaling round-off.
+
 ## 0.9.0
 
 Built-in Radau IIA(5) DAE solver, SuiteSparse KLU as the default sparse
