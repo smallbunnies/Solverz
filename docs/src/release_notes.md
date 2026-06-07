@@ -2,6 +2,12 @@
 
 # Release Notes
 
+## 0.10.2
+
+### Changed
+
+- **`Rodas` decides the row-equilibration reduction once per integration.** The row-scale step needs the row maxima of the iteration matrix, which change every step, but whether that reduction yields a sparse column to densify or an already-dense array is fixed for the whole solve. `Rodas` now judges this once on the first reduction instead of type-checking each step, so the dense path never calls `.toarray()` and the sparse path skips the repeated `hasattr` probe.
+
 ## 0.10.1
 
 ### Fixed

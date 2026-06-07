@@ -122,6 +122,10 @@ def Rodas(dae: nDAE,
     klu_cache = KLUCache() if linsolver == 'klu' else None
     done = False
     reject = 0
+    # Whether the row-equilibration reduction densifies (sparse iteration
+    # matrix) or is already dense is fixed for the whole integration, so
+    # decide it once on the first reduction instead of per step.
+    rscale_to_dense = None
     while not done:
         # step size too small
         # pass
@@ -165,11 +169,15 @@ def Rodas(dae: nDAE,
         # the solve well-conditioned. The rhs is scaled by the same factor,
         # so every stage solution is unchanged.
         Miter = M - dt * rparam.gamma * J
-        # Row max |.|, robust to a sparse, dense-ndarray, or np.matrix
-        # iteration matrix: the dense made_numerical path (sparse=False)
-        # yields a Miter whose row-reduction has no ``.toarray()``.
+        # Row max |.| of the (changing) iteration matrix. A sparse Miter
+        # yields a sparse column that must be densified; a dense Miter
+        # (made_numerical(sparse=False)) yields an ndarray with no
+        # ``.toarray()``. The sparse/dense nature is invariant, so judge
+        # it once (first reduction) rather than per step.
         row_max = np.max(np.abs(Miter), axis=1)
-        if hasattr(row_max, 'toarray'):
+        if rscale_to_dense is None:
+            rscale_to_dense = hasattr(row_max, 'toarray')
+        if rscale_to_dense:
             row_max = row_max.toarray()
         rscale = (1.0 / np.asarray(row_max)).ravel()
         Miter = diags_array(rscale, format='csc') @ Miter
