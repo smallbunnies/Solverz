@@ -238,6 +238,24 @@ class JacBlock:
 
         self.DeriType = DeriType
 
+        # Issue #140: a length-1 Var is classified 'scalar' purely by
+        # size (DiffVarValue.size == 1). But when its derivative is a
+        # *matrix* — e.g. a single-element LoopEqn whose identity block
+        # is the 1x1 ``_LoopJacEye(1)``, or a selection matrix that
+        # collapses several rows onto one DOF — the variable participates
+        # as a 1-element vector of DOFs, not a value broadcast across
+        # rows. The 'scalar'/'matrix' combination has no meaningful
+        # broadcast (it previously raised). Reclassify it as 'vector' so
+        # the (EqnSize, 1) / 1x1 block flows through the vector/matrix
+        # path and a length-1 block behaves identically to the n>=2 case,
+        # which already renders. This is consistent everywhere DiffVarType
+        # is consumed: ParseSp/ParseDen gain the matrix handling, and Hvp
+        # treats every matrix derivative uniformly as not-implemented
+        # regardless of length.
+        if DiffVarType == 'scalar' and DeriType == 'matrix':
+            DiffVarType = 'vector'
+            self.DiffVarType = DiffVarType
+
         # Determine if the matrix derivative depends on variables (mutable) or is constant.
         # Constant: DeriExpr has no Var/IdxVar/iAliasVar/IdxAliasVar in its free symbols
         #           — data never changes between Newton iterations and can be inlined

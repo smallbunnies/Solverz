@@ -157,13 +157,22 @@ def Rodas(dae: nDAE,
         rhs = dae.F(t, y0, p) + rparam.g[0] * dfdt0
         stats.nfeval = stats.nfeval + 1
 
+        # Row-equilibrate the iteration matrix (rscale = 1/max|row|) before
+        # the LU, matching NDF.perf_lu. On tightly-coupled DAEs (e.g. IEGS
+        # with gas-Pa and EPS-pu blocks linked by an algebraic coupling) the
+        # unscaled M - dt*gamma*J is so ill-conditioned that the LU returns
+        # ~1e100 garbage and the integration NaN-storms; row scaling keeps
+        # the solve well-conditioned. The rhs is scaled by the same factor,
+        # so every stage solution is unchanged.
+        Miter = M - dt * rparam.gamma * J
+        rscale = (1.0 / np.max(np.abs(Miter), axis=1).toarray()).ravel()
+        Miter = diags_array(rscale, format='csc') @ Miter
         try:
-            lu = lu_decomposition(M - dt * rparam.gamma * J,
-                                  backend=linsolver, cache=klu_cache)
+            lu = lu_decomposition(Miter, backend=linsolver, cache=klu_cache)
         except RuntimeError:
             break
         stats.ndecomp = stats.ndecomp + 1
-        K[:, 0] = lu.solve(rhs)
+        K[:, 0] = lu.solve(rscale * rhs)
 
         for j in range(1, rparam.s):
             sum_1 = K @ rparam.alpha[:, j]
@@ -172,7 +181,7 @@ def Rodas(dae: nDAE,
 
             rhs = dae.F(t + dt * rparam.a[j], y1, p) + M @ sum_2 + rparam.g[j] * dfdt0
             stats.nfeval = stats.nfeval + 1
-            sol = lu.solve(rhs)
+            sol = lu.solve(rscale * rhs)
             K[:, j] = sol - sum_2
         stats.nsolve += rparam.s
 

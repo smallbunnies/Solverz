@@ -372,6 +372,76 @@ def test_loop_eqn_mass_continuity():
     np.testing.assert_allclose(sol.y['m_pipe'], m_target, atol=1e-8)
 
 
+def test_loop_eqn_single_element_length1():
+    """Regression for issue #140: a single-element ``LoopEqn`` over a
+    length-1 ``Var`` must render and produce a correct 1x1 identity
+    Jacobian block.
+
+    The body ``x[i] - 1`` differentiates to ``KroneckerDelta(i, k)`` →
+    ``_LoopJacEye(1)``, a 1x1 matrix derivative. The diff Var has size
+    1, so the Jacobian builder classified it as 'scalar', and the
+    'scalar'/'matrix' combination previously raised
+    ``TypeError("Matrix derivative of scalar variables not supported!")``
+    in ``JacBlock.__init__``. A matrix derivative of a length-1 Var is
+    now reclassified as a 1-element vector so the block flows through
+    the same vector/matrix path as the n>=2 case (which always
+    rendered).
+    """
+    for jit in (False, True):
+        m = Model()
+        m.x = Var('x', [1.0])
+        i = Idx('i', 1)
+        m.eqn = LoopEqn('eqn', outer_index=i, body=m.x[i] - 1.0, model=m)
+        spf, y0 = m.create_instance()
+        assert spf.eqn_size == spf.vsize == 1
+
+        mdl, y = _mdl_from_module(spf, y0, jit=jit)
+
+        # F(x) = x - 1, zero at the flat start x=1.
+        F_val = np.array(mdl.F(y, mdl.p)).reshape(-1).copy()
+        np.testing.assert_allclose(F_val, [0.0], atol=1e-12)
+
+        # J = d(x-1)/dx = 1, a 1x1 identity block.
+        J = mdl.J(y, mdl.p)
+        Jd = np.asarray(J.todense()) if hasattr(J, 'todense') else np.asarray(J)
+        assert Jd.shape == (1, 1)
+        np.testing.assert_allclose(Jd, [[1.0]], atol=1e-12)
+
+        # Newton solves x - 1 = 0 -> x = 1.
+        sol = nr_method(mdl, y)
+        np.testing.assert_allclose(sol.y['x'], [1.0], atol=1e-10)
+
+
+def test_loop_eqn_single_element_multiple_vars():
+    """Two single-element ``LoopEqn`` devices over distinct length-1
+    Vars must each scatter their 1x1 identity block to the correct
+    (non-zero) equation/variable address, not collapse onto address 0.
+    Guards the sparse-addressing path of the issue #140 fix: the second
+    block lives at row 1 / col 1, so a wrong address would make the
+    2x2 Jacobian non-identity and the Newton solve diverge or land on
+    the wrong root.
+    """
+    for jit in (False, True):
+        m = Model()
+        m.x = Var('x', [2.0])
+        m.z = Var('z', [5.0])
+        i = Idx('i', 1)
+        m.eqn_x = LoopEqn('eqn_x', outer_index=i, body=m.x[i] - 1.0, model=m)
+        m.eqn_z = LoopEqn('eqn_z', outer_index=i, body=m.z[i] - 3.0, model=m)
+        spf, y0 = m.create_instance()
+        assert spf.eqn_size == spf.vsize == 2
+
+        mdl, y = _mdl_from_module(spf, y0, jit=jit)
+
+        J = mdl.J(y, mdl.p)
+        Jd = np.asarray(J.todense()) if hasattr(J, 'todense') else np.asarray(J)
+        np.testing.assert_allclose(Jd, np.eye(2), atol=1e-12)
+
+        sol = nr_method(mdl, y)
+        np.testing.assert_allclose(sol.y['x'], [1.0], atol=1e-10)
+        np.testing.assert_allclose(sol.y['z'], [3.0], atol=1e-10)
+
+
 def _build_eps_minimal_model(nb=3):
     """Shared model factory for the Phase 0 minimum + JIT path tests."""
     from Solverz import LoopEqn
