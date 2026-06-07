@@ -256,19 +256,23 @@ def create_python_module(module_name,
     # Create the parent directory if it doesn't exist
     os.makedirs(location, exist_ok=True)
 
-    # Create an empty __init__.py file
+    # Generated files are Python source, which the interpreter decodes as
+    # UTF-8 by default (PEP 3120). Write them as UTF-8 explicitly so any
+    # non-ASCII content (e.g. provenance docstrings) round-trips on
+    # interpreters whose locale default is not UTF-8, such as Windows
+    # (cp1252), where ``open(..., "w")`` would otherwise corrupt them.
     init_path = os.path.join(location, "__init__.py")
-    with open(init_path, "w") as file:
+    with open(init_path, "w", encoding="utf-8") as file:
         file.write(initiate_code)
 
     # Create the file with the dependency code
     module_path = os.path.join(location, "dependency.py")
-    with open(module_path, "w") as file:
+    with open(module_path, "w", encoding="utf-8") as file:
         file.write(dependency_code)
 
     # Create the file with the module code
     module_path = os.path.join(location, "num_func.py")
-    with open(module_path, "w") as file:
+    with open(module_path, "w", encoding="utf-8") as file:
         file.write(module_code)
 
     save(auxiliary, os.path.join(location, "param_and_setting.pkl"))

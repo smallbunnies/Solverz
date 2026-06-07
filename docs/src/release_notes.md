@@ -2,6 +2,12 @@
 
 # Release Notes
 
+## 0.10.1
+
+### Fixed
+
+- **Generated modules with provenance docstrings failed to import on Windows.** The 0.10.0 provenance docstrings used a Unicode em-dash as the source separator, and the module printer wrote the generated `.py` files with `open(..., "w")`, which uses the OS locale encoding. On Windows (cp1252) the em-dash was written as byte `0x97`, so importing the generated module raised `SyntaxError: 'utf-8' codec can't decode byte 0x97`. This only affected stamped models, so it surfaced once SolMuseum / SolPSDyn began calling `stamp_source`. The printer now writes all generated `.py` files as UTF-8 explicitly, and `format_source` uses a plain ASCII separator, so generated modules import on every platform.
+
 ## 0.10.0
 
 Self-describing generated modules: every `module_printer(...).render()` artifact now carries provenance docstrings, and a new `stamp_source` helper lets reusable components tag the equations they contribute.
