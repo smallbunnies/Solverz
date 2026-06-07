@@ -29,7 +29,10 @@ def _with_docstring(func_src: str, doc: str) -> str:
     """
     if not doc:
         return func_src
-    doc = ' '.join(doc.split()).replace('"""', "'''")
+    # Collapse to one line, neutralise embedded triple-quotes, and drop a
+    # trailing '"' or '\\' that would otherwise escape/extend the closing
+    # triple-quote and produce uncompilable source.
+    doc = ' '.join(doc.split()).replace('"""', "'''").rstrip('"\\')
     lines = func_src.split('\n')
     for i, ln in enumerate(lines):
         stripped = ln.lstrip()
