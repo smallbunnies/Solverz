@@ -2,7 +2,23 @@
 
 # Release Notes
 
-## 0.9.1
+## 0.10.0
+
+Self-describing generated modules: every `module_printer(...).render()` artifact now carries provenance docstrings, and a new `stamp_source` helper lets reusable components tag the equations they contribute.
+
+### New
+
+- **Generated modules are now self-describing through provenance docstrings.** The module-level docstring in the generated `__init__.py` records the generating Solverz version, a UTC generation timestamp, a `Provenance:` block grouping each contributing package and version with its components, and an `Equations:` table mapping every `inner_F` function to its equation name, declaration-order row range, and source. Each F equation function and each J derivative kernel in `num_func.py` is annotated with a one-line docstring naming its equation, rendered as the equation name for F residuals and as `d(eqn)/d(var)` for J kernels, including the loop-jacobian kernels of `LoopEqn`. When an equation was stamped, the docstring also carries its source as `package version / component`.
+
+  ```python
+  from Solverz import stamp_source
+
+  stamp_source(model, component='gt', package='SolMuseum', version='0.2.0')
+  ```
+
+  Reusable building blocks call `stamp_source(model, component=..., package=..., version=...)` once per fragment to tag every equation they contribute. The default `overwrite=False` leaves equations that already carry a more specific source untouched, so a composite block does not clobber the stamps of the sub-fragments it aggregates. Solverz core never imports the downstream packages; the version travels as data on the equation objects.
+
+  Plain models that are never stamped degrade gracefully: F and J docstrings carry the equation name only, and the module docstring groups their equations under `(user-defined)`. `num_func.py` carries no timestamp and is byte-stable across renders of the same model, so only the `__init__.py` header timestamp varies between two renders.
 
 ### Fixed
 

@@ -41,6 +41,11 @@ class Eqn:
 
         self.NUM_EQN: Callable = self.lambdify()
         self.derivatives: Dict[str, EqnDiff] = dict()
+        # Optional provenance: None, or a dict
+        # {'component': str, 'package': str, 'version': str} set by
+        # stamp_source(). Read defensively elsewhere via
+        # getattr(eqn, 'source', None) so old pickles keep working.
+        self.source = None
 
     def obtain_symbols(self) -> Dict[str, Symbol]:
         temp_dict = dict()
@@ -1102,6 +1107,7 @@ class LoopEqn(Eqn):
         self.n_outer = n_outer
         self.body = body
         self.var_map = dict(var_map)
+        self.source = None  # see Eqn.source; LoopEqn bypasses Eqn.__init__
 
         # Build SYMBOLS — what the model assembler uses to discover
         # the Var / Param dependencies of this equation. Maps the
