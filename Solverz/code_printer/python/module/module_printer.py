@@ -13,6 +13,31 @@ from Solverz.code_printer.python.module.mutable_mat_analyzer import (
     generate_block_function_code,
     MutableMatBlockMapping,
 )
+from Solverz.equation.source import format_source
+
+
+def _with_docstring(func_src: str, doc: str) -> str:
+    """Insert ``doc`` as a one-line docstring immediately after the
+    ``def …:`` line of a rendered function-source string.
+
+    ``func_src`` is the text of a single function whose first ``def``
+    line ends with ``:``. ``doc`` is sanitised to one physical line
+    (collapsed whitespace, no triple quotes). Returns ``func_src``
+    unchanged when ``doc`` is empty. Works uniformly for the AST-rendered
+    (pycode) F/J functions and the string-rendered LoopEqn / loop-jac
+    kernels because all of them start with a ``def`` line.
+    """
+    if not doc:
+        return func_src
+    doc = ' '.join(doc.split()).replace('"""', "'''")
+    lines = func_src.split('\n')
+    for i, ln in enumerate(lines):
+        stripped = ln.lstrip()
+        if stripped.startswith('def ') and ln.rstrip().endswith(':'):
+            indent = ' ' * (len(ln) - len(stripped) + 4)
+            lines.insert(i + 1, f'{indent}"""{doc}"""')
+            break
+    return '\n'.join(lines)
 
 
 class MutableMatJacDataModule(Function):

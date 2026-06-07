@@ -53,3 +53,29 @@ def test_stamp_source_ignores_non_equations():
     # Vars/Params untouched; only the Eqn is stamped.
     assert m.e.source is not None
     assert not hasattr(m.x, 'source') or m.x.source is None
+
+
+from Solverz.code_printer.python.module.module_printer import _with_docstring
+
+
+def test_with_docstring_inserts_after_def_line():
+    src = "def inner_F0(x, y):\n    return x + y\n"
+    out = _with_docstring(src, 'P_eqn — Pkg 1.0 / comp')
+    lines = out.split('\n')
+    assert lines[0] == 'def inner_F0(x, y):'
+    assert lines[1].strip().startswith('"""')
+    assert 'P_eqn' in lines[1]
+    assert lines[2].strip() == 'return x + y'
+
+
+def test_with_docstring_sanitizes_to_single_line():
+    src = "def f():\n    return 1\n"
+    out = _with_docstring(src, 'line1\nline2  with   spaces')
+    doc_line = out.split('\n')[1]
+    assert doc_line.count('"""') == 2          # opening + closing on one line
+    assert 'line1 line2 with spaces' in doc_line
+
+
+def test_with_docstring_noop_when_empty_doc():
+    src = "def f():\n    return 1\n"
+    assert _with_docstring(src, '') == src
