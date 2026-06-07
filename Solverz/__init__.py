@@ -12,6 +12,7 @@ from Solverz.utilities.profile import count_time
 from Solverz.utilities.miscellaneous import derive_incidence_matrix
 from Solverz.variable.ssymbol import Var, AliasVar
 from Solverz.model.basic import Model
+from Solverz.equation.source import stamp_source, format_source
 
 from importlib.metadata import version, PackageNotFoundError
 
