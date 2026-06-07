@@ -279,7 +279,9 @@ def print_J(eqs_type: str,
 def print_inner_J(var_addr: Address,
                   PARAM: Dict[str, ParamBase],
                   jac: Jac,
-                  nstep: int = 0):
+                  nstep: int = 0,
+                  source_map=None):
+    source_map = source_map or {}
     var_assignments, var_list = print_var(var_addr,
                                           nstep)
     # inner_J must not receive sparse matrices (they're handled in J_ wrapper).
@@ -343,7 +345,9 @@ def print_inner_J(var_addr: Address,
                     block_source = ed.kernel_source.replace(
                         ed._kernel_func_name, kernel_fn_name
                     )
-                    mut_mat_block_funcs.append(block_source)
+                    _doc = (f"d({eqn_name})/d({var.name})"
+                            f"{format_source(source_map.get(eqn_name))}")
+                    mut_mat_block_funcs.append(_with_docstring(block_source, _doc))
 
                     row_key = f'_sz_loop_jac_row_{block_idx}'
                     col_key = f'_sz_loop_jac_col_{block_idx}'
@@ -449,7 +453,10 @@ def print_inner_J(var_addr: Address,
                 fp1 = FunctionPrototype(real, f'inner_J{int(count)}', SymbolsInDeri)
                 body1 = [Return(rhs)]
                 fd1 = FunctionDefinition.from_FunctionPrototype(fp1, body1)
-                code_sub_inner_J_blocks.append(pycode(fd1, fully_qualified_modules=False))
+                _doc = (f"d({eqn_name})/d({var.name})"
+                        f"{format_source(source_map.get(eqn_name))}")
+                code_sub_inner_J_blocks.append(
+                    _with_docstring(pycode(fd1, fully_qualified_modules=False), _doc))
                 count += 1
             addr_by_ele_0 += jb.SpEleSize
 

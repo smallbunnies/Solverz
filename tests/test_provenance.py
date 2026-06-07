@@ -126,3 +126,47 @@ def test_f_functions_name_only_when_unsourced():
     num_func = _read(mod, 'num_func.py')
     assert '"""e"""' in num_func          # name-only docstring
     assert ' / ' not in num_func.split('"""e"""')[0][-200:]  # no source suffix nearby
+
+
+def _demo_model_nonconstant_jac():
+    """A scalar model whose Jacobian is *non-constant*, so the printer
+    emits per-derivative ``inner_J{k}`` kernels (a linear model folds
+    its constant derivatives into the static ``_data_`` and emits no
+    scalar kernel at all)."""
+    m = Model()
+    m.x = Var('x', np.ones(2))
+    m.b = Param('b', np.array([1.0, 2.0]))
+    m.e0 = Eqn('e0', m.x[0] ** 2 - m.b[0])   # d/dx0 = 2*x0 -> non-constant
+    m.e1 = Eqn('e1', m.x[1] ** 2 - m.b[1])
+    stamp_source(m, component='demo', package='Pkg', version='1.2.3')
+    return m
+
+
+def test_j_kernels_have_derivative_docstrings():
+    mod = _render(_demo_model_nonconstant_jac(), jit=False)
+    num_func = _read(mod, 'num_func.py')
+    # Scalar J kernels annotated as d(eqn)/d(var) with source. The diff
+    # var of a scalar block is the indexed element, so var.name is the
+    # ``x[k]`` form, e.g. ``d(e0)/d(x[0])``.
+    assert 'd(e0)/d(x[' in num_func or 'd(e1)/d(x[' in num_func
+    assert 'Pkg 1.2.3 / demo' in num_func.split('def inner_J')[-1] \
+        or 'Pkg 1.2.3 / demo' in num_func
+
+
+def test_loop_jac_kernel_has_derivative_docstring():
+    """A LoopEqn whose Jacobian flows through the dense ``LoopEqnDiff``
+    kernel path (``_sz_loop_jac_kernel_N``) must also carry the
+    ``d(eqn)/d(var)`` + source docstring. A bilinear body with no
+    matrix Param carrier forces that path."""
+    m = Model()
+    m.x = Var('x', np.array([1.5, 2.0, 2.5]))
+    m.b = Param('b', np.zeros(3))
+    i = Idx('i', 3)
+    j = Idx('j', 3)
+    m.le = LoopEqn('le', outer_index=i, body=Sum(m.x[i] * m.x[j], j) - m.b[i], model=m)
+    stamp_source(m, component='demo', package='Pkg', version='1.0')
+    num_func = _read(_render(m, jit=False), 'num_func.py')
+    assert '_sz_loop_jac_kernel_' in num_func   # the kernel path is exercised
+    kernel = num_func.split('def _sz_loop_jac_kernel_')[-1]
+    assert 'd(le)/d(x)' in kernel
+    assert 'Pkg 1.0 / demo' in kernel

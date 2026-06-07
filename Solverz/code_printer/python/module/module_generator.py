@@ -95,10 +95,12 @@ def render_modules(eqs: SymEquations,
                                          eqs.nstep,
                                          precompute_info=precompute_info_F)
 
+    source_map = {n: getattr(e, 'source', None) for n, e in eqs.EQNs.items()}
     J = print_inner_J(eqs.var_address,
                       eqs.PARAM,
                       eqs.jac,
-                      eqs.nstep)
+                      eqs.nstep,
+                      source_map=source_map)
     code_dict["J"] = print_J(eqs.__class__.__name__,
                              eqs.eqn_size,
                              eqs.var_address,
