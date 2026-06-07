@@ -165,7 +165,13 @@ def Rodas(dae: nDAE,
         # the solve well-conditioned. The rhs is scaled by the same factor,
         # so every stage solution is unchanged.
         Miter = M - dt * rparam.gamma * J
-        rscale = (1.0 / np.max(np.abs(Miter), axis=1).toarray()).ravel()
+        # Row max |.|, robust to a sparse, dense-ndarray, or np.matrix
+        # iteration matrix: the dense made_numerical path (sparse=False)
+        # yields a Miter whose row-reduction has no ``.toarray()``.
+        row_max = np.max(np.abs(Miter), axis=1)
+        if hasattr(row_max, 'toarray'):
+            row_max = row_max.toarray()
+        rscale = (1.0 / np.asarray(row_max)).ravel()
         Miter = diags_array(rscale, format='csc') @ Miter
         try:
             lu = lu_decomposition(Miter, backend=linsolver, cache=klu_cache)
