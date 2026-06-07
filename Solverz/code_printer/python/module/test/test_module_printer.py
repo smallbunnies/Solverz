@@ -427,12 +427,15 @@ def test_print_inner_F():
 
 
 expected9 = """def inner_F0(delta, omega):
+    \"\"\"a\"\"\"
     return delta*omega
 """.strip()
 expected10 = """def inner_F1(lam, x, y):
+    \"\"\"b\"\"\"
     return lam*y + x
 """.strip()
 expected11 = """def inner_F2(_sz_mm_0):
+    \"\"\"c\"\"\"
     return _sz_mm_0
 """.strip()
 

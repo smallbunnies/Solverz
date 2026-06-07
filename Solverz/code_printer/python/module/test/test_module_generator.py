@@ -101,9 +101,9 @@ def test_AE_module_printer():
 
     assert inspect.getsource(
         inner_F) == '@njit(cache=True)\ndef inner_F(_F_, x):\n    _F_[0:1] = inner_F0(x)\n    _F_[1:2] = inner_F1(x)\n    return _F_\n'
-    assert inspect.getsource(inner_F0.func_code) == '@njit(cache=True)\ndef inner_F0(x):\n    return 2*x[0] + x[1]\n'
+    assert inspect.getsource(inner_F0.func_code) == '@njit(cache=True)\ndef inner_F0(x):\n    """f1"""\n    return 2*x[0] + x[1]\n'
     assert inspect.getsource(
-        inner_F1.func_code) == '@njit(cache=True)\ndef inner_F1(x):\n    return x[0]**2 + np.sin(x[1])\n'
+        inner_F1.func_code) == '@njit(cache=True)\ndef inner_F1(x):\n    """f2"""\n    return x[0]**2 + np.sin(x[1])\n'
     assert inspect.getsource(
         inner_J) == '@njit(cache=True)\ndef inner_J(_data_, x):\n    _data_[2:3] = inner_J0(x)\n    _data_[3:4] = inner_J1(x)\n    return _data_\n'
 
@@ -128,8 +128,8 @@ def test_AE_module_printer():
 
     assert inspect.getsource(
         inner_F) == 'def inner_F(_F_, x):\n    _F_[0:1] = inner_F0(x)\n    _F_[1:2] = inner_F1(x)\n    return _F_\n'
-    assert inspect.getsource(inner_F0) == 'def inner_F0(x):\n    return 2*x[0] + x[1]\n'
-    assert inspect.getsource(inner_F1) == 'def inner_F1(x):\n    return x[0]**2 + np.sin(x[1])\n'
+    assert inspect.getsource(inner_F0) == 'def inner_F0(x):\n    """f1"""\n    return 2*x[0] + x[1]\n'
+    assert inspect.getsource(inner_F1) == 'def inner_F1(x):\n    """f2"""\n    return x[0]**2 + np.sin(x[1])\n'
     assert inspect.getsource(
         inner_J) == 'def inner_J(_data_, x):\n    _data_[2:3] = inner_J0(x)\n    _data_[3:4] = inner_J1(x)\n    return _data_\n'
 
@@ -157,11 +157,13 @@ def inner_F(_F_, x, y, A_data, A_indices, A_indptr, A_shape0, b, c):
 
 expected_inner_F0_mat = """@njit(cache=True)
 def inner_F0(A_data, A_indices, A_indptr, A_shape0, b, x):
+    \"\"\"eqnf\"\"\"
     return b - SolCF.csc_matvec(A_data, A_indices, A_indptr, A_shape0, x)
 """
 
 expected_inner_F1_mat = """@njit(cache=True)
 def inner_F1(c, y):
+    \"\"\"eqng\"\"\"
     return c - y
 """
 

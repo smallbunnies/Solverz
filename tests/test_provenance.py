@@ -79,3 +79,50 @@ def test_with_docstring_sanitizes_to_single_line():
 def test_with_docstring_noop_when_empty_doc():
     src = "def f():\n    return 1\n"
     assert _with_docstring(src, '') == src
+
+
+import os, sys, tempfile, importlib, uuid
+
+
+def _render(model, jit=False):
+    """create_instance + module_printer render; return the module dir."""
+    from Solverz import module_printer
+    spf, y0 = model.create_instance()
+    d = tempfile.mkdtemp(prefix='sz_prov_')
+    name = f'prov_{uuid.uuid4().hex[:8]}'
+    module_printer(spf, y0, name, directory=d, jit=jit).render()
+    return os.path.join(d, name)
+
+
+def _read(path, fname):
+    with open(os.path.join(path, fname)) as f:
+        return f.read()
+
+
+def _demo_model_with_source():
+    m = Model()
+    m.x = Var('x', np.ones(2))
+    m.b = Param('b', np.array([1.0, 2.0]))
+    m.e0 = Eqn('e0', m.x[0] - m.b[0])
+    m.e1 = Eqn('e1', m.x[1] - m.b[1])
+    stamp_source(m, component='demo', package='Pkg', version='1.2.3')
+    return m
+
+
+def test_f_functions_have_source_docstrings():
+    mod = _render(_demo_model_with_source(), jit=False)
+    num_func = _read(mod, 'num_func.py')
+    # Each inner_F has a docstring naming its equation + source.
+    assert '"""e0' in num_func or '"""e1' in num_func
+    assert 'Pkg 1.2.3 / demo' in num_func
+
+
+def test_f_functions_name_only_when_unsourced():
+    m = Model()
+    m.x = Var('x', np.ones(1))
+    m.b = Param('b', np.array([1.0]))
+    m.e = Eqn('e', m.x[0] - m.b[0])
+    mod = _render(m, jit=False)
+    num_func = _read(mod, 'num_func.py')
+    assert '"""e"""' in num_func          # name-only docstring
+    assert ' / ' not in num_func.split('"""e"""')[0][-200:]  # no source suffix nearby

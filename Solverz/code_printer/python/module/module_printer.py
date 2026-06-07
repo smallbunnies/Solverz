@@ -1311,7 +1311,9 @@ def print_sub_inner_F(EQNs: Dict[str, Eqn]):
             # ``mut_mat_mappings`` by ``render_modules``.
             arg_names = eqn.njit_arg_names()
             args = [symbols(v, real=True) for v in arg_names]
-            code_blocks.append(eqn.print_njit_source(f'inner_F{count}'))
+            _doc = f"{eqn_name}{format_source(getattr(eqn, 'source', None))}"
+            code_blocks.append(_with_docstring(
+                eqn.print_njit_source(f'inner_F{count}'), _doc))
             precompute_info.append({
                 'eqn_name': eqn_name,
                 'new_rhs': eqn.RHS,
@@ -1328,7 +1330,9 @@ def print_sub_inner_F(EQNs: Dict[str, Eqn]):
             fp = FunctionPrototype(real, f'inner_F{count}', args)
             body = [Return(eqn.RHS)]
             fd = FunctionDefinition.from_FunctionPrototype(fp, body)
-            code_blocks.append(pycode(fd, fully_qualified_modules=False))
+            _doc = f"{eqn_name}{format_source(getattr(eqn, 'source', None))}"
+            code_blocks.append(_with_docstring(
+                pycode(fd, fully_qualified_modules=False), _doc))
             precompute_info.append({
                 'eqn_name': eqn_name,
                 'new_rhs': eqn.RHS,
@@ -1393,7 +1397,9 @@ def print_sub_inner_F(EQNs: Dict[str, Eqn]):
         fp = FunctionPrototype(real, f'inner_F{count}', ordered_args)
         body = [Return(new_rhs)]
         fd = FunctionDefinition.from_FunctionPrototype(fp, body)
-        code_blocks.append(pycode(fd, fully_qualified_modules=False))
+        _doc = f"{eqn_name}{format_source(getattr(eqn, 'source', None))}"
+        code_blocks.append(_with_docstring(
+            pycode(fd, fully_qualified_modules=False), _doc))
 
         precompute_info.append({
             'eqn_name': eqn_name,
