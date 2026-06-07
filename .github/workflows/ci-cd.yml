@@ -53,6 +53,17 @@ jobs:
         repository: 'smallbunnies/SolMuseum'
         ref: 'main'
 
+    - name: Install IPOPT
+      shell: pwsh
+      env:
+        IPOPT_VERSION: "3.14.12"
+      run: |
+        $url = "https://github.com/coin-or/Ipopt/releases/download/releases%2F$env:IPOPT_VERSION/Ipopt-$env:IPOPT_VERSION-win64-msvs2019-md.zip"
+        Invoke-WebRequest -Uri $url -OutFile Ipopt.zip
+        Expand-Archive -Path Ipopt.zip -DestinationPath .
+        $ipoptPath = "$pwd\Ipopt-$env:IPOPT_VERSION-win64-msvs2019-md\bin"
+        echo "$ipoptPath" >> $env:GITHUB_PATH
+
     - name: Install uv
       uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57
       with:
