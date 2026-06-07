@@ -18,6 +18,21 @@ Use these URLs whenever linking to Solverz docs from code, tests, comments, comm
 - Prefer composition over inheritance
 - Code style follows existing patterns in the codebase
 
+## Repository topology and merge target
+
+This working copy's `origin` is the fork **`rzyu45/Solverz-dev`**, whose `main` is stale and is **not** used for releases. The real upstream is **`smallbunnies/Solverz`** — the published PyPI package, and the repo whose CI gates and releases actually run.
+
+**Always merge changes into the upstream `smallbunnies/Solverz` `main` branch, never the fork's `main`.** Day-to-day development happens on the fork's `dev` branch; open every PR against `smallbunnies/Solverz:main`. After an upstream merge, keep the fork's `dev` current by merging `smallbunnies/Solverz:main` back into it so `dev` never falls behind.
+
+Add the upstream remote once:
+
+```shell
+git remote add upstream https://github.com/smallbunnies/Solverz.git
+git fetch upstream
+```
+
+Throughout the release process below, every reference to `main` means **`smallbunnies/Solverz:main`** (upstream), not the fork's `main`.
+
 ## Architecture Notes
 
 - **Symbolic layer** (`Solverz/sym_algebra/`): SymPy-based symbolic expressions, functions, and matrix calculus
