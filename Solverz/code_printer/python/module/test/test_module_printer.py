@@ -240,9 +240,11 @@ expected2 = """def inner_J(_data_, omega, x, y, z, ax, lam, G6):
     return _data_
 """.strip()
 expected3 = """def inner_J0(y):
+    \"\"\"d(b)/d(x[0])\"\"\"
     return y*np.ones(3)
 """.strip()
 expected4 = """def inner_J1(y):
+    \"\"\"d(c)/d(omega[1:4])\"\"\"
     return y**2
 """.strip()
 expected5 = """def inner_J(_data_, omega, x, y, z, omega_tag_0, x_tag_0, y_tag_0, z_tag_0, ax, lam, G6):
@@ -427,12 +429,15 @@ def test_print_inner_F():
 
 
 expected9 = """def inner_F0(delta, omega):
+    \"\"\"a\"\"\"
     return delta*omega
 """.strip()
 expected10 = """def inner_F1(lam, x, y):
+    \"\"\"b\"\"\"
     return lam*y + x
 """.strip()
 expected11 = """def inner_F2(_sz_mm_0):
+    \"\"\"c\"\"\"
     return _sz_mm_0
 """.strip()
 

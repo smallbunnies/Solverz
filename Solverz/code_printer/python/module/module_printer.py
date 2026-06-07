@@ -13,6 +13,34 @@ from Solverz.code_printer.python.module.mutable_mat_analyzer import (
     generate_block_function_code,
     MutableMatBlockMapping,
 )
+from Solverz.equation.source import format_source
+
+
+def _with_docstring(func_src: str, doc: str) -> str:
+    """Insert ``doc`` as a one-line docstring immediately after the
+    ``def …:`` line of a rendered function-source string.
+
+    ``func_src`` is the text of a single function whose first ``def``
+    line ends with ``:``. ``doc`` is sanitised to one physical line
+    (collapsed whitespace, no triple quotes). Returns ``func_src``
+    unchanged when ``doc`` is empty. Works uniformly for the AST-rendered
+    (pycode) F/J functions and the string-rendered LoopEqn / loop-jac
+    kernels because all of them start with a ``def`` line.
+    """
+    if not doc:
+        return func_src
+    # Collapse to one line, neutralise embedded triple-quotes, and drop a
+    # trailing '"' or '\\' that would otherwise escape/extend the closing
+    # triple-quote and produce uncompilable source.
+    doc = ' '.join(doc.split()).replace('"""', "'''").rstrip('"\\')
+    lines = func_src.split('\n')
+    for i, ln in enumerate(lines):
+        stripped = ln.lstrip()
+        if stripped.startswith('def ') and ln.rstrip().endswith(':'):
+            indent = ' ' * (len(ln) - len(stripped) + 4)
+            lines.insert(i + 1, f'{indent}"""{doc}"""')
+            break
+    return '\n'.join(lines)
 
 
 class MutableMatJacDataModule(Function):
@@ -254,7 +282,9 @@ def print_J(eqs_type: str,
 def print_inner_J(var_addr: Address,
                   PARAM: Dict[str, ParamBase],
                   jac: Jac,
-                  nstep: int = 0):
+                  nstep: int = 0,
+                  source_map=None):
+    source_map = source_map or {}
     var_assignments, var_list = print_var(var_addr,
                                           nstep)
     # inner_J must not receive sparse matrices (they're handled in J_ wrapper).
@@ -318,7 +348,9 @@ def print_inner_J(var_addr: Address,
                     block_source = ed.kernel_source.replace(
                         ed._kernel_func_name, kernel_fn_name
                     )
-                    mut_mat_block_funcs.append(block_source)
+                    _doc = (f"d({eqn_name})/d({var.name})"
+                            f"{format_source(source_map.get(eqn_name))}")
+                    mut_mat_block_funcs.append(_with_docstring(block_source, _doc))
 
                     row_key = f'_sz_loop_jac_row_{block_idx}'
                     col_key = f'_sz_loop_jac_col_{block_idx}'
@@ -424,7 +456,10 @@ def print_inner_J(var_addr: Address,
                 fp1 = FunctionPrototype(real, f'inner_J{int(count)}', SymbolsInDeri)
                 body1 = [Return(rhs)]
                 fd1 = FunctionDefinition.from_FunctionPrototype(fp1, body1)
-                code_sub_inner_J_blocks.append(pycode(fd1, fully_qualified_modules=False))
+                _doc = (f"d({eqn_name})/d({var.name})"
+                        f"{format_source(source_map.get(eqn_name))}")
+                code_sub_inner_J_blocks.append(
+                    _with_docstring(pycode(fd1, fully_qualified_modules=False), _doc))
                 count += 1
             addr_by_ele_0 += jb.SpEleSize
 
@@ -1286,7 +1321,9 @@ def print_sub_inner_F(EQNs: Dict[str, Eqn]):
             # ``mut_mat_mappings`` by ``render_modules``.
             arg_names = eqn.njit_arg_names()
             args = [symbols(v, real=True) for v in arg_names]
-            code_blocks.append(eqn.print_njit_source(f'inner_F{count}'))
+            _doc = f"{eqn_name}{format_source(getattr(eqn, 'source', None))}"
+            code_blocks.append(_with_docstring(
+                eqn.print_njit_source(f'inner_F{count}'), _doc))
             precompute_info.append({
                 'eqn_name': eqn_name,
                 'new_rhs': eqn.RHS,
@@ -1303,7 +1340,9 @@ def print_sub_inner_F(EQNs: Dict[str, Eqn]):
             fp = FunctionPrototype(real, f'inner_F{count}', args)
             body = [Return(eqn.RHS)]
             fd = FunctionDefinition.from_FunctionPrototype(fp, body)
-            code_blocks.append(pycode(fd, fully_qualified_modules=False))
+            _doc = f"{eqn_name}{format_source(getattr(eqn, 'source', None))}"
+            code_blocks.append(_with_docstring(
+                pycode(fd, fully_qualified_modules=False), _doc))
             precompute_info.append({
                 'eqn_name': eqn_name,
                 'new_rhs': eqn.RHS,
@@ -1368,7 +1407,9 @@ def print_sub_inner_F(EQNs: Dict[str, Eqn]):
         fp = FunctionPrototype(real, f'inner_F{count}', ordered_args)
         body = [Return(new_rhs)]
         fd = FunctionDefinition.from_FunctionPrototype(fp, body)
-        code_blocks.append(pycode(fd, fully_qualified_modules=False))
+        _doc = f"{eqn_name}{format_source(getattr(eqn, 'source', None))}"
+        code_blocks.append(_with_docstring(
+            pycode(fd, fully_qualified_modules=False), _doc))
 
         precompute_info.append({
             'eqn_name': eqn_name,
