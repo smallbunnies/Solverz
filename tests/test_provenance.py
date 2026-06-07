@@ -230,3 +230,36 @@ def test_with_docstring_trailing_quote_or_backslash_compiles():
     for bad in ['ends in quote"', 'ends in backslash\\', 'x"', 'y\\']:
         out = _with_docstring("def f():\n    return 1\n", bad)
         compile(out, '<test>', 'exec')  # raises SyntaxError if malformed
+
+
+def test_generated_module_is_ascii_when_source_is_ascii():
+    """Generated .py stays pure ASCII for ASCII-stamped models, so it
+    imports on interpreters whose default source encoding is not UTF-8.
+
+    Regression: format_source used a Unicode em-dash, which the printer
+    wrote with the OS locale encoding (cp1252 on Windows -> byte 0x97),
+    breaking the UTF-8 import of the generated module for stamped models.
+    """
+    mod = _render(_demo_model_with_source(), jit=False)
+    for fname in ('num_func.py', '__init__.py'):
+        text = _read(mod, fname)
+        bad = sorted({c for c in text if not c.isascii()})
+        assert not bad, f"{fname} has non-ASCII chars: {bad!r}"
+
+
+def test_generated_module_with_nonascii_source_is_utf8_and_imports():
+    """A non-ASCII provenance string is written as UTF-8 and the module
+    still imports (guards the explicit encoding='utf-8' on file write)."""
+    import importlib
+    m = Model()
+    m.x = Var('x', np.ones(1))
+    m.b = Param('b', np.array([1.0]))
+    m.e = Eqn('e', m.x[0] - m.b[0])
+    stamp_source(m, component='café', package='SolMüseum', version='0.3.0')
+    mod = _render(m, jit=False)
+    # The generated source must be valid UTF-8.
+    with open(os.path.join(mod, 'num_func.py'), encoding='utf-8') as f:
+        f.read()
+    # And it must import without a SyntaxError (the original failure mode).
+    sys.path.insert(0, os.path.dirname(mod))
+    importlib.import_module(os.path.basename(mod))

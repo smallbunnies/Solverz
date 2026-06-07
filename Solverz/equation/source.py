@@ -46,9 +46,15 @@ def stamp_source(model, *, component, package, version, overwrite=False):
 
 
 def format_source(source):
-    """Return a one-line ``' — <package> <version> / <component>'`` suffix
-    for a source dict, or ``''`` when ``source`` is falsy."""
+    """Return a one-line ``' - <package> <version> / <component>'`` suffix
+    for a source dict, or ``''`` when ``source`` is falsy.
+
+    The separator is plain ASCII on purpose: this string is embedded as a
+    docstring inside generated ``.py`` source, and a non-ASCII character
+    (e.g. an em-dash) breaks importing that module on interpreters whose
+    default source encoding is not UTF-8.
+    """
     if not source:
         return ''
-    return (f" — {source.get('package', '?')} "
+    return (f" - {source.get('package', '?')} "
             f"{source.get('version', '?')} / {source.get('component', '?')}")
