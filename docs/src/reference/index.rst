@@ -82,4 +82,8 @@ DAE solver
 
 .. autofunction:: Solverz.solvers.daesolver.radau.Radau
 
+.. autofunction:: Solverz.solvers.daesolver.pe.PE
+
+.. autofunction:: Solverz.solvers.daesolver.adams_bdf.AdamsBDF
+
 .. autofunction:: Solverz.solvers.daesolver.ode15s.ode15s
