@@ -2,6 +2,12 @@
 
 # Release Notes
 
+## 0.10.3
+
+### New
+
+- **`PE` and `AdamsBDF` are built-in DAE solvers.** `PE` provides fixed-step partitioned-explicit integration with Euler and modified-Euler differential updates followed by an algebraic Newton solve. `AdamsBDF` provides a variable-step mixed Adams-BDF method that applies Adams treatment to differential variables and BDF treatment to algebraic variables. Both solvers are exported from the public `Solverz` namespace and are documented in the DAE solver API reference.
+
 ## 0.10.2
 
 ### Changed
