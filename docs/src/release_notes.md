@@ -2,6 +2,13 @@
 
 # Release Notes
 
+## 0.10.3
+
+### Fixed
+
+- **A `Set`-backed outer index composed with a second index map forced a dense Jacobian block.** `Set.idx('g')` desugars every access to a gather, so a body written as `m.b[m.back[g]]` reaches the Jacobian pipeline as `b[back[S[g]]]` — two levels of indexing. Both the Phase J1/J2 classifier and the structural sparsity analyzer required the inner index of a map to be a bare `Idx`, so neither recognised the composition and the block fell back to the full `n_outer x n_diff` reservation. The values were always correct, since an over-reservation is a superset of the true pattern, but the cost was paid on every factorization: on a model with 342 coupled rows and 4342 unknowns the assembled Jacobian carried 121 306 nonzeros where 4 684 is exact. A new `resolve_outer_index_values` helper materialises an index expression of any nesting depth into its concrete column vector at build time, so `map[outer]`, `back[S[outer]]`, and `outer + c` all resolve through one rule. The pattern is now the exact permutation, and the same expression also classifies to a constant `_LoopJacSelectMat` instead of falling to the per-entry kernel. Time-varying, fractional, and out-of-range maps are refused rather than guessed, so those cases keep the conservative dense path.
+- **A `LoopEqn` whose outer range was shorter than the `Var` it indexes failed to render.** The identity block of `LoopEqn('c', outer_index=Idx('i', 15), body=m.a[i] - 1.0)` over a 16-entry `a` is `15x16`, but `_LoopJacEye` printed a square `np.eye(n_outer)` unconditionally, so `JacBlock` raised `ValueError: Incompatible matrix derivative size (15, 15) and vector variable size (16,)`. `_LoopJacEye` now takes both sizes and prints `np.eye(n_outer, n_diff)` when they differ.
+
 ## 0.10.2
 
 ### Changed

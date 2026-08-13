@@ -2506,3 +2506,285 @@ def test_index_set_outer_kwarg_matches_outer_index():
         body=m2.x[ii] - m2.target[ii], model=m2,
     )
     assert eqn_via_outer_index.n_outer == eqn_via_outer.n_outer == 2
+
+
+# ---------------------------------------------------------------------
+# Issue #149 — a Set-backed outer index composed with a second index map
+#
+# ``Set.idx('g')`` desugars every access to a gather, so ``m.b[m.back[g]]``
+# reaches the code printer as ``b[back[S[g]]]`` — TWO levels of indexing.
+# The classifier and the sparsity analyzer both used to require the inner
+# index of a map to be a bare ``Idx``, so the block fell back to a dense
+# ``n_outer x n_diff`` reservation even though every index is known at
+# build time. ``resolve_outer_index_values`` now materialises the whole
+# composition, so the pattern is the exact permutation.
+# ---------------------------------------------------------------------
+
+_ISSUE149_ROWS = np.array([0, 2, 3, 5, 7, 9, 11, 13], dtype=int)
+_ISSUE149_NA = 16
+_ISSUE149_N = 8
+
+
+def _issue149_back():
+    back = np.zeros(_ISSUE149_NA, dtype=np.int64)
+    back[_ISSUE149_ROWS] = np.arange(_ISSUE149_N)
+    return back
+
+
+def _issue149_model(body_fn, positional=False):
+    """Build the coupled model in either the ``Set`` + second-map form
+    (the shape issue #149 reports) or the positional form that already
+    produced exact sparsity. ``body_fn(m, outer, col)`` receives the
+    model, the outer index, and the column index expression."""
+    from Solverz import Set
+
+    m = Model()
+    m.a = Var('a', np.arange(_ISSUE149_NA, dtype=float) + 1.0)
+    m.b = Var('b', np.arange(_ISSUE149_N, dtype=float) + 1.0)
+    if positional:
+        m.map = Param('map', _ISSUE149_ROWS, dtype=int)
+        i = Idx('i', _ISSUE149_N)
+        m.c = LoopEqn('c', outer_index=i,
+                      body=body_fn(m, m.map[i], i), model=m)
+    else:
+        m.back = Param('back', _issue149_back(), dtype=int)
+        m.S = Set('S', _ISSUE149_ROWS)
+        g = m.S.idx('g')
+        m.c = LoopEqn('c', outer=m.S, outer_index=g,
+                      body=body_fn(m, g, m.back[g]), model=m)
+    m.pin = Eqn('pin', m.a - 1.0)
+    return m
+
+
+def _fd_jac(F, y, p, h=1e-6):
+    """Central-difference Jacobian. Copies every residual — a rendered
+    ``F`` may reuse one output buffer, in which case ``F(y+h) - F(y-h)``
+    on the raw returns is identically zero."""
+    f0 = np.array(F(y, p), copy=True)
+    J = np.zeros((f0.size, y.size))
+    for j in range(y.size):
+        yp = y.copy(); yp[j] += h
+        ym = y.copy(); ym[j] -= h
+        J[:, j] = (np.array(F(yp, p), copy=True)
+                   - np.array(F(ym, p), copy=True)) / (2 * h)
+    return J
+
+
+def test_issue149_resolve_outer_index_values_composes_maps():
+    """``resolve_outer_index_values`` materialises an index expression
+    of any nesting depth into the concrete column vector."""
+    from Solverz.equation.loop_jac import resolve_outer_index_values
+
+    n = _ISSUE149_N
+    back = _issue149_back()
+    second = (np.arange(n) + 3) % n
+    var_map = {
+        'S': Param('S', _ISSUE149_ROWS, dtype=int),
+        'back': Param('back', back, dtype=int),
+        'back2': Param('back2', second, dtype=int),
+    }
+    g = sp.Idx('g', n)
+    S = sp.IndexedBase('S')
+    back_b = sp.IndexedBase('back')
+    back2_b = sp.IndexedBase('back2')
+
+    def resolve(expr):
+        return resolve_outer_index_values(expr, g, n, var_map)
+
+    np.testing.assert_array_equal(resolve(g), np.arange(n))
+    np.testing.assert_array_equal(resolve(g + 2), np.arange(n) + 2)
+    np.testing.assert_array_equal(resolve(S[g]), _ISSUE149_ROWS)
+    # Two levels — the shape issue #149 reports.
+    np.testing.assert_array_equal(resolve(back_b[S[g]]),
+                                  back[_ISSUE149_ROWS])
+    # Three levels — the recursion is not capped at two.
+    np.testing.assert_array_equal(resolve(back2_b[back_b[S[g]]]),
+                                  second[back[_ISSUE149_ROWS]])
+
+
+def test_issue149_resolve_outer_index_values_refuses_unresolvable():
+    """The resolver returns ``None`` — never a guess — when the map is
+    time-varying, non-integer, addresses out of range, or is rooted at
+    something other than the outer index. Every caller then falls back
+    to its own conservative path."""
+    from Solverz import TimeSeriesParam
+    from Solverz.equation.loop_jac import resolve_outer_index_values
+
+    n = _ISSUE149_N
+    var_map = {
+        'S': Param('S', _ISSUE149_ROWS, dtype=int),
+        'frac': Param('frac', np.arange(n) + 0.5),
+        'short': Param('short', np.arange(3), dtype=int),
+        'ts': TimeSeriesParam('ts', v_series=[0, 1], time_series=[0, 1]),
+    }
+    g = sp.Idx('g', n)
+    other = sp.Idx('other', n)
+    S = sp.IndexedBase('S')
+
+    def resolve(expr):
+        return resolve_outer_index_values(expr, g, n, var_map)
+
+    assert resolve(other) is None                 # not the outer index
+    assert resolve(sp.IndexedBase('frac')[g]) is None
+    assert resolve(sp.IndexedBase('ts')[g]) is None
+    # ``short`` has 3 entries but ``S[g]`` addresses up to 13.
+    assert resolve(sp.IndexedBase('short')[S[g]]) is None
+    assert resolve(sp.IndexedBase('missing')[g]) is None
+
+
+def test_issue149_composed_index_classifies_to_select_mat():
+    """``KD(diff, back[S[g]])`` is a permutation and must translate to a
+    constant ``_LoopJacSelectMat``, not raise ``NotImplementedError``
+    into the dense Phase J3 fallback."""
+    from Solverz.equation.eqn import _LoopJacSelectMat
+    from Solverz.equation.loop_jac import (
+        canonicalize_kronecker, loop_jac_to_solverz_expr,
+    )
+
+    m = _issue149_model(lambda mm, row, col: mm.a[row] - mm.b[col])
+    le = m.c
+    k = sp.Idx('_sz_loop_dk')
+    canonical = canonicalize_kronecker(
+        sp.diff(le.body, sp.IndexedBase('b')[k]), le.outer_index, k)
+    translated = loop_jac_to_solverz_expr(
+        canonical, le.outer_index, k, le.n_outer, le.var_map,
+        n_diff=_ISSUE149_N)
+
+    select = [a for a in sp.preorder_traversal(translated)
+              if isinstance(a, _LoopJacSelectMat)]
+    assert len(select) == 1, f'expected one selection matrix, got {translated}'
+    cols = [int(c) for c in select[0].args[0].args]
+    assert cols == _issue149_back()[_ISSUE149_ROWS].tolist()
+
+
+def test_issue149_composed_index_sparsity_is_the_permutation():
+    """The structural analyzer reserves ``n_outer`` entries, not the
+    full ``n_outer x n_diff`` block, and emits no dense-fallback
+    warning."""
+    import warnings
+
+    from Solverz.equation.loop_jac import (
+        canonicalize_kronecker, compute_loop_jac_sparsity,
+    )
+
+    # A nonlinear coefficient keeps the block on the Phase J3 kernel, so
+    # this exercises the sparsity analyzer rather than the classifier.
+    m = _issue149_model(
+        lambda mm, row, col: mm.a[row] ** 2 - sin(mm.b[col]))
+    le = m.c
+    k = sp.Idx('_sz_loop_dk')
+    canonical = canonicalize_kronecker(
+        sp.diff(le.body, sp.IndexedBase('b')[k]), le.outer_index, k)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        rows, cols = compute_loop_jac_sparsity(
+            canonical, le.outer_index, k, le.var_map,
+            le.n_outer, _ISSUE149_N)
+
+    assert not [w for w in caught if 'dense fallback' in str(w.message)]
+    assert len(rows) == _ISSUE149_N, (
+        f'expected the {_ISSUE149_N}-entry permutation, got {len(rows)} '
+        f'(dense would be {_ISSUE149_N * _ISSUE149_N})'
+    )
+    expected = _issue149_back()[_ISSUE149_ROWS]
+    got = dict(zip(rows.tolist(), cols.tolist()))
+    assert got == {i: int(expected[i]) for i in range(_ISSUE149_N)}
+
+
+def test_issue149_set_plus_map_matches_positional_end_to_end():
+    """The ``Set`` + second-map formulation and the positional one must
+    render to the same Jacobian — same nnz, same values."""
+    def body(mm, row, col):
+        return mm.a[row] - mm.b[col]
+
+    mdl_s, y_s = _mdl_from_module(*_issue149_model(body).create_instance())
+    mdl_p, y_p = _mdl_from_module(
+        *_issue149_model(body, positional=True).create_instance())
+
+    yv = np.asarray(y_s.array, dtype=float)
+    J_s = mdl_s.J(yv, mdl_s.p)
+    J_p = mdl_p.J(np.asarray(y_p.array, dtype=float), mdl_p.p)
+
+    exact = _ISSUE149_NA + 2 * _ISSUE149_N   # pin diagonal + both couplings
+    assert J_s.nnz == J_p.nnz == exact
+    np.testing.assert_allclose(J_s.toarray(), J_p.toarray(), atol=1e-12)
+
+
+def test_issue149_composed_index_jacobian_matches_finite_difference():
+    """Sparsity must be a superset of the true pattern and the stored
+    values must be right — a permutation reservation is only correct if
+    no true nonzero falls outside it."""
+    m = _issue149_model(
+        lambda mm, row, col: mm.a[row] ** 2 - sin(mm.b[col]))
+    mdl, y = _mdl_from_module(*m.create_instance())
+    rng = np.random.default_rng(0)
+    yv = np.asarray(y.array, dtype=float) + 0.1 * rng.standard_normal(
+        len(y.array))
+
+    J = mdl.J(yv, mdl.p)
+    J_fd = _fd_jac(mdl.F, yv, mdl.p)
+    np.testing.assert_allclose(J.toarray(), J_fd, atol=1e-6)
+
+    coo = csc_array(J).tocoo()
+    covered = np.zeros(J.shape, dtype=bool)
+    covered[coo.row, coo.col] = True
+    missing = int(((np.abs(J_fd) > 1e-6) & ~covered).sum())
+    assert missing == 0, f'{missing} true nonzeros outside the pattern'
+
+
+def test_issue149_composed_index_newton_matches_positional():
+    """Both formulations converge to the same solution."""
+    def body(mm, row, col):
+        return mm.a[row] ** 2 - sin(mm.b[col]) - 1.0
+
+    mdl_s, y_s = _mdl_from_module(*_issue149_model(body).create_instance())
+    mdl_p, y_p = _mdl_from_module(
+        *_issue149_model(body, positional=True).create_instance())
+    sol_s = nr_method(mdl_s, y_s)
+    sol_p = nr_method(mdl_p, y_p)
+    np.testing.assert_allclose(np.asarray(sol_s.y.array, dtype=float),
+                               np.asarray(sol_p.y.array, dtype=float),
+                               atol=1e-10)
+
+
+def test_loop_eqn_outer_range_shorter_than_var_renders():
+    """A LoopEqn whose outer range is shorter than the Var it indexes
+    needs a RECTANGULAR identity block. ``_LoopJacEye`` used to emit a
+    square ``np.eye(n_outer)`` unconditionally, so ``JacBlock`` rejected
+    the ``(n-1, n-1)`` value against an ``n``-long variable."""
+    n = 6
+    targets = np.arange(1.0, n + 1)
+
+    m = Model()
+    m.x = Var('x', np.zeros(n))
+    m.target = Param('target', targets)
+    i = Idx('i', n - 1)
+    m.free = LoopEqn('free', outer_index=i,
+                     body=m.x[i] - m.target[i], model=m)
+    m.last = Eqn('last', m.x[n - 1] - targets[n - 1])
+
+    mdl, y = _mdl_from_module(*m.create_instance())
+    sol = nr_method(mdl, y)
+    np.testing.assert_allclose(sol.y['x'], targets, atol=1e-10)
+
+
+def test_loop_eqn_shifted_outer_index_keeps_exact_sparsity():
+    """``m.x[i + 1] - m.x[i]`` over a range one shorter than ``x``. The
+    shifted index used to be a special case in the sparsity analyzer;
+    it now resolves through the same path as an index map, and the
+    pattern must stay the two-band structure rather than widen."""
+    n = 8
+    m = Model()
+    m.x = Var('x', np.zeros(n))
+    i = Idx('i', n - 1)
+    m.diff = LoopEqn('diff', outer_index=i,
+                     body=m.x[i + 1] - m.x[i] - 1.0, model=m)
+    m.anchor = Eqn('anchor', m.x[0])
+
+    mdl, y = _mdl_from_module(*m.create_instance())
+    J = mdl.J(np.asarray(y.array, dtype=float), mdl.p)
+    # (n-1) rows with two entries each, plus the 1-entry anchor row.
+    assert J.nnz == 2 * (n - 1) + 1
+    sol = nr_method(mdl, y)
+    np.testing.assert_allclose(sol.y['x'], np.arange(float(n)), atol=1e-10)

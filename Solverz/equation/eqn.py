@@ -1698,7 +1698,8 @@ class _LoopJacBlockCall(Function):
 
 
 class _LoopJacEye(Function):
-    """Sympy ``Function`` node that prints to ``np.eye(n)``.
+    """Sympy ``Function`` node that prints to ``np.eye(n)``, or to
+    ``np.eye(n_outer, n_diff)`` when called with both sizes.
 
     Emitted by :func:`Solverz.equation.loop_jac.loop_jac_to_solverz_expr`
     whenever a LoopEqn derivative simplifies to
@@ -1714,17 +1715,23 @@ class _LoopJacEye(Function):
     a constant-matrix block (zero free symbols), so ``inner_J``
     reduces to ``return _data_`` with the identity baked in at
     module-build time.
+
+    The block is **not** square whenever the LoopEqn's outer range is
+    shorter than the Var it indexes — ``LoopEqn('c', outer_index=
+    Idx('i', 15), body=m.a[i] - 1.0)`` over a 16-entry ``a`` needs a
+    ``15x16`` derivative. Pass both sizes in that case; a single
+    argument keeps the square form.
     """
 
     @classmethod
-    def eval(cls, n):
+    def eval(cls, n, n_diff=None):
         # Don't auto-simplify; we want a Function application that the
         # printer can intercept.
         return None
 
     def _numpycode(self, printer, **kwargs):
-        n_arg = self.args[0]
-        return f'np.eye({printer._print(n_arg)})'
+        sizes = ', '.join(printer._print(a) for a in self.args)
+        return f'np.eye({sizes})'
 
     def _pythoncode(self, printer, **kwargs):
         return self._numpycode(printer, **kwargs)

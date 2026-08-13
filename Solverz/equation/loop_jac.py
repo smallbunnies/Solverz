@@ -343,6 +343,99 @@ def loop_jac_to_solverz_expr(expr: sp.Expr,
     )
 
 
+# Recursion cap for :func:`resolve_outer_index_values`. Index maps
+# nest at most two deep in practice (``back[S[g]]``); the cap only
+# guards against a pathological hand-built expression.
+_MAX_INDEX_MAP_DEPTH = 8
+
+
+def resolve_outer_index_values(expr: sp.Expr,
+                                outer_idx: sp.Idx,
+                                n_outer: int,
+                                var_map: Dict[str, object],
+                                _depth: int = 0):
+    """Materialise an integer index expression written over the outer
+    loop index into a concrete ``ndarray`` of length ``n_outer``.
+
+    Returns ``None`` when the expression is not resolvable at build
+    time, so every caller can fall back to its own conservative path.
+
+    Recognised shapes, applied *recursively* so that compositions of
+    any depth resolve:
+
+    * ``outer_idx``                 → ``arange(n_outer)``
+    * ``outer_idx + c``, integer c  → ``arange(n_outer) + c``
+    * ``P[<resolvable>]``           → ``P.v[<resolved>]``, with ``P`` a
+      1-D integer ``Param``
+
+    The last rule is what makes a ``Set``-backed outer index behave
+    like a positional one. ``m.b[m.back[g]]`` with ``g`` produced by
+    ``Set.idx`` desugars to ``b[back[S[g]]]``; the inner ``S[g]``
+    resolves to the set's values and the outer ``back[...]`` gathers
+    through them, giving the same column vector the positional
+    formulation ``m.b[m.map[i]]`` produces directly.
+
+    ``TimeSeriesParam`` is refused: its value is a function of time,
+    so baking the build-time sample into a structural pattern would
+    be wrong the moment the profile moves.
+    """
+    from Solverz.equation.param import ParamBase, TimeSeriesParam
+
+    if _depth > _MAX_INDEX_MAP_DEPTH:
+        return None
+
+    if isinstance(expr, sp.Idx):
+        if _name_of(expr) == _name_of(outer_idx):
+            return np.arange(n_outer, dtype=np.int64)
+        return None
+
+    if isinstance(expr, sp.Indexed):
+        if len(expr.indices) != 1:
+            return None
+        map_obj = var_map.get(expr.base.name)
+        if not isinstance(map_obj, ParamBase):
+            return None
+        if isinstance(map_obj, TimeSeriesParam):
+            return None
+        if getattr(map_obj, 'dim', None) != 1:
+            return None
+        inner_vals = resolve_outer_index_values(
+            expr.indices[0], outer_idx, n_outer, var_map, _depth + 1)
+        if inner_vals is None:
+            return None
+        map_v = np.asarray(map_obj.v).reshape(-1)
+        if not np.issubdtype(map_v.dtype, np.integer):
+            # Accept an integral float array (index Params built via
+            # np.concatenate are routinely upcast to float), reject a
+            # genuinely fractional one.
+            if not np.all(map_v == np.floor(map_v)):
+                return None
+            map_v = map_v.astype(np.int64)
+        if inner_vals.size and (int(inner_vals.min()) < 0
+                                or int(inner_vals.max()) >= map_v.size):
+            return None
+        return map_v[inner_vals].astype(np.int64, copy=False)
+
+    if isinstance(expr, sp.Add):
+        base_vals = None
+        shift = 0
+        for arg in expr.args:
+            if arg.is_Integer:
+                shift += int(arg)
+                continue
+            if base_vals is not None:
+                return None  # two index-bearing addends — not an offset
+            base_vals = resolve_outer_index_values(
+                arg, outer_idx, n_outer, var_map, _depth + 1)
+            if base_vals is None:
+                return None
+        if base_vals is None:
+            return None
+        return base_vals + shift
+
+    return None
+
+
 def _translate_kronecker_delta(
         expr: KroneckerDelta,
         outer_idx: sp.Idx,
@@ -357,15 +450,14 @@ def _translate_kronecker_delta(
 
     Recognized patterns:
 
-    - ``KD(outer, diff)`` → ``_LoopJacEye(n_outer)``
-    - ``KD(diff, map_param[outer])`` → ``_LoopJacSelectMat(...)``
-      where *map_param* is a 1-D integer ``Param`` that maps each
-      outer index to a column.  The result is a sparse selection
-      matrix with one 1 per row.
+    - ``KD(outer, diff)`` → ``_LoopJacEye(n_outer[, n_diff])``
+    - ``KD(diff, <index expression over outer>)`` →
+      ``_LoopJacSelectMat(...)``, where the index expression is
+      anything :func:`resolve_outer_index_values` can materialise —
+      ``map[outer]``, ``back[S[outer]]``, ``outer + c``. The result
+      is a sparse selection matrix with one 1 per row.
     """
-    import numpy as np
     from Solverz.equation.eqn import _LoopJacEye, _LoopJacSelectMat
-    from Solverz.equation.param import ParamBase
 
     outer_name = _name_of(outer_idx)
     diff_name = _name_of(diff_idx)
@@ -375,32 +467,29 @@ def _translate_kronecker_delta(
     # --- direct diagonal: KD(outer, diff) ---
     if ({_name_of(a0), _name_of(a1)}
             == {outer_name, diff_name}):
+        # Rectangular whenever the outer range is shorter than the Var
+        # being differentiated, e.g. a 15-step loop over a 16-entry Var.
+        if n_diff > 0 and n_diff != n_outer:
+            return _LoopJacEye(sp.Integer(n_outer), sp.Integer(n_diff))
         return _LoopJacEye(sp.Integer(n_outer))
 
-    # --- indirect diagonal: KD(diff, map[outer]) ---
+    # --- indirect diagonal: KD(diff, <index expression>) ---
     for arg_d, arg_m in [(a0, a1), (a1, a0)]:
         if not (isinstance(arg_d, sp.Idx)
                 and _name_of(arg_d) == diff_name):
             continue
-        if not isinstance(arg_m, sp.Indexed):
+        col_map = resolve_outer_index_values(
+            arg_m, outer_idx, n_outer, var_map)
+        if col_map is None or col_map.size != n_outer:
             continue
-        if len(arg_m.indices) != 1:
-            continue
-        inner = arg_m.indices[0]
-        if not (isinstance(inner, sp.Idx)
-                and _name_of(inner) == outer_name):
-            continue
-        map_name = arg_m.base.name
-        map_obj = var_map.get(map_name)
-        if not isinstance(map_obj, ParamBase):
-            continue
-        if getattr(map_obj, 'dim', None) != 1:
+        if int(col_map.min()) < 0:
             continue
         # Build the selection matrix node.  Use the caller-supplied
         # n_diff (the actual variable size) when available; fall back
         # to max(col_map)+1 which is a safe lower bound.
-        col_map = np.asarray(map_obj.v, dtype=np.int64).reshape(-1)
-        nd = n_diff if n_diff > 0 else (int(col_map.max()) + 1 if len(col_map) else 0)
+        nd = n_diff if n_diff > 0 else int(col_map.max()) + 1
+        if int(col_map.max()) >= nd:
+            continue
         return _LoopJacSelectMat(
             sp.Tuple(*[sp.Integer(int(c)) for c in col_map]),
             sp.Integer(n_outer),
@@ -711,15 +800,15 @@ def _try_kd_outer_scalars(
     KD shape handling:
 
     * Direct ``KD(outer, diff)`` — emit ``Diag(scalar_vec)``.
-    * Indirect ``KD(diff, map[outer])`` where ``map`` is a 1-D
-      ``ParamBase`` of length ``n_outer`` — emit
-      ``Mat_Mul(Diag(scalar_vec), _LoopJacSelectMat(map, n_outer, n_diff))``.
+    * Indirect ``KD(diff, <index expression over outer>)`` resolving
+      to ``n_outer`` columns via :func:`resolve_outer_index_values` —
+      emit ``Mat_Mul(Diag(scalar_vec), _LoopJacSelectMat(map,
+      n_outer, n_diff))``.
 
     Returns ``None`` on unsupported KD shapes or when the scalar
     product cannot be translated (caller falls back to J3).
     """
     from Solverz.equation.eqn import _LoopJacSelectMat
-    from Solverz.equation.param import ParamBase
     from Solverz.sym_algebra.functions import Diag, Mat_Mul
 
     outer_name = _name_of(outer_idx)
@@ -732,24 +821,14 @@ def _try_kd_outer_scalars(
     if ({_name_of(a0), _name_of(a1)} == {outer_name, diff_name}):
         col_map_v = None
     else:
-        # Indirect: KD(diff, map[outer])
+        # Indirect: KD(diff, <index expression over outer>)
         matched = False
         for arg_d, arg_m in ((a0, a1), (a1, a0)):
             if not (isinstance(arg_d, sp.Idx) and _name_of(arg_d) == diff_name):
                 continue
-            if not isinstance(arg_m, sp.Indexed):
-                continue
-            if len(arg_m.indices) != 1:
-                continue
-            inner = arg_m.indices[0]
-            if not (isinstance(inner, sp.Idx) and _name_of(inner) == outer_name):
-                continue
-            map_name = arg_m.base.name
-            map_obj = var_map.get(map_name)
-            if not (isinstance(map_obj, ParamBase) and map_obj.dim == 1):
-                continue
-            map_v = np.asarray(map_obj.v, dtype=np.int64).reshape(-1)
-            if len(map_v) != n_outer:
+            map_v = resolve_outer_index_values(
+                arg_m, outer_idx, n_outer, var_map)
+            if map_v is None or len(map_v) != n_outer:
                 continue
             if n_diff > 0 and (int(map_v.min()) < 0 or int(map_v.max()) >= n_diff):
                 continue
@@ -1537,14 +1616,16 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
 
     def _classify_axis(expr):
         """Return ``('outer', None)`` if ``expr`` is the outer Idx,
-        ``('diff', None)`` if ``expr`` is the diff Idx,
-        ``('indirect_outer', map_name)`` if ``expr`` is
-        ``Indexed(map_param, outer_idx)`` where ``map_param`` is a
-        1-D int ``Param``, or ``('outer_shifted', shift)`` if
-        ``expr`` is ``outer_idx + integer_constant`` (e.g.
-        ``off + k + 1``). Otherwise ``(None, None)`` — the axis is
-        not structurally classifiable and the term will fall through
-        to the dense fallback or the numerical probing path.
+        ``('diff', None)`` if ``expr`` is the diff Idx, or
+        ``('indirect_outer', values)`` when ``expr`` is any index
+        expression over the outer index that
+        :func:`resolve_outer_index_values` can materialise —
+        ``map_param[outer]``, ``back[S[outer]]``, ``outer + 1``.
+        ``values`` is the resolved ``ndarray`` of length ``n_outer``.
+
+        Otherwise ``(None, None)`` — the axis is not structurally
+        classifiable and the term will fall through to the dense
+        fallback or the numerical probing path.
         """
         if isinstance(expr, sp.Idx):
             if _name_of(expr) == outer_name:
@@ -1552,46 +1633,20 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
             if _name_of(expr) == diff_name:
                 return 'diff', None
             return None, None
-        if isinstance(expr, sp.Indexed):
-            if len(expr.indices) != 1:
-                return None, None
-            inner = expr.indices[0]
-            if not isinstance(inner, sp.Idx) or _name_of(inner) != outer_name:
-                return None, None
-            map_name = expr.base.name
-            map_obj = var_map.get(map_name)
-            if not isinstance(map_obj, ParamBase):
-                return None, None
-            if getattr(map_obj, 'dim', None) != 1:
-                return None, None
-            return 'indirect_outer', map_name
-        if isinstance(expr, sp.Add):
-            has_outer = False
-            shift = 0
-            all_simple = True
-            for arg in expr.args:
-                if (isinstance(arg, sp.Idx)
-                        and _name_of(arg) == outer_name):
-                    if has_outer:
-                        all_simple = False
-                        break
-                    has_outer = True
-                elif isinstance(arg, (sp.Integer, sp.Rational,
-                                      sp.Number)):
-                    shift += int(arg)
-                else:
-                    all_simple = False
-                    break
-            if has_outer and all_simple:
-                return 'outer_shifted', shift
+        values = resolve_outer_index_values(
+            expr, outer_idx, n_outer, var_map)
+        if values is not None and values.size == n_outer:
+            return 'indirect_outer', values
         return None, None
 
-    def _map_values(map_name):
+    def _map_values(map_ref):
         """Return the materialised 1-D int array for an indirect
-        outer row map. Assumes the caller has already validated
-        dim=1 and ParamBase via ``_classify_axis``.
+        outer row map — either an already-resolved ``ndarray`` from
+        ``_classify_axis`` or a ``var_map`` Param name.
         """
-        return np.asarray(var_map[map_name].v, dtype=np.int64).reshape(-1)
+        if isinstance(map_ref, np.ndarray):
+            return map_ref
+        return np.asarray(var_map[map_ref].v, dtype=np.int64).reshape(-1)
 
     # Each classified term contributes one or more (row, col)
     # pattern fragments; we accumulate them here and union at
@@ -1616,9 +1671,7 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
         # ``_sz_loop_dk == row_map.v[i]``.
         has_diag_kron = False
         has_indirect_diag_kron = False
-        indirect_diag_map: str = ''
-        has_shifted_diag_kron = False
-        shifted_diag_shift: int = 0
+        indirect_diag_map = None
         has_probed_kron = False
         probed_kron_entries: list = []
         for f in factors:
@@ -1634,12 +1687,6 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
                 if kinds == {'indirect_outer', 'diff'}:
                     has_indirect_diag_kron = True
                     indirect_diag_map = map0 if kind0 == 'indirect_outer' else map1
-                    break
-                if 'outer_shifted' in kinds and 'diff' in kinds:
-                    has_shifted_diag_kron = True
-                    shifted_diag_shift = (
-                        map0 if kind0 == 'outer_shifted' else map1
-                    )
                     break
                 diff_side = (0 if kind0 == 'diff'
                              else 1 if kind1 == 'diff'
@@ -1706,6 +1753,14 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
                     swapped = True
                 row_map = _map_values(map_name)
                 val = sol.v
+                n_src_rows = int(val.shape[0])
+                if (row_map.size
+                        and (int(row_map.min()) < 0
+                             or int(row_map.max()) >= n_src_rows)):
+                    # Row map addresses outside the Param — cannot
+                    # derive a pattern; leave the term unclassified so
+                    # the conservative dense path takes over.
+                    continue
                 if hasattr(val, 'tocsr'):
                     csr = val.tocsr()
                     sub_rows_i = []
@@ -1748,12 +1803,6 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
             for i_outer, real_col in enumerate(row_map):
                 if 0 <= int(real_col) < n_diff:
                     all_positions.add((int(i_outer), int(real_col)))
-
-        if has_shifted_diag_kron:
-            for i in range(n_outer):
-                col = i + shifted_diag_shift
-                if 0 <= col < n_diff:
-                    all_positions.add((i, col))
 
         if has_probed_kron:
             all_positions.update(probed_kron_entries)
@@ -1867,7 +1916,6 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
 
         if (not has_diag_kron
                 and not has_indirect_diag_kron
-                and not has_shifted_diag_kron
                 and not has_probed_kron
                 and not param_hits
                 and not has_sum_kd):
