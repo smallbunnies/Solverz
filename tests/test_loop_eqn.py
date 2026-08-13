@@ -2788,3 +2788,58 @@ def test_loop_eqn_shifted_outer_index_keeps_exact_sparsity():
     assert J.nnz == 2 * (n - 1) + 1
     sol = nr_method(mdl, y)
     np.testing.assert_allclose(sol.y['x'], np.arange(float(n)), atol=1e-10)
+
+
+def test_issue149_sum_kd_with_set_backed_row_axis():
+    """A `Set`-backed outer index selecting rows of a sparse 2-D Param
+    inside a `Sum`, with the summed Var reached through a column map.
+
+    This is the incidence-matrix shape network models use, e.g.
+    ``Sum(V_in[NonSlack[i], p] * m[p], p)``. The Sum-KD branch of the
+    sparsity analyzer reads the row axis through ``_classify_axis``,
+    whose payload is now the resolved index array rather than a Param
+    name, so a truth test on it raises
+    ``ValueError: The truth value of an array ... is ambiguous``.
+    Guards the ``is not None`` test that replaced it.
+    """
+    from Solverz import Set
+
+    n_node, n_pipe = 6, 9
+    rng = np.random.default_rng(3)
+    # Each pipe leaves one node and enters another.
+    from_node = rng.integers(0, n_node, n_pipe)
+    to_node = np.array([(f + 1 + rng.integers(0, n_node - 1)) % n_node
+                        for f in from_node])
+    V = np.zeros((n_node, n_pipe))
+    V[from_node, np.arange(n_pipe)] = -1.0
+    V[to_node, np.arange(n_pipe)] = 1.0
+
+    non_slack = np.array([i for i in range(n_node) if i != 0], dtype=int)
+
+    m = Model()
+    m.q = Var('q', np.ones(n_pipe))
+    m.V = Param('V', csc_array(V), dim=2, sparse=True)
+    m.p2n = Param('p2n', to_node.astype(int), dtype=int)   # pipe -> node
+    m.NonSlack = Set('NonSlack', non_slack)
+    i_ns = m.NonSlack.idx('i_ns')
+    p_p = Idx('p_p', n_pipe)
+
+    m.balance = LoopEqn(
+        'balance', outer=m.NonSlack, outer_index=i_ns,
+        body=Sum(m.V[i_ns, p_p] * m.q[m.p2n[p_p]], p_p) - 1.0, model=m)
+    # Square the system: the LoopEqn supplies ``non_slack.size`` rows,
+    # the remaining pipes are pinned.
+    for extra in range(n_pipe - non_slack.size):
+        setattr(m, f'fix{extra}', Eqn(f'fix{extra}', m.q[extra] - 1.0))
+
+    mdl, y = _mdl_from_module(*m.create_instance())
+    yv = np.asarray(y.array, dtype=float)
+    J = mdl.J(yv, mdl.p)
+    J_fd = _fd_jac(mdl.F, yv, mdl.p)
+    np.testing.assert_allclose(J.toarray(), J_fd, atol=1e-6)
+
+    coo = csc_array(J).tocoo()
+    covered = np.zeros(J.shape, dtype=bool)
+    covered[coo.row, coo.col] = True
+    missing = int(((np.abs(J_fd) > 1e-6) & ~covered).sum())
+    assert missing == 0, f'{missing} true nonzeros outside the pattern'

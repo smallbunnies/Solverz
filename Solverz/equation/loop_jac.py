@@ -1741,17 +1741,17 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
                     r, c = c, r
                 param_hits.append((r, c))
             elif kinds == {'indirect_outer', 'diff'}:
-                # Indirect outer: row is ``map_name[outer]`` for
-                # some known row map. Look up the Param's stored
-                # columns for each ``row = map.v[i]`` and emit
-                # ``(i, col)``.
+                # Indirect outer: the row axis is an index expression
+                # over the outer index, already resolved to concrete
+                # rows. Look up the Param's stored columns for each
+                # ``row = row_map[i]`` and emit ``(i, col)``.
                 if kind0 == 'indirect_outer':
-                    map_name = map0
+                    row_map_ref = map0
                     swapped = False
                 else:
-                    map_name = map1
+                    row_map_ref = map1
                     swapped = True
-                row_map = _map_values(map_name)
+                row_map = _map_values(row_map_ref)
                 val = sol.v
                 n_src_rows = int(val.shape[0])
                 if (row_map.size
@@ -1864,7 +1864,7 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
             # row.
             col_map = _map_values(col_map_name)
             sparse_param = None
-            sp_row_map_name = None
+            sp_row_map = None
             for sf in sbody_factors:
                 if not isinstance(sf, sp.Indexed):
                     continue
@@ -1885,14 +1885,17 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
                     continue
                 if kind_row in ('outer', 'indirect_outer'):
                     sparse_param = sobj
-                    sp_row_map_name = map_row  # None for direct
+                    sp_row_map = map_row  # None for direct
                     break
             # Build sparsity entries.
             if sparse_param is not None and hasattr(
                     sparse_param.v, 'tocsr'):
                 csr = sparse_param.v.tocsr()
-                row_map = (_map_values(sp_row_map_name)
-                           if sp_row_map_name else
+                # ``sp_row_map`` is the resolved ndarray for an indirect
+                # row axis and ``None`` for a direct one. Test it
+                # against None: an ndarray has no truth value.
+                row_map = (_map_values(sp_row_map)
+                           if sp_row_map is not None else
                            np.arange(n_outer, dtype=np.int64))
                 for i_outer in range(n_outer):
                     real_row = int(row_map[i_outer])
