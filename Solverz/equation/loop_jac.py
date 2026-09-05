@@ -332,7 +332,8 @@ def loop_jac_to_solverz_expr(expr: sp.Expr,
 
     if isinstance(expr, sp.Indexed):
         return _translate_indexed_param(
-            expr, outer_idx, diff_idx, var_map
+            expr, outer_idx, diff_idx, var_map,
+            n_outer=n_outer, n_diff=n_diff,
         )
 
     # Everything from here is a Mul (or a Sum without sign — fall
@@ -502,13 +503,22 @@ def _translate_kronecker_delta(
 def _translate_indexed_param(e: sp.Indexed,
                               outer_idx: sp.Idx,
                               diff_idx: sp.Idx,
-                              var_map: Dict[str, object]) -> sp.Expr:
+                              var_map: Dict[str, object],
+                              n_outer: int = None,
+                              n_diff: int = None) -> sp.Expr:
     """Translate a bare ``Indexed(Param, (outer, diff))`` node — the
     constant 2-D-Param case — into ``Para(name, dim=2)``.
 
     Used both by the top-level walker (for unwrapped single-term
     expressions) and by the per-term classifier inside
     :func:`_classify_and_translate_term`.
+
+    When the Param has more rows than the outer range (a plain
+    ``Idx('i', k)`` over a larger matrix, issue #151) the block is the
+    leading ``n_outer`` rows, so the constant is emitted as
+    ``Mat_Mul(row_selector, Para)`` with a ``(n_outer, nrows)``
+    :class:`_LoopJacSelectMat`; the product has no free symbols and
+    stays on the constant path.
     """
     from Solverz.equation.param import ParamBase
 
@@ -537,7 +547,27 @@ def _translate_indexed_param(e: sp.Indexed,
             f"with indices {e.indices} — expected [outer, diff] "
             f"(in either order)"
         )
-    return Para(sol_obj.name, dim=2)
+    para = Para(sol_obj.name, dim=2)
+    shape = getattr(getattr(sol_obj, 'v', None), 'shape', None)
+    if (n_outer is None or shape is None or len(shape) != 2
+            or _name_of(e.indices[0]) != _name_of(outer_idx)):
+        return para
+    nrows, ncols = int(shape[0]), int(shape[1])
+    if n_diff and ncols > n_diff:
+        raise NotImplementedError(
+            f"LoopEqn J translator: 2-D Param {base_name!r} has {ncols} "
+            f"columns but the differentiated Var has {n_diff} entries"
+        )
+    if nrows > n_outer:
+        from Solverz.equation.eqn import _LoopJacSelectMat
+        from Solverz.sym_algebra.functions import Mat_Mul
+        rows = _LoopJacSelectMat(
+            sp.Tuple(*[sp.Integer(i) for i in range(n_outer)]),
+            sp.Integer(n_outer),
+            sp.Integer(nrows),
+        )
+        return Mat_Mul(rows, para)
+    return para
 
 
 def _classify_and_translate_term(term: sp.Expr,
@@ -636,7 +666,8 @@ def _classify_and_translate_term(term: sp.Expr,
             and len(sum_factors) == 0
             and not other_factors):
         return coeff * _translate_indexed_param(
-            indexed_factors[0], outer_idx, diff_idx, var_map
+            indexed_factors[0], outer_idx, diff_idx, var_map,
+            n_outer=n_outer, n_diff=n_diff,
         )
 
     # --- Phase J2 shapes ---------------------------------------------
@@ -1739,6 +1770,13 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
                 # ``[diff, outer]`` transposes row/col.
                 if kind0 == 'diff':
                     r, c = c, r
+                # The block has ``n_outer`` rows and ``n_diff`` columns.
+                # A Param with more rows than the outer range (a plain
+                # ``Idx('i', k)`` over a larger matrix, issue #151) or
+                # more columns than the diff Var contributes only the
+                # entries that fall inside the block.
+                keep = (r < n_outer) & (c < n_diff)
+                r, c = r[keep], c[keep]
                 param_hits.append((r, c))
             elif kinds == {'indirect_outer', 'diff'}:
                 # Indirect outer: the row axis is an index expression
