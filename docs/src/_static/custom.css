@@ -1,145 +1,206 @@
-/* Reduce the vertical space between lines in code blocks. Required to */
-/* make Unicode pretty printing appear correctly. */
-pre {
-    line-height: 120% !important;
+/* Solverz documentation. Theme colors and fonts are configured in conf.py. */
+html { scroll-behavior: auto; scroll-padding-top: 5rem; }
+body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+article { line-height: 1.7; }
+article h1, article h2, article h3 { color: var(--solverz-heading); letter-spacing: -0.025em; }
+article h1 { line-height: 1.2; font-weight: 650; margin-top: 2.5rem; }
+article h2 { margin-top: 2.5rem; padding-top: 0.4rem; font-weight: 600; }
+h4, h5, h6 { text-transform: none; }
+article a { text-underline-offset: 0.2em; text-decoration-thickness: 1px; }
+a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible {
+    outline: 3px solid var(--color-brand-primary);
+    outline-offset: 4px;
+    border-radius: 4px;
 }
 
-article pre {
-    line-height: 120% !important;
+/* Keep Furo's native search, navigation tree, and mobile controls. */
+.sidebar-brand { padding: 1.25rem 1rem 0.65rem; }
+.sidebar-brand:hover { text-decoration: none; }
+.sidebar-logo-container { margin: 0; border-radius: 10px; overflow: hidden; }
+.sidebar-logo { width: 100%; height: auto; }
+.solverz-sidebar-caption {
+    margin-top: 0.1rem;
+    text-align: center;
+    font-size: 0.72rem;
+    letter-spacing: 0.025em;
+    color: var(--color-foreground-secondary);
 }
+.sidebar-search-container {
+    margin: 0.75rem 0.8rem 0.4rem;
+    border: 1px solid var(--color-sidebar-search-border);
+    border-radius: 8px;
+}
+.sidebar-search { border: 0; min-height: 2.5rem; }
+.sidebar-search-container:focus-within {
+    outline: 2px solid var(--color-brand-primary);
+    outline-offset: 2px;
+}
+.sidebar-tree .caption { margin-top: 1.45rem; font-size: 0.67rem; letter-spacing: 0.075em; }
+.sidebar-tree .reference {
+    line-height: 1.5;
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+    border-left: 3px solid transparent;
+}
+.sidebar-tree .current-page > .reference {
+    color: var(--color-brand-primary);
+    background: var(--color-sidebar-item-background--current);
+    border-left-color: var(--solverz-accent);
+    font-weight: 600;
+}
+.sidebar-tree .reference:hover { text-decoration: none; }
+.toc-title { letter-spacing: 0.04em; font-size: 0.72rem; }
+.toc-tree { font-size: 0.82rem; }
+.mobile-header .brand { font-size: 0.95rem; font-weight: 600; }
 
-/* Disable most blockquotes. The Furo defaults make block quotes very*/
-/* apparent. However, the parameter blocks from numpydoc render as block
- * quotes, which looks bad. Furthermore, it is very easy for things to
- * accidentally have block quotes due to the fact that RST makes indented
- * blocks render as a block quote (unlike Markdown which makes indented blocks
- * render as code). Apart from a few epigraphs, there aren't any places in the
- * documentation that use a block quote on purpose. */
+/* Compact preformatted lines preserve Unicode mathematical pretty printing. */
+pre, article pre { line-height: 1.25; }
+article[role="main"] div.highlight {
+    border: 1px solid var(--color-background-border);
+    border-radius: 10px;
+    background: var(--color-code-background);
+    color: var(--color-code-foreground);
+}
+div.highlight pre { padding: 1.1rem 1.25rem; }
+.highlight .hll { background: var(--color-highlighted-background); }
+code.literal { border-radius: 4px; padding: 0.12em 0.3em; }
+.table-wrapper {
+    overflow-x: auto;
+    border: 1px solid var(--color-table-border);
+    border-radius: 10px;
+    margin: 1.25rem 0;
+}
+.table-wrapper table.docutils { margin: 0; border: 0; }
+table.docutils th { background: var(--color-table-header-background); font-weight: 600; }
+table.docutils td, table.docutils th { padding: 0.7rem 0.85rem; }
+.admonition {
+    border-radius: 9px;
+    box-shadow: none;
+    border: 1px solid var(--color-background-border);
+}
+.admonition-title { border-radius: 8px 8px 0 0; }
+
+/* Numpydoc parameter descriptions use blockquotes rather than quotations. */
 blockquote {
-    border-left: inherit;
-    font-style: inherit;
-    margin-left: inherit;
-    margin-right: inherit;
-    padding: inherit;
-    background-color: inherit;
-    margin-block-start: -0.5rem;
-    margin-block-end: -0.5rem;
-}
-blockquote.epigraph {
-    border-left: 4px solid var(--color-background-border);
-    background: var(--color-background-secondary);
+    border-left: 0;
+    font-style: normal;
     margin-left: 0;
     margin-right: 0;
-    margin-top: 1rem;
-    margin-bottom: 1rem;
-    padding: 0.5rem 1rem;
+    padding: 0;
+    background: transparent;
 }
+blockquote.epigraph { border-left: 3px solid var(--solverz-accent); margin: 1.25rem 0; padding: 0.5rem 1.25rem; }
+p.rubric, dl.field-list > dt, dl.py .field-list > dt { text-transform: none; font-weight: 600; }
+dl.py > dt.sig {
+    margin-left: 0;
+    margin-right: 0;
+    border-left: 3px solid var(--solverz-accent);
+    border-radius: 0 7px 7px 0;
+    padding: 0.6rem 0.8rem;
+    text-indent: 0;
+    overflow-wrap: anywhere;
+}
+.contains-task-list { list-style: none; }
+.task-list-item-checkbox { margin: 0 0.2em 0.25em -1.4em; }
+.related-pages a { align-self: stretch; border: 1px solid var(--color-background-border); border-radius: 10px; padding: 1rem; }
+.bottom-of-page { border-top: 1px solid var(--color-background-border); margin-top: 1.5rem; padding-top: 1.25rem; }
 
-/* Version selector. See _templates/sidebar/versions.html */
-.versions-header {
-    color: white;
-    padding: var(--sidebar-item-spacing-vertical) var(--sidebar-item-spacing-horizontal);
-    margin: 1rem 0rem;
+/* Homepage components use native links without additional JavaScript. */
+.solverz-home { padding-top: 1.5rem; }
+.solverz-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 12rem;
+    align-items: center;
+    gap: 2rem;
+    padding: 2rem 0 2.25rem;
+    border-bottom: 1px solid var(--color-background-border);
 }
-.current-version {
-    background-color: #2f431e;
+.solverz-eyebrow {
+    color: var(--color-brand-primary);
+    font-size: 0.69rem;
+    font-weight: 650;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin: 0 0 1rem;
 }
-.versions-not-found {
-    color: white;
-    font-style: italic;
-    padding: var(--sidebar-item-spacing-vertical) var(--sidebar-item-spacing-horizontal);
+.solverz-hero h1 {
+    font-size: clamp(2.1rem, 3.3vw, 3rem);
+    line-height: 1.08;
+    letter-spacing: -0.045em;
+    margin: 0 0 1.2rem;
 }
-
-/* Make the "SymPy documentation" text bold */
-.sidebar-brand-text {
-    font-weight: bold;
-}
-/* Remove the green underline from the "SymPy documentation" on hover */
-.sidebar-brand:hover {
-    text-decoration: none !important;
-}
-
-/* Make top-level items in the sidebar bold */
-.sidebar-tree .toctree-l1>.reference, .sidebar-tree .toctree-l1>label .icon {
-    font-weight: bold !important;
-}
-/* Indicate the current page using a background color rather than bold text */
-.sidebar-tree .current-page>.reference {
-    font-weight: normal;
-    background-color: #2f431e;
-}
-/* Make sure the 'a' colors below don't affect the sidebar*/
-.sidebar-tree .icon, .sidebar-tree .reference {
-    color: var(--color-sidebar-link-text) !important;
-}
-
-/* The "hide search matches" text after doing a search. Defaults to the same
-   color as the icon which is illegible on the green background. */
-.highlight-link a {
-    color: white !important;
-}
-
-.admonition.warning>.admonition-title {
-    color: white;
-}
-
-/* Makes the text look better on Mac retina displays (the Furo CSS disables*/
-/* subpixel antialiasing). */
-body {
-    -webkit-font-smoothing: auto;
-    -moz-osx-font-smoothing: auto;
-}
-
-/* Disable upcasing of headers 4+ (they are still distinguishable by*/
-/* font-weight and size) */
-h4, h5, h6 {
-    text-transform: inherit;
-}
-
-/* Make "Examples" and "Parameters" headers easier to see */
-p.rubric, dl.c .field-list dt, dl.cpp .field-list dt, dl.js .field-list dt, dl.py .field-list dt, dl[class]:not(.option-list):not(.field-list):not(.footnote):not(.glossary):not(.simple) .field-list>dt {
-    text-transform: none;
+.solverz-lead { color: var(--color-foreground-secondary); max-width: 31rem; margin: 0 0 1.6rem; font-size: 1.03rem; line-height: 1.7; }
+.solverz-hero-art { margin: 0; padding: 0.5rem; border-radius: 1rem; border: 1px solid var(--color-background-border); background: #FFFFFF; }
+.solverz-hero-art img { display: block; width: 100%; height: auto; }
+.solverz-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem; }
+a.solverz-button {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.75rem;
+    padding: 0.65rem 1.05rem;
+    border: 1px solid var(--color-background-border);
+    border-radius: 7px;
+    color: var(--solverz-heading);
+    font-size: 0.87rem;
     font-weight: 600;
-    font-size: 120%;
-}
-
-/* Disable underlines on links except on hover */
-a {
+    line-height: 1.25;
     text-decoration: none;
 }
-a:hover {
-    text-decoration: underline;
+a.solverz-button-primary { color: var(--solverz-button-foreground); background: var(--solverz-button-background); border-color: var(--solverz-button-background); }
+a.solverz-button:hover { box-shadow: 0 0 0 2px var(--color-background-border); text-decoration: none; }
+.solverz-section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin: 2rem 0 1rem; }
+.solverz-section-heading h2 { margin: 0; padding: 0; font-size: 1.35rem; }
+.solverz-section-heading p { margin: 0; color: var(--color-foreground-muted); font-size: 0.78rem; }
+.solverz-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.85rem; }
+a.solverz-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    color: var(--solverz-heading);
+    background: var(--solverz-surface);
+    border: 1px solid var(--color-background-border);
+    border-radius: 10px;
+    padding: 1.15rem;
+    text-decoration: none;
 }
-/* Keep the underline in the announcement header */
-.announcement-content a {
-    text-decoration: underline;
+a.solverz-card:hover { border-color: var(--solverz-accent); background: var(--solverz-soft-accent); text-decoration: none; }
+.solverz-card-index { color: var(--color-brand-primary); font-size: 0.7rem; letter-spacing: 0.06em; font-weight: 600; margin-bottom: 0.65rem; }
+.solverz-card h3 { margin: 0 0 0.5rem; font-size: 1rem; letter-spacing: -0.015em; }
+.solverz-card p { color: var(--color-foreground-secondary); font-size: 0.82rem; line-height: 1.6; margin: 0; }
+.solverz-workflow {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 1.15rem 0;
+    border-top: 1px solid var(--color-background-border);
+    border-bottom: 1px solid var(--color-background-border);
+    gap: 1.5rem;
 }
-/* TODO: Some styling for visited? */
-/* a:visited { */
-/*     color: #307748; */
-/*     text-decoration: none; */
-/* } */
-/* a:visited:hover { */
-/*     color: #307748; */
-/*     text-decoration: underline; */
-/* } */
+.solverz-workflow h3 { font-size: 0.9rem; margin: 0 0 0.4rem; }
+.solverz-workflow p { font-size: 0.8rem; color: var(--color-foreground-secondary); margin: 0; line-height: 1.6; }
+.solverz-resource-links { list-style: none; padding: 0; margin: 0.5rem 0 2rem; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 1.5rem; }
+.solverz-resource-links li { border-bottom: 1px solid var(--color-background-border); margin: 0; }
+.solverz-resource-links a { display: block; padding: 0.8rem 0; color: var(--solverz-heading); font-size: 0.87rem; text-decoration: none; }
+.solverz-resource-links a::after { content: "\2192"; float: right; color: var(--color-brand-primary); }
+.solverz-resource-links a:hover { color: var(--color-brand-primary); text-decoration: underline; }
+.solverz-brand-preview { border: 1px solid var(--color-background-border); border-radius: 12px; overflow: hidden; }
 
-/* Disable the fancy scrolling behavior when jumping to headers (this is too
-   slow for long pages) */
-html {
-    scroll-behavior: auto;
+@media (max-width: 67em) {
+    .solverz-hero { grid-template-columns: minmax(0, 1fr) 10rem; gap: 1.2rem; }
 }
-
-/* Make checkboxes from the tasklist extension ('- [ ]' in Markdown) not add bullet points to the checkboxes.
-
-This can be removed once https://github.com/executablebooks/mdit-py-plugins/issues/59 is addressed.
-*/
-
-.contains-task-list {
-    list-style: none;
+@media (max-width: 40em) {
+    article h1 { margin-top: 1.5rem; }
+    .solverz-home { padding-top: 0.5rem; }
+    .solverz-hero { grid-template-columns: minmax(0, 1fr); padding-top: 1.2rem; gap: 1.5rem; }
+    .solverz-hero-art { width: 8rem; order: -1; }
+    .solverz-cards, .solverz-workflow, .solverz-resource-links { grid-template-columns: minmax(0, 1fr); }
+    .solverz-section-heading { display: block; }
+    .solverz-section-heading p { margin-top: 0.4rem; }
+    .solverz-card { min-height: 0; }
 }
-
-/* Make the checkboxes indented like they are bullets */
-.task-list-item-checkbox {
-    margin: 0 0.2em 0.25em -1.4em;
+@media print {
+    .solverz-hero-art, .solverz-actions { display: none; }
+    .solverz-hero { display: block; }
+    a.solverz-card { break-inside: avoid; }
 }

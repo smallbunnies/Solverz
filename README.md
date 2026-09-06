@@ -1,7 +1,30 @@
-# Overview
-Solverz is an open-source python-based simulation modelling language that provides symbolic interfaces for you to model your equations and can then generate functions or numba-jitted python modules for numerical solutions. 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/src/_static/brand/logo-horizontal-dark.png">
+    <img src="docs/src/_static/brand/logo-horizontal-light.png" alt="Solverz" width="640">
+  </picture>
+</p>
 
-Solverz supports three types of abstract equation types, that are
+<p align="center">
+  <a href="https://docs.solverz.org/">Documentation</a> ·
+  <a href="https://cookbook.solverz.org/latest/">Cookbook</a> ·
+  <a href="https://docs.solverz.org/reference/index.html">API reference</a> ·
+  <a href="https://pypi.org/project/Solverz/">PyPI</a>
+</p>
+
+Solverz is an open-source, general-purpose modeling and simulation toolkit for Python. Define symbolic equations, generate numerical functions or compiled Python modules, and solve your models through a consistent interface.
+
+## Installation
+
+Solverz requires Python 3.10 or later.
+
+```shell
+pip install Solverz
+```
+
+## Model types
+
+Solverz supports three equation types.
 
 - Algebraic Equations (AEs) $0=F(y,p)$
 - Finite Difference Algebraic Equations (FDAEs) $0=F(y,p,y_0)$
@@ -9,15 +32,16 @@ Solverz supports three types of abstract equation types, that are
 
 where $p$ is the parameter set of your models, $y_0$ is the previous time node value of $y$.
 
-Say, we want to know how long it will take for an apple, launched from the ground into the air, to fall back to the
-ground. We have the differential equations 
+## A first simulation
+
+The following example models an object launched vertically from the ground. Its velocity and height satisfy
 
 $$
 \begin{aligned}
 &v'=-9.8\\
 &h'=v
 \end{aligned}
-$$ 
+$$
 
 with $v(0)=20$ and $h(0)=0$, we can just type the codes
 ```python
@@ -56,11 +80,13 @@ plt.xlabel('Time/s')
 plt.ylabel('h/m')
 plt.show()
 ```
-Then we have
+The result is
 
-![image.png](res.png)
+![Height of the object over time](res.png)
 
-The model is solved with the stiffly accurate Rosenbrock type method, but you can also write your own solvers by the generated numerical interfaces since, for example, the Newton-Raphson solver implememtation for AEs is as simple as below.
+## Use the numerical interface
+
+The example uses a Rosenbrock method. Solverz also exposes numerical functions for custom solvers. The following Newton–Raphson implementation solves algebraic equations.
 ```python
 @ae_io_parser
 def nr_method(eqn: nAE,
@@ -84,9 +110,11 @@ def nr_method(eqn: nAE,
 
     return aesol(y, ite)
 ```
-The implementation of the NR solver just resembles the formulae you read in any numerical analysis book. This is because the numerical AE object `eqn` provides the $F(t,y,p)$ interface and its Jacobian $J(t,y,p)$, which is derived by symbolic differentiation. 
+The implementation of the NR solver just resembles the formulae you read in any numerical analysis book. This is because the numerical AE object `eqn` provides the $F(t,y,p)$ interface and its Jacobian $J(t,y,p)$, which is derived by symbolic differentiation.
 
-Sometimes you have very complex models and you dont want to re-derive them everytime. With Solverz, you can just use
+## Generate a reusable module
+
+Save a model as an independent Python module when you need to reuse it.
 ```python
 from Solverz import module_printer
 
@@ -96,33 +124,26 @@ pyprinter = module_printer(bball,
                            jit=True)
 pyprinter.render()
 ```
-to generate an independent python module of your simulation models. You can import them to your .py file by
+Import the generated model with
 
 ```python
 from bounceball import mdl as nbball, y as y0
 ```
 
-# Installation
-
-Solverz requires ```python>=3.10```, and can be installed locally with
-
-```shell
-pip install Solverz
-```
-
-# Useful Resources
+## Resources
 
 - [Solverz Documentation](https://docs.solverz.org)
-- [Solverz Cookbook](https://cook.solverz.org)
+- [Solverz Cookbook](https://cookbook.solverz.org/latest/)
 - [Solverz Museum](https://solmuseum.solverz.org)
+- [Brand assets](docs/src/_static/brand/README.md)
 
- # Cite Solverz
- 
- In Chinese
- 
+## Cite Solverz
+
+### Chinese
+
  [1] 俞睿智,顾伟,陆帅,张苏涵,徐一骏.面向综合能源系统的开源高性能仿真建模工具开发[J].中国电机工程学报,2026,46(9):3654-3665.DOI:10.13334/j.0258-8013.pcsee.242788.
 
- In English
+### English
 
  [1] R. Yu, W. Gu, S. Lu, S. Zhang, Y. Xu and R. Wang, "Efficient and Generic Co-simulation Framework for Integrated Energy Systems with Renewable Energy Penetration," 2026 IEEE PES International Meeting (PES IM), Hong Kong, Hong Kong, 2026, pp. 1-5, doi: 10.1109/PESIM67009.2026.11439048.
 

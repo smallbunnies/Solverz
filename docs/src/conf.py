@@ -38,7 +38,7 @@ autodoc_inherit_docstrings = False
 # 虽然Sphinx本身提供了一些对数学公式的支持，但其渲染效果不如MathJax优秀。因此，为了获得更好的数学公式渲染效果，使用MathJax插件可以帮助Sphinx在生成文档时自动渲染数学公式，从而提高文档的质量和可读性。
 
 templates_path = ['_templates']
-exclude_patterns = []
+exclude_patterns = ['_static/**', '_templates/**']
 
 source_suffix = {
     '.rst': 'restructuredtext',
@@ -75,64 +75,104 @@ html_static_path = ['_static']
 html_theme = 'furo'
 
 common_theme_variables = {
-    # Main "SymPy green" colors. Many things uses these colors.
-    "color-brand-primary": "#52833A",
-    "color-brand-content": "#307748",
-
-    # The left sidebar.
-    "color-sidebar-background": "#3B5526",
-    "color-sidebar-background-border": "var(--color-background-primary)",
-    "color-sidebar-link-text": "#FFFFFF",
-    "color-sidebar-brand-text": "var(--color-sidebar-link-text--top-level)",
-    "color-sidebar-link-text--top-level": "#FFFFFF",
-    "color-sidebar-item-background--hover": "var(--color-brand-primary)",
-    "color-sidebar-item-expander-background--hover": "var(--color-brand-primary)",
-
-    "color-link-underline--hover": "var(--color-link)",
-    "color-api-keyword": "#000000bd",
-    "color-api-name": "var(--color-brand-content)",
-    "color-api-pre-name": "var(--color-brand-content)",
-    "api-font-size": "var(--font-size--normal)",
-    "color-foreground-secondary": "#53555B",
-
-    # TODO: Add the other types of admonitions here if anyone uses them.
-    "color-admonition-title-background--seealso": "#CCCCCC",
-    "color-admonition-title--seealso": "black",
-    "color-admonition-title-background--note": "#CCCCCC",
-    "color-admonition-title--note": "black",
-    "color-admonition-title-background--warning": "var(--color-problematic)",
-    "color-admonition-title--warning": "white",
-    "admonition-font-size": "var(--font-size--normal)",
-    "admonition-title-font-size": "var(--font-size--normal)",
-
-    # Note: this doesn't work. If we want to change this, we have to set
-    # it as the .highlight background in custom.css.
-    "color-code-background": "hsl(80deg 100% 95%)",
-
-    "code-font-size": "var(--font-size--small)",
-    "font-stack--monospace": 'DejaVu Sans Mono,"SFMono-Regular",Menlo,Consolas,Monaco,Liberation Mono,Lucida Console,monospace;'
+    # Link orange is darker than logo orange to keep body links readable.
+    "color-brand-primary": "#A74418",
+    "color-brand-content": "#A74418",
+    "color-brand-visited": "#805041",
+    "color-foreground-primary": "#223746",
+    "color-foreground-secondary": "#526573",
+    "color-foreground-muted": "#617480",
+    "color-foreground-border": "#8396A1",
+    "color-background-primary": "#FFFFFF",
+    "color-background-secondary": "#F5F7F8",
+    "color-background-hover": "#EDF2F4",
+    "color-background-border": "#DFE7EB",
+    "color-sidebar-background": "#FFFFFF",
+    "color-sidebar-background-border": "#DFE7EB",
+    "color-sidebar-link-text": "#425B6B",
+    "color-sidebar-link-text--top-level": "#164162",
+    "color-sidebar-caption-text": "#617480",
+    "color-sidebar-item-background--current": "#FFF2E9",
+    "color-sidebar-item-background--hover": "#F5F7F8",
+    "color-sidebar-item-expander-background--hover": "#EDF2F4",
+    "color-sidebar-search-background": "#F5F7F8",
+    "color-sidebar-search-background--focus": "#FFFFFF",
+    "color-api-name": "#164162",
+    "color-api-pre-name": "#526573",
+    "color-api-background": "#F5F7F8",
+    "color-api-background-hover": "#EDF2F4",
+    "color-api-keyword": "#A74418",
+    "color-highlight-on-target": "#FFF0CC",
+    "color-highlighted-background": "#FFE4BE",
+    "color-admonition-background": "#F8FAFB",
+    "color-admonition-title-background--note": "#E9F4F4",
+    "color-admonition-title--note": "#126D76",
+    "color-admonition-title-background--seealso": "#EEF3F8",
+    "color-admonition-title--seealso": "#164162",
+    "color-code-background": "#F6F8FA",
+    "color-code-foreground": "#223746",
+    "font-stack": '-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif',
+    "font-stack--monospace": '"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace',
+    "code-font-size": "0.875rem",
+    "admonition-font-size": "0.95rem",
+    "solverz-accent": "#F96A20",
+    "solverz-heading": "#164162",
+    "solverz-surface": "#F7F9FA",
+    "solverz-soft-accent": "#FFF2E9",
+    "solverz-button-background": "#164162",
+    "solverz-button-foreground": "#FFFFFF",
 }
 
 html_theme_options = {
+    "light_logo": "brand/logo-horizontal-light.png",
+    "dark_logo": "brand/logo-horizontal-dark.png",
+    "sidebar_hide_name": True,
+    "source_repository": "https://github.com/smallbunnies/Solverz/",
+    "source_branch": "main",
+    "source_directory": "docs/src/",
     "light_css_variables": common_theme_variables,
-    # The dark variables automatically inherit values from the light variables
     "dark_css_variables": {
         **common_theme_variables,
-        "color-brand-primary": "#33CB33",
-        "color-brand-content": "#1DBD1D",
-
-        "color-api-keyword": "#FFFFFFbd",
-        "color-api-overall": "#FFFFFF90",
-        "color-api-paren": "#FFFFFF90",
-
-        "color-sidebar-item-background--hover": "#52833A",
-        "color-sidebar-item-expander-background--hover": "#52833A",
-        # This is the color of the text in the right sidebar
-        "color-foreground-secondary": "#9DA1AC",
-
-        "color-admonition-title-background--seealso": "#555555",
-        "color-admonition-title-background--note": "#555555",
-        "color-problematic": "#B30000",
+        "color-brand-primary": "#FFAE76",
+        "color-brand-content": "#FFAE76",
+        "color-brand-visited": "#E5BAA7",
+        "color-foreground-primary": "#E5EDF2",
+        "color-foreground-secondary": "#B5C6D0",
+        "color-foreground-muted": "#99AFBD",
+        "color-foreground-border": "#667F90",
+        "color-background-primary": "#102433",
+        "color-background-secondary": "#172F40",
+        "color-background-hover": "#203C50",
+        "color-background-border": "#2D4658",
+        "color-sidebar-background": "#142A3A",
+        "color-sidebar-background-border": "#2D4658",
+        "color-sidebar-link-text": "#C2D0D9",
+        "color-sidebar-link-text--top-level": "#E5EDF2",
+        "color-sidebar-caption-text": "#99AFBD",
+        "color-sidebar-item-background--current": "#273C4B",
+        "color-sidebar-item-background--hover": "#203C50",
+        "color-sidebar-item-expander-background--hover": "#203C50",
+        "color-sidebar-search-background": "#102433",
+        "color-sidebar-search-background--focus": "#1C3749",
+        "color-api-name": "#8DD7DF",
+        "color-api-pre-name": "#B5C6D0",
+        "color-api-background": "#172F40",
+        "color-api-background-hover": "#203C50",
+        "color-api-keyword": "#FFAE76",
+        "color-highlight-on-target": "#4E401D",
+        "color-highlighted-background": "#674321",
+        "color-admonition-background": "#172F40",
+        "color-admonition-title-background--note": "#183E48",
+        "color-admonition-title--note": "#8DD7DF",
+        "color-admonition-title-background--seealso": "#203C50",
+        "color-admonition-title--seealso": "#C2D9E7",
+        "color-code-background": "#142B3C",
+        "color-code-foreground": "#E5EDF2",
+        "solverz-heading": "#F1F6F8",
+        "solverz-surface": "#172F40",
+        "solverz-soft-accent": "#273C4B",
+        "solverz-button-background": "#FFAE76",
+        "solverz-button-foreground": "#142A3A",
     },
     # See https://pradyunsg.me/furo/customisation/footer/
     "footer_icons": [
@@ -153,10 +193,18 @@ html_css_files = ['custom.css']
 
 html_domain_indices = ['py-modindex']
 
-# Solverz logo on title page
-html_logo = '_static/sympylogo.png'
-latex_logo = '_static/sympylogo_big.png'
-html_favicon = '../_build/logo/sympy-notailtext-favicon.ico'
+html_title = 'Solverz documentation'
+html_baseurl = os.environ.get('READTHEDOCS_CANONICAL_URL', 'https://docs.solverz.org/')
+html_context = {
+    'solverz_description': 'General-purpose modeling and simulation in Python. Define symbolic equations, generate numerical functions, and solve your models with Solverz.',
+    'solverz_social_image': html_baseurl.rstrip('/') + '/_static/brand/social-cover.png',
+}
+pygments_style = 'friendly'
+pygments_dark_style = 'native'
+
+# Reuse the approved square mark rather than maintaining another icon design.
+latex_logo = '_static/brand/logo-stacked.png'
+html_favicon = '_static/brand/symbol-square.png'
 
 
 def linkcode_resolve(domain, info):

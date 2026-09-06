@@ -1,0 +1,21 @@
+{% extends "!page.html" %}
+
+{% block extrahead %}
+{{ super() }}
+<meta name="description" content="{{ solverz_description|e }}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Solverz">
+<meta property="og:title" content="{{ title|striptags|e }} — Solverz">
+<meta property="og:description" content="{{ solverz_description|e }}">
+<meta property="og:image" content="{{ solverz_social_image|e }}">
+<meta property="og:image:alt" content="Solverz — general-purpose modeling and simulation in Python">
+<meta name="twitter:card" content="summary_large_image">
+{% endblock %}
+
+{% block content %}
+{% if pagename == master_doc %}
+{% include "partials/solverz-home.html" %}
+{% else %}
+{{ super() }}
+{% endif %}
+{% endblock %}
