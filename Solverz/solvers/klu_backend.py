@@ -16,6 +16,22 @@ cached ordering), which is the regime that makes KLU roughly twice as fast as
 SuperLU on power-system / IEGS Jacobians. The reusable symbolic is meant to be
 held on the model object via a :class:`KLUCache` for the lifetime of a run.
 
+Before the symbolic analysis the rows are permuted by the maximum-product
+matching of :mod:`Solverz.solvers.matching`, so that every column has its
+largest entry, or an entry close to it, on the diagonal, and the block
+triangular form is switched off so that KLU keeps that diagonal as its pivot
+sequence. KLU's own transversal is blind to the magnitudes, and for a Jacobian
+whose structural diagonal is empty, which every LoopEqn model produces, the
+AMD ordering of that arbitrary matching can carry several times the fill of
+the matched one; on the SolUtil power flow of MATPOWER case_ACTIVSg70k the
+factorization drops from 1.3 s to 52 ms. The permutation is part of the cached
+:class:`KLUSymbolic`, and :meth:`klu_decomposition.solve` applies it to the
+right-hand side, so callers see the same interface as before. Systems below
+``MATCHING_MIN_N`` unknowns (1000 by default) keep KLU's own transversal,
+since the fixed cost of the matching exceeds their whole factorization. Set
+the environment variable ``SOLVERZ_KLU_MATCHING=0`` or call
+:func:`set_klu_matching` to fall back to KLU's own transversal everywhere.
+
 Real matrices only. Complex matrices raise :class:`NotImplementedError`; the
 ``lu_decomposition`` dispatcher checks for this and routes complex systems to
 scipy instead.
@@ -35,7 +51,32 @@ from ctypes import (
 
 import numpy as np
 
-__all__ = ["KLU_AVAILABLE", "libklu_path", "klu_decomposition", "KLUSymbolic", "KLUCache"]
+__all__ = ["KLU_AVAILABLE", "libklu_path", "klu_decomposition", "KLUSymbolic", "KLUCache",
+           "set_klu_matching", "klu_matching_enabled"]
+
+# Row matching before the KLU ordering (see the module docstring). Off when
+# the environment variable is "0"; toggled at runtime by set_klu_matching.
+# Below MATCHING_MIN_N unknowns the matching is skipped: its fixed cost of
+# 0.1 to 0.5 ms per pattern exceeds the whole factorization of such systems,
+# and the fill it saves there is negligible. Measured gains start around
+# 2 000 unknowns and reach a factor of 8 in the Newton solve at 140 000.
+_MATCHING = os.environ.get("SOLVERZ_KLU_MATCHING", "1").strip() != "0"
+MATCHING_MIN_N = int(os.environ.get("SOLVERZ_KLU_MATCHING_MIN_N", "1000"))
+
+
+def set_klu_matching(enabled: bool, min_n: int = None) -> None:
+    """Enable or disable the maximum-product row matching before the KLU
+    symbolic analysis, and optionally set the smallest number of unknowns it
+    applies to. Takes effect for the next symbolic analysis; a cached
+    :class:`KLUSymbolic` keeps the setting it was built with."""
+    global _MATCHING, MATCHING_MIN_N
+    _MATCHING = bool(enabled)
+    if min_n is not None:
+        MATCHING_MIN_N = int(min_n)
+
+
+def klu_matching_enabled() -> bool:
+    return _MATCHING
 
 
 # --------------------------------------------------------------------------- #
@@ -125,16 +166,25 @@ class KLUSymbolic:
     The fingerprint is ``(shape, nnz, indptr)``. Solverz guarantees the pattern
     is invariant within a run, so an ``indptr`` match (cheap, O(ncol)) together
     with the same shape and nnz is a sufficient reuse condition in practice.
+
+    ``perm`` is the row permutation applied before the analysis (``None`` when
+    the matching is off or failed), ``indices_p`` the row indices of the
+    permuted pattern and ``gather`` the entry order that turns the caller's
+    CSC data into the data of the permuted matrix, so every later numeric
+    factorization of the same pattern costs one gather and no sort.
     """
 
-    __slots__ = ("ptr", "shape", "nnz", "indptr", "_common")
+    __slots__ = ("ptr", "shape", "nnz", "indptr", "_common", "perm", "indices_p", "gather")
 
-    def __init__(self, ptr, shape, nnz, indptr, common):
+    def __init__(self, ptr, shape, nnz, indptr, common, perm=None, indices_p=None, gather=None):
         self.ptr = ptr
         self.shape = shape
         self.nnz = nnz
         self.indptr = indptr           # int32 copy
         self._common = common          # keep the Common used at analyze alive
+        self.perm = perm
+        self.indices_p = indices_p
+        self.gather = gather
 
     def matches(self, shape, nnz, indptr):
         return (shape == self.shape and nnz == self.nnz
@@ -182,6 +232,34 @@ def _as_int32_csc(A):
     return A.shape, indptr, indices, data
 
 
+def _row_matching(n, indptr, indices, data):
+    """Maximum-product row permutation of the CSC matrix and the arrays that
+    apply it to the pattern once and to the data at every factorization.
+
+    Returns ``(perm, indices_p, gather)`` or ``(None, None, None)`` when the
+    matching is unavailable. ``A[perm]`` has the matched entries on its
+    diagonal; ``gather`` reorders the entries of ``A.data`` so that
+    ``(data[gather], indices_p, indptr)`` is the CSC form of ``A[perm]`` with
+    sorted row indices, which ``klu_analyze`` and ``klu_factor`` expect.
+    """
+    try:
+        from Solverz.solvers.matching import max_product_matching
+        perm = max_product_matching(indptr, indices, data, n)
+    except Exception:
+        return None, None, None
+    if perm is None:
+        return None, None, None
+    inv = np.empty(n, dtype=np.int64)
+    inv[perm] = np.arange(n)
+    new_rows = inv[np.asarray(indices, dtype=np.int64)]
+    # one stable sort on the combined (column, new row) key; a lexsort on
+    # two keys costs an order of magnitude more on large patterns
+    key = np.repeat(np.arange(n, dtype=np.int64), np.diff(indptr)) * n + new_rows
+    gather = np.argsort(key, kind='stable')
+    indices_p = np.ascontiguousarray(new_rows[gather], dtype=np.int32)
+    return perm, indices_p, gather
+
+
 # --------------------------------------------------------------------------- #
 # Decomposition object: matches sp_decomposition's .solve(b) interface
 # --------------------------------------------------------------------------- #
@@ -200,7 +278,7 @@ class klu_decomposition:
     created) ordering for the next step.
     """
 
-    def __init__(self, A, symbolic=None, tol=None):
+    def __init__(self, A, symbolic=None, tol=None, matching=None):
         if not KLU_AVAILABLE:
             raise RuntimeError("libklu not available")
         self._common = _fresh_common()
@@ -215,29 +293,47 @@ class klu_decomposition:
         self.nnz = int(indptr[-1])
         n = shape[0]
         Ap = indptr.ctypes.data_as(POINTER(c_int32))
-        Ai = indices.ctypes.data_as(POINTER(c_int32))
-        Ax = data.ctypes.data_as(POINTER(c_double))
 
         if symbolic is not None and symbolic.ptr and symbolic.matches(shape, self.nnz, indptr):
             self.symbolic = symbolic
         else:
-            ptr = _lib.klu_analyze(n, Ap, Ai, byref(self._common))
+            # ``matching=None`` follows the global switch and the size
+            # threshold; an explicit True or False overrides both.
+            use_matching = (_MATCHING and n >= MATCHING_MIN_N) if matching is None else bool(matching)
+            perm = indices_p = gather = None
+            if use_matching and n > 1:
+                perm, indices_p, gather = _row_matching(n, indptr, indices, data)
+            # KLU keeps the diagonal it is given only without the block
+            # triangular form; with BTF on it would recompute a structural
+            # transversal and discard the matching.
+            self._common.btf = 0 if perm is not None else 1
+            Ai_a = (indices_p if indices_p is not None else indices).ctypes.data_as(POINTER(c_int32))
+            ptr = _lib.klu_analyze(n, Ap, Ai_a, byref(self._common))
             if not ptr:
                 raise RuntimeError(f"klu_analyze failed (status {self._common.status})")
-            self.symbolic = KLUSymbolic(ptr, shape, self.nnz, indptr.copy(), self._common)
+            self.symbolic = KLUSymbolic(ptr, shape, self.nnz, indptr.copy(), self._common,
+                                        perm=perm, indices_p=indices_p, gather=gather)
 
-        self._num = _lib.klu_factor(Ap, Ai, Ax, self.symbolic.ptr, byref(self._common))
+        sym = self.symbolic
+        if sym.perm is not None:
+            self._common.btf = 0
+            self._indices = sym.indices_p
+            self._data = data = np.ascontiguousarray(data[sym.gather])
+        Ai = self._indices.ctypes.data_as(POINTER(c_int32))
+        Ax = data.ctypes.data_as(POINTER(c_double))
+        self._num = _lib.klu_factor(Ap, Ai, Ax, sym.ptr, byref(self._common))
         if not self._num or self._common.status != _KLU_OK:
             raise RuntimeError(f"klu_factor failed (status {self._common.status})")
 
     def solve(self, b):
         b = np.asarray(b)
         n = self.shape[0]
+        perm = self.symbolic.perm
         if b.ndim == 1:
-            x = np.array(b, dtype=np.float64, copy=True)
+            x = np.array(b[perm] if perm is not None else b, dtype=np.float64, copy=True)
             nrhs = 1
         else:
-            x = np.array(b, dtype=np.float64, order="F", copy=True)
+            x = np.array(b[perm] if perm is not None else b, dtype=np.float64, order="F", copy=True)
             nrhs = x.shape[1]
         Xp = x.ctypes.data_as(POINTER(c_double))
         _lib.klu_solve(self.symbolic.ptr, self._num, n, nrhs, Xp, byref(self._common))
