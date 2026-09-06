@@ -698,10 +698,20 @@ def _target_first_axis_len(sol_obj):
             break
     if arr is None:
         return None
+    # A sparse 2-D Param stores a scipy sparse matrix; ``np.asarray`` wraps
+    # it in a 0-d object array and hides its shape (issue #151), so read
+    # ``.shape`` from any object that carries one before falling back.
+    shape = getattr(arr, 'shape', None)
+    if shape is None:
+        try:
+            shape = np.asarray(arr).shape
+        except Exception:
+            return None
+    if len(shape) == 0:
+        return None
     try:
-        import numpy as _np
-        return int(_np.asarray(arr).shape[0])
-    except Exception:
+        return int(shape[0])
+    except (TypeError, ValueError):
         return None
 
 

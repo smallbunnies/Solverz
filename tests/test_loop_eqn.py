@@ -2843,3 +2843,86 @@ def test_issue149_sum_kd_with_set_backed_row_axis():
     covered[coo.row, coo.col] = True
     missing = int(((np.abs(J_fd) > 1e-6) & ~covered).sum())
     assert missing == 0, f'{missing} true nonzeros outside the pattern'
+
+
+# --------------------------------------------------------------------------- #
+# Issue #151. A ``Set`` whose values form the leading range ``0..k-1`` of a
+# larger index space is flagged ``is_identity``. On a sparse 2-D Param the
+# body rewriter could not read the Param's first-axis length, dropped the
+# gather, and the sparsity analyzer then took every stored row of the Param
+# for a ``k``-row block, so ``render()`` failed in ``FormJac``. The same
+# clipping defect hit a plain ``Idx`` outer range shorter than the Param.
+# --------------------------------------------------------------------------- #
+
+def _issue151_model(outer_kind, linear):
+    from Solverz import Set
+
+    n = 5
+    A = csc_array(np.eye(n) + np.diag(np.ones(n - 1), 1)
+                  + np.diag(np.ones(n - 1), -1))
+    m = Model()
+    m.x = Var('x', np.full(n, 1.3))
+    m.A = Param('A', A, dim=2, sparse=True)
+    m.Bus = Set('Bus', n)
+    j = m.Bus.idx('j')
+    if outer_kind == 'set':
+        m.Head = Set('Head', [0, 1, 2])   # == arange(3), a subset of 5 rows
+        i = m.Head.idx('i_head151')
+    else:
+        i = Idx('i_idx151', 3)
+    if linear:
+        body = Sum(m.A[i, j] * m.x[j], j) - 1.0
+    else:
+        body = m.x[i] * Sum(m.A[i, j] * m.x[j] ** 2, j) - 1.0
+    m.row = LoopEqn('row', outer_index=i, body=body, model=m)
+    m.Tail = Set('Tail', [3, 4])
+    k = m.Tail.idx('k_tail151')
+    m.pin = LoopEqn('pin', outer_index=k, body=m.x[k] - 1.0, model=m)
+    return m, A.toarray()
+
+
+def _issue151_check(outer_kind, linear):
+    m, A = _issue151_model(outer_kind, linear)
+    spf, y0 = m.create_instance()
+    d = spf.EQNs['row'].derivatives['x']
+    if hasattr(d, '_sparsity_row'):
+        assert int(np.max(d._sparsity_row)) < d.n_outer
+    mdl, y = _mdl_from_module(spf, y0)
+    yv = np.asarray(y.array, dtype=float)
+    J = mdl.J(yv, mdl.p).toarray()
+    np.testing.assert_allclose(J, _fd_jac(mdl.F, yv, mdl.p), atol=1e-6)
+    from Solverz import Opt
+    sol = nr_method(mdl, y, Opt(ite_tol=1e-10))
+    assert sol.stats.succeed
+    x = np.asarray(sol.y['x'])
+    res = A[:3] @ x - 1.0 if linear else x[:3] * (A[:3] @ x ** 2) - 1.0
+    np.testing.assert_allclose(res, 0.0, atol=1e-9)
+    np.testing.assert_allclose(x[3:], 1.0, atol=1e-10)
+
+
+def test_issue151_leading_range_set_gathers_sparse_param():
+    m, _ = _issue151_model('set', linear=False)
+    spf, _ = m.create_instance()
+    assert 'A[Head[i_head151], j]' in str(spf.EQNs['row'].body)
+    _issue151_check('set', linear=False)
+
+
+def test_issue151_leading_range_set_linear_body():
+    _issue151_check('set', linear=True)
+
+
+def test_issue151_plain_idx_shorter_than_param_rows():
+    _issue151_check('idx', linear=False)
+
+
+def test_issue151_target_first_axis_len_reads_sparse_shape():
+    from Solverz.equation.eqn import _target_first_axis_len
+    assert _target_first_axis_len(
+        Param('A151', csc_array(np.eye(4)), dim=2, sparse=True)) == 4
+    assert _target_first_axis_len(Param('b151', np.zeros(7))) == 7
+
+
+def test_issue151_plain_idx_shorter_than_param_rows_linear_body():
+    """The constant-Param path (Phase J1) must slice the Param to the
+    leading ``n_outer`` rows instead of returning the whole matrix."""
+    _issue151_check('idx', linear=True)
