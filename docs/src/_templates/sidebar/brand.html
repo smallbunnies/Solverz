@@ -1,0 +1,9 @@
+{% extends "!sidebar/brand.html" %}
+
+{% block brand_content %}
+<div class="sidebar-logo-container">
+  <img class="sidebar-logo only-light" src="{{ pathto('_static/' + theme_light_logo, 1) }}" alt="Solverz" width="1774" height="887">
+  <img class="sidebar-logo only-dark" src="{{ pathto('_static/' + theme_dark_logo, 1) }}" alt="Solverz" width="1774" height="887">
+</div>
+<span class="solverz-sidebar-caption">Modeling and simulation in Python</span>
+{% endblock %}

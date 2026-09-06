@@ -1,0 +1,62 @@
+<div class="solverz-home" id="documentation">
+  <span id="welcome-to-solverz"></span>
+  <section class="solverz-hero" id="solverz-documentation" aria-labelledby="solverz-home-title">
+    <div>
+      <p class="solverz-eyebrow">General-purpose modeling in Python</p>
+      <h1 id="solverz-home-title">Model equations.<br>Solve systems.</h1>
+      <p class="solverz-lead">Define your equations with a symbolic interface. Generate numerical functions and solve algebraic, differential, and finite-difference models.</p>
+      <div class="solverz-actions">
+        <a class="solverz-button solverz-button-primary" href="{{ pathto('install') }}">Install Solverz</a>
+        <a class="solverz-button" href="{{ pathto('intro') }}">Try a first model</a>
+      </div>
+    </div>
+    <figure class="solverz-hero-art">
+      <img src="{{ pathto('_static/brand/symbol-square.png', 1) }}" alt="Solverz multicolored geometric sun" width="1254" height="1254">
+    </figure>
+  </section>
+
+  <section aria-labelledby="solverz-start-title">
+    <div class="solverz-section-heading">
+      <h2 id="solverz-start-title">Start with your model</h2>
+      <p>From a first example to the full API</p>
+    </div>
+    <div class="solverz-cards">
+      <a class="solverz-card" href="{{ pathto('intro') }}">
+        <span class="solverz-card-index">01 / FIRST EXAMPLE</span>
+        <h3>Run a simulation</h3>
+        <p>Build a small model and follow it from equations to a plotted solution.</p>
+      </a>
+      <a class="solverz-card" href="{{ pathto('gettingstart') }}">
+        <span class="solverz-card-index">02 / MODELING GUIDE</span>
+        <h3>Learn the components</h3>
+        <p>Use variables, parameters, and equations to describe your system.</p>
+      </a>
+      <a class="solverz-card" href="{{ pathto('reference/index') }}">
+        <span class="solverz-card-index">03 / API REFERENCE</span>
+        <h3>Find a function</h3>
+        <p>Look up modeling objects, mathematical functions, and numerical solvers.</p>
+      </a>
+    </div>
+  </section>
+
+  <section aria-labelledby="solverz-workflow-title">
+    <div class="solverz-section-heading"><h2 id="solverz-workflow-title">One modeling workflow</h2></div>
+    <div class="solverz-workflow">
+      <div><h3>Define</h3><p>Write symbolic equations using Python expressions and model components.</p></div>
+      <div><h3>Generate</h3><p>Create numerical residuals and Jacobians, or reusable compiled Python modules.</p></div>
+      <div><h3>Solve</h3><p>Choose a numerical solver, compute the solution, and inspect the results.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="solverz-explore-title">
+    <div class="solverz-section-heading"><h2 id="solverz-explore-title">Explore further</h2></div>
+    <ul class="solverz-resource-links">
+      <li><a href="https://cookbook.solverz.org/latest/">Worked examples in the Cookbook</a></li>
+      <li><a href="{{ pathto('matrix_calculus') }}">Matrix and vector equations</a></li>
+      <li><a href="{{ pathto('loopeqn') }}">Indexed equations and summations</a></li>
+      <li><a href="{{ pathto('advanced') }}">Custom functions and code generation</a></li>
+      <li><a href="{{ pathto('release_notes') }}">Release notes</a></li>
+      <li><a href="{{ pathto('contributing') }}">Contribute to Solverz</a></li>
+    </ul>
+  </section>
+</div>
