@@ -23,6 +23,10 @@ def nr_method(eqn: nAE,
         - ite_tol: 1e-5(default)|float
             The iteration error tolerance.
 
+        - linsolver: None(default)|'klu'|'superlu'
+            The sparse linear solver of the Newton step; None uses the global
+            selection of ``set_linsolver`` or the ``linsolver`` context manager.
+
     Returns
     =======
 
@@ -59,7 +63,7 @@ def nr_method(eqn: nAE,
 
         stats.nstep += 1
 
-        y = y - solve(eqn.J(y, p), df, cache=cache)
+        y = y - solve(eqn.J(y, p), df, backend=opt.linsolver, cache=cache)
         stats.nJeval += 1
         stats.ndecomp += 1
         stats.nsolve += 1
