@@ -68,5 +68,15 @@ def nr_method(eqn: nAE,
 
     if np.max(np.abs(df)) < tol:
         stats.succeed = True
+    else:
+        J = eqn.J(y, p)
+        import scipy.sparse as _sps
+        Jd = J.data if _sps.issparse(J) else np.asarray(J).ravel()
+        print(f"[diag] nr_method failed: nstep {stats.nstep}, max|F| {np.max(np.abs(df))}, nan in F {int(np.isnan(df).sum())}, "
+              f"J shape {J.shape} nnz {getattr(J, 'nnz', Jd.size)} nan in J {int(np.isnan(Jd).sum())} "
+              f"y nan {int(np.isnan(y).sum())} y max {np.nanmax(np.abs(y))}", flush=True)
+        if _sps.issparse(J):
+            Jc = J.tocsc(); empty_rows = int((np.diff(J.tocsr().indptr) == 0).sum()); empty_cols = int((np.diff(Jc.indptr) == 0).sum())
+            print(f"[diag] J empty rows {empty_rows} empty cols {empty_cols}; row/col ranges {J.tocoo().row.min()}..{J.tocoo().row.max()} / {J.tocoo().col.min()}..{J.tocoo().col.max()}", flush=True)
 
     return aesol(y, stats)

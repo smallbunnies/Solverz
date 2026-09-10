@@ -1968,6 +1968,11 @@ def compute_loop_jac_sparsity(canonical: sp.Expr,
                 and not param_hits
                 and not has_sum_kd):
             has_dense_fallback = True
+            _kinds = [(str(f), _classify_axis(f.args[0])[0], _classify_axis(f.args[1])[0],
+                       type(f.args[0]).__name__, type(f.args[1]).__name__)
+                      for f in factors if isinstance(f, KroneckerDelta)]
+            print(f"[diag] dense fallback by term {term} | outer {outer_idx!r} ({type(outer_idx).__name__}) "
+                  f"diff {diff_idx!r} | deltas {_kinds} | free {sorted(str(x) for x in term.free_symbols)}", flush=True)
             break
 
     def _dense_fallback():
