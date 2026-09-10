@@ -648,8 +648,15 @@ def _lookup_index_set(idx_expr: sp.Expr):
     :class:`SetIdx`, e.g. a plain ``sp.Idx``.
     """
     if not isinstance(idx_expr, SetIdx):
+        if type(idx_expr).__name__ == 'SetIdx':
+            import sys as _sys
+            print(f"[diag] SetIdx from another module object: {type(idx_expr).__module__} vs {SetIdx.__module__}; "
+                  f"eqn modules loaded: {[k for k in _sys.modules if k.lower().endswith('equation.eqn')]}", flush=True)
         return None
-    return _IDX_SET_TAGS.get(idx_expr.token)
+    iset = _IDX_SET_TAGS.get(idx_expr.token)
+    if iset is None:
+        print(f"[diag] SetIdx {idx_expr} token {idx_expr.token} not in the registry ({len(_IDX_SET_TAGS)} entries)", flush=True)
+    return iset
 
 
 def _desugar_set_idx(index_expr, var_map, model, target_len=None):
@@ -694,6 +701,7 @@ def _desugar_set_idx(index_expr, var_map, model, target_len=None):
     if iset.is_identity and (target_len is None
                               or target_len == iset.size):
         return index_expr
+    print(f"[diag] gather {index_expr} through {iset.name} (target_len={target_len}, size={iset.size}, identity={iset.is_identity})", flush=True)
     if iset.name not in var_map:
         var_map[iset.name] = iset.param
     return sp.IndexedBase(iset.name)[index_expr]
