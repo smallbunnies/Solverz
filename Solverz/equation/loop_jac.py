@@ -388,17 +388,22 @@ def resolve_outer_index_values(expr: sp.Expr,
     if isinstance(expr, sp.Idx):
         if _name_of(expr) == _name_of(outer_idx):
             return np.arange(n_outer, dtype=np.int64)
+        print(f"[diag] resolve: idx {expr!r} ({type(expr).__name__}, name {_name_of(expr)!r}) is not the outer {outer_idx!r} ({type(outer_idx).__name__}, name {_name_of(outer_idx)!r})", flush=True)
         return None
 
     if isinstance(expr, sp.Indexed):
         if len(expr.indices) != 1:
+            print(f"[diag] resolve: {expr!r} has {len(expr.indices)} indices {expr.indices!r}", flush=True)
             return None
         map_obj = var_map.get(expr.base.name)
         if not isinstance(map_obj, ParamBase):
+            print(f"[diag] resolve: {expr!r}: var_map[{expr.base.name!r}] is {type(map_obj).__name__}; keys {sorted(var_map)}", flush=True)
             return None
         if isinstance(map_obj, TimeSeriesParam):
+            print(f"[diag] resolve: {expr!r}: TimeSeriesParam", flush=True)
             return None
         if getattr(map_obj, 'dim', None) != 1:
+            print(f"[diag] resolve: {expr!r}: dim {getattr(map_obj, 'dim', None)}", flush=True)
             return None
         inner_vals = resolve_outer_index_values(
             expr.indices[0], outer_idx, n_outer, var_map, _depth + 1)
@@ -410,10 +415,12 @@ def resolve_outer_index_values(expr: sp.Expr,
             # np.concatenate are routinely upcast to float), reject a
             # genuinely fractional one.
             if not np.all(map_v == np.floor(map_v)):
+                print(f"[diag] resolve: {expr!r}: fractional map {map_v!r}", flush=True)
                 return None
             map_v = map_v.astype(np.int64)
         if inner_vals.size and (int(inner_vals.min()) < 0
                                 or int(inner_vals.max()) >= map_v.size):
+            print(f"[diag] resolve: {expr!r}: inner {inner_vals.min()}..{inner_vals.max()} outside map size {map_v.size} (dtype {map_v.dtype})", flush=True)
             return None
         return map_v[inner_vals].astype(np.int64, copy=False)
 
