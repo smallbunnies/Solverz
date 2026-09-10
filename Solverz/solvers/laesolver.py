@@ -1,5 +1,6 @@
 import os
 import contextvars
+import functools
 from typing import Union
 
 import numpy as np
@@ -155,14 +156,32 @@ class dense_decomposition:
 
 
 class sp_decomposition:
+    """SuperLU factorization behind the ``.solve(b)`` interface of
+    :class:`klu_decomposition`.
+
+    ``L``, ``U`` and ``nnz`` are read from the SuperLU object on first
+    access and kept, since each of ``L`` and ``U`` builds a scipy sparse
+    matrix from the factor, a copy of the factor's size that most callers
+    never read (issue #159); ``perm_r`` and ``perm_c`` are cheap and eager.
+    """
+
     def __init__(self,
                  A: Union[(csc_array, csc_matrix)]):
         self.splu = splu(A)
         self.perm_r = self.splu.perm_r
         self.perm_c = self.splu.perm_c
-        self.L = self.splu.L
-        self.U = self.splu.U
-        self.nnz = self.splu.nnz
+
+    @functools.cached_property
+    def L(self):
+        return self.splu.L
+
+    @functools.cached_property
+    def U(self):
+        return self.splu.U
+
+    @functools.cached_property
+    def nnz(self):
+        return self.splu.nnz
 
     def solve(self, b):
         return self.splu.solve(b)
