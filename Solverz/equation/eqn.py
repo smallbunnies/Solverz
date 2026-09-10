@@ -457,12 +457,10 @@ def Sum(expr, dummy, n: int = None):
     )
 
 
-# Module-level counter used to generate unique param names for the
-# auxiliary ``Idx`` symbols produced by :meth:`IndexSet.idx`. Sharing
-# the counter across all ``IndexSet`` instances avoids collisions
-# when two calls to ``IndexSet.idx('i')`` happen to reuse the same
-# name.
-_INDEX_SET_IDX_COUNTER = [0]
+# Module-level counter of ``IndexSet`` tokens. Every set takes the next
+# value at construction and stamps it on each index it produces, so two
+# sets can never share a token (issue #161).
+_INDEX_SET_TOKEN_COUNTER = [0]
 
 
 class IndexSet:
@@ -513,6 +511,8 @@ class IndexSet:
         if not isinstance(name, str) or not name:
             raise ValueError("IndexSet name must be a non-empty string")
         self.name = name
+        _INDEX_SET_TOKEN_COUNTER[0] += 1
+        self._token = _INDEX_SET_TOKEN_COUNTER[0]
 
         # Identity range: Set('X', n) where n is an int.
         if isinstance(values, int):
@@ -588,52 +588,68 @@ class IndexSet:
         return self._param
 
     def idx(self, name: str) -> sp.Idx:
-        """Produce a bounded ``sympy.Idx`` sized to this set.
+        """Produce a bounded index sized to this set.
 
-        Body authors use the returned ``Idx`` exactly as they would a
-        bare ``Idx(name, n)`` — the body rewriter detects that the
-        ``Idx`` came from a non-identity set and transparently wraps
-        every ``Var`` / ``Param`` access with the set's gather Param.
+        Body authors use the returned index exactly as they would a
+        bare ``Idx(name, n)`` — the body rewriter detects that it came
+        from a non-identity set and transparently wraps every ``Var`` /
+        ``Param`` access with the set's gather Param. The index is a
+        :class:`SetIdx` that carries this set's token, so the link
+        survives SymPy rebuilds and a plain ``Idx`` of the same name and
+        size is never mistaken for it (issue #161).
         """
         if not isinstance(name, str) or not name:
             raise ValueError("IndexSet.idx requires a non-empty name")
-        i = sp.Idx(name, self.size)
-        # Tag the Idx so the rewriter can find its parent set. We stash
-        # the tag on a module-level registry keyed by the Idx's
-        # ``name``-and-bounds fingerprint — sympy Idx objects with the
-        # same name and bounds compare equal, so using the name alone
-        # is enough to round-trip here.
-        _IDX_SET_TAGS[(str(i), int(i.lower), int(i.upper))] = self
-        return i
+        _IDX_SET_TAGS[self._token] = self
+        return SetIdx(name, self.size, self._token)
 
     def __repr__(self) -> str:
         kind = 'range' if self._is_identity else 'subset'
         return f"IndexSet({self.name!r}, {kind}, size={self.size})"
 
 
-# Registry mapping ``(idx_name, lower, upper)`` → the ``IndexSet`` that
-# produced the Idx via :meth:`IndexSet.idx`. Consulted by
-# :func:`_rewrite_solverz_body` to detect non-identity sets and wrap
-# their accesses with the set's gather Param.
-_IDX_SET_TAGS: Dict[Tuple[str, int, int], 'IndexSet'] = {}
+class SetIdx(sp.Idx):
+    """A bounded ``sympy.Idx`` produced by :meth:`IndexSet.idx`.
+
+    The token of the producing set is the third argument, so the link
+    survives every SymPy rebuild through ``func(*args)``, two indices of
+    the same name and size from different sets compare unequal, and a
+    plain ``sp.Idx`` of the same name and size is never mistaken for a
+    set index (issue #161). The token is an integer, which every reader
+    of an index's bounds already tolerates in ``args``, and the index
+    prints as its label like a plain ``Idx``.
+    """
+
+    def __new__(cls, label, range=None, token=None):
+        if token is None:
+            raise TypeError("SetIdx needs the token of the IndexSet that produces it")
+        base = sp.Idx.__new__(sp.Idx, label, range)
+        obj = sp.Expr.__new__(cls, *base.args, sp.Integer(int(token)))
+        obj._assumptions["finite"] = True
+        obj._assumptions["real"] = True
+        return obj
+
+    @property
+    def token(self) -> int:
+        return int(self.args[2])
+
+
+# Registry mapping the token of an ``IndexSet`` to the set, filled by
+# :meth:`IndexSet.idx` and consulted by :func:`_rewrite_solverz_body` to
+# detect non-identity sets and wrap their accesses with the set's gather
+# Param. Tokens are unique per set, so no two sets and no plain ``Idx``
+# can share an entry.
+_IDX_SET_TAGS: Dict[int, 'IndexSet'] = {}
 
 
 def _lookup_index_set(idx_expr: sp.Expr):
     """Return the :class:`IndexSet` that produced ``idx_expr`` via
-    :meth:`IndexSet.idx`, or ``None`` when ``idx_expr`` is a plain
-    ``sp.Idx`` not associated with a set.
+    :meth:`IndexSet.idx`, or ``None`` when ``idx_expr`` is not a
+    :class:`SetIdx`, e.g. a plain ``sp.Idx``.
     """
-    if not isinstance(idx_expr, sp.Idx):
+    if not isinstance(idx_expr, SetIdx):
         return None
-    lower = getattr(idx_expr, 'lower', None)
-    upper = getattr(idx_expr, 'upper', None)
-    if lower is None or upper is None:
-        return None
-    try:
-        key = (str(idx_expr), int(lower), int(upper))
-    except (TypeError, ValueError):
-        return None
-    return _IDX_SET_TAGS.get(key)
+    return _IDX_SET_TAGS.get(idx_expr.token)
 
 
 def _desugar_set_idx(index_expr, var_map, model, target_len=None):
