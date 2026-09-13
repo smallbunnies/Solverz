@@ -1131,25 +1131,18 @@ def print_F(eqs_type: str,
     """
     fp = print_F_J_prototype(eqs_type,
                              'F_',
-                             nstep)
+                             nstep,
+                             out=True)
     body = []
-    # A fresh residual array on every call, sized by ``_F_size_``, the
-    # module-level equation count.
-    #
-    # ``F_`` used to write into one module-level ``_F_`` buffer and return
-    # it, so two residuals were never valid at the same time. Every solver
-    # that DIFFERENCES two residuals then read a zero derivative, silently:
-    # the dF/dt of a Rosenbrock method, ``(F(t + ddt) - F(t)) / ddt``, became
-    # exactly 0, so ``Rodas`` dropped from order 4 to order 1 on any
-    # non-autonomous problem while still converging, and its accepted-step
-    # count scaled as rtol**(-1/2) instead of rtol**(-1/5). ``Radau`` holds
-    # three stage residuals together and ``ode15s`` and ``adams_bdf`` pass
-    # one into ``numjac``, which differences against it. ``made_numerical``
-    # was never affected because its printer allocates inside the function,
-    # which is what this restores. It also removes the shared mutable state,
-    # so two threads may now evaluate one model.
-    body.append(Assignment(iVar('_F_', internal_use=True),
-                           zeros(Symbol('_F_size_'), )))
+    # The residual is written into the caller's ``out`` array when one is
+    # given, the in-place form of SciML's ``f!(du, u, p, t)`` in NumPy's
+    # ``out=`` spelling, so a solver that owns its work arrays allocates
+    # nothing per call; ``inner_F`` is the in-place kernel. Without ``out``
+    # a fresh array of ``_F_size_`` entries, the module-level equation
+    # count, is allocated, so two residuals are never the same object.
+    # ``F_`` used to return one module-level buffer from every call, which
+    # made the ``dF/dt`` difference of ``Rodas`` exactly zero (issue #187).
+    body.append(residual_buffer(Symbol('_F_size_')))
     var_assignments, var_list = print_var(var_addr,
                                           nstep)
     body.extend(var_assignments)
@@ -1223,7 +1216,7 @@ def print_F(eqs_type: str,
         [Return(FunctionCall('inner_F',
                              [symbols('_F_', real=True)] + var_list + param_list + inner_extra_args
                              + [symbols(w, real=True) for w in walker_args]))])
-    fd = FunctionDefinition.from_FunctionPrototype(fp, body)
+    fd = PyFunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
 
 

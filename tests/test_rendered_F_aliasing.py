@@ -1,4 +1,4 @@
-"""Regression: a rendered ``F_`` must return a fresh array on every call.
+"""Regression: a rendered ``F_`` must not hand back one shared array.
 
 ``print_module_code`` used to emit one module-level ``_F_`` buffer that
 ``F_`` wrote into and returned, so two residuals were never valid at the
@@ -14,10 +14,12 @@ derivative, silently:
 - ``ode15s`` and ``adams_bdf`` pass a residual into ``numjac``, which
   differences against it.
 
-``made_numerical`` was never affected: its printer allocates ``_F_`` inside
-the function. The two paths must agree, which is what the tests below
-assert. ``J_`` was never affected either: ``CooToCsc.__call__`` gathers the
-values with fancy indexing, which copies.
+The contract now is the one of SciML's ``f!(du, u, p, t)``: the residual is
+written into the caller's ``out`` array when one is given, and a fresh array
+is returned when none is. ``made_numerical`` and the rendered module both
+print that form, and ``nDAE`` gives any other residual the keyword by
+copying. ``J_`` was never affected: ``CooToCsc.__call__`` gathers the values
+with fancy indexing, which copies.
 """
 import numpy as np
 import pytest
@@ -100,3 +102,71 @@ def test_residual_sized_by_the_equations(rendered):
     mdl, inline, y = rendered
     assert (np.asarray(mdl.F(0.0, y, mdl.p)).shape
             == np.asarray(inline.F(0.0, y, inline.p)).shape)
+
+
+# ---------------------------------------------------------------------------
+# The in-place contract: ``F(t, y, p, out=buf)`` writes into the caller's
+# array, the form of SciML's ``f!(du, u, p, t)`` in NumPy's ``out=`` spelling.
+
+
+def test_out_is_written_in_place(rendered):
+    """Both printers honour ``out``: the result IS the caller's array and it
+    equals the out-of-place value."""
+    mdl, inline, y = rendered
+    for dae in (mdl, inline):
+        expected = np.asarray(dae.F(0.6, y, dae.p), dtype=float)
+        buf = np.full(expected.shape, np.nan)
+        r = dae.F(0.6, y, dae.p, out=buf)
+        assert r is buf
+        np.testing.assert_array_equal(buf, expected)
+
+
+def test_legacy_F_gets_out_by_copy():
+    """A residual written without ``out``, a user's lambda or a module
+    rendered by an older Solverz, receives the keyword from ``nDAE``."""
+    from Solverz.num_api.num_eqn import nDAE
+    calls = []
+
+    def F(t, y, p):
+        calls.append(t)
+        return np.array([-y[0] + t])
+
+    dae = nDAE(np.eye(1), F, lambda t, y, p: np.array([[-1.0]]), {})
+    y = np.array([0.5])
+    plain = dae.F(0.3, y, dae.p)
+    buf = np.empty(1)
+    r = dae.F(0.3, y, dae.p, out=buf)
+    assert r is buf
+    np.testing.assert_array_equal(buf, plain)
+    assert calls == [0.3, 0.3]
+
+
+def test_kwargs_catch_all_is_not_an_out_parameter():
+    """``**kwargs`` would take the keyword and ignore it, so it does not
+    count as support; the adapter copies instead."""
+    from Solverz.num_api.num_eqn import _accepts_out, nAE
+
+    def F(y, p, **kwargs):
+        return np.array([y[0] - 1.0])
+
+    assert not _accepts_out(F)
+    ae = nAE(F, lambda y, p: np.array([[1.0]]), {})
+    buf = np.empty(1)
+    assert ae.F(np.array([3.0]), ae.p, out=buf) is buf
+    assert buf[0] == 2.0
+
+
+def test_in_place_and_out_of_place_integrate_identically(rendered):
+    """A solver may not read a buffer after overwriting it. Integrating the
+    same residual once through its own ``out`` and once through a wrapper
+    that drops the keyword must give the same trajectory bit for bit."""
+    from Solverz.num_api.num_eqn import nDAE
+    mdl, _, y = rendered
+    F = mdl.F
+    wrapped = nDAE(mdl.M, lambda t, y_, p: F(t, y_, p), mdl.J, mdl.p)
+    tspan = np.linspace(0.0, 1.0, 11)
+    opt = dict(rtol=1e-8, atol=1e-10, hmax=1e-2)
+    a = Rodas(mdl, tspan, y.copy(), Opt(**opt))
+    b = Rodas(wrapped, tspan, y.copy(), Opt(**opt))
+    assert a.stats.nstep == b.stats.nstep
+    np.testing.assert_array_equal(np.asarray(a.Y), np.asarray(b.Y))
