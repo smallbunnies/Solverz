@@ -97,6 +97,8 @@ def render_modules(eqs: SymEquations,
                              eqs.nstep,
                              precompute_info=precompute_info_F,
                              walker_args=walker_args)
+    # ``F_`` sizes its per-call residual from this; see ``print_F``.
+    code_dict['eqn_size'] = int(eqs.a.total_size)
     code_dict["inner_F"] = print_inner_F(eqs.EQNs,
                                          eqs.a,
                                          eqs.var_address,
@@ -388,7 +390,7 @@ def print_module_code(code_dict: Dict[str, str], numba=False):
     code += """_data_hvp = setting["data_hvp"]\n"""
     # the CSC pattern of J_ is analysed once at import; J_ only gathers the values (issue #160)
     code += '_sz_coo2csc = SolCF.CooToCsc(row, col, setting["jac_shape"])\n'
-    code += """_F_ = zeros_like(y__, dtype=float64)\n"""
+    code += f'_F_size_ = {int(code_dict["eqn_size"])}\n'
     # Load mutable matrix block mapping arrays from setting at module-level
     # so the J_ wrapper can reference them directly (and numba sees typed
     # numpy arrays).

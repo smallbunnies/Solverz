@@ -335,6 +335,7 @@ def test_print_inner_J():
 
 
 expected6 = """def F_(t, y_, p_):
+    _F_ = np.zeros((_F_size_, ))
     omega = y_[0:10]
     delta = y_[10:15]
     x = y_[15:18]

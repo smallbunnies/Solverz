@@ -151,6 +151,7 @@ def test_AE_module_printer():
 
 
 expected_F_mat = """def F_(y_, p_):
+    _F_ = np.zeros((_F_size_, ))
     x = y_[0:2]
     y = y_[2:3]
     A_data = p_["A_data"]
@@ -317,6 +318,7 @@ def test_AE_module_generator_with_hvp():
 
 
 expected_F = """def F_(t, y_, p_, y_0):
+    _F_ = np.zeros((_F_size_, ))
     p = y_[0:82]
     q = y_[82:164]
     p_tag_0 = y_0[0:82]
@@ -424,6 +426,7 @@ def test_FDAE_module_generator():
 
 
 expected_F1 = """def F_(t, y_, p_):
+    _F_ = np.zeros((_F_size_, ))
     h = y_[0:1]
     v = y_[1:2]
     return inner_F(_F_, h, v)
