@@ -8,6 +8,7 @@ from scipy.sparse import issparse
 from Solverz.solvers.daesolver.rodas.param import Rodas_param
 from Solverz.solvers.daesolver.rodas.rodas import ntrp1, ntrp2
 from Solverz.integrator.algorithm import Algorithm
+from Solverz.integrator.controllers import IController, LegacyRodasController
 
 __all__ = ['RosenbrockTableau', 'Rosenbrock', 'Rodas3', 'Rodas4', 'Rodasp', 'Rodas5P']
 
@@ -159,6 +160,13 @@ class Rosenbrock(Algorithm):
         except (KeyError, TypeError):
             raise ValueError(f"unknown Rosenbrock scheme {name!r}") from None
         return method(legacy_compat=legacy_compat)
+
+    def controller(self, opts):
+        """``LegacyRodasController`` in the legacy-compatible configuration,
+        ``IController`` otherwise."""
+        if opts.legacy_compat:
+            return LegacyRodasController(opts, self)
+        return IController(opts, self)
 
     def alloc(self, integ):
         """The stage matrix ``K`` and the work vectors of a step, allocated once.

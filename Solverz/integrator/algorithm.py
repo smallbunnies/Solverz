@@ -1,9 +1,13 @@
 """The author contract: what an integration algorithm defines."""
 import inspect
+import warnings
 import weakref
+from time import perf_counter
 from types import SimpleNamespace
 
 import numpy as np
+
+from Solverz.integrator.controllers import IController
 
 __all__ = ['Algorithm', 'StepFailure']
 
@@ -74,12 +78,51 @@ class Algorithm:
     def reset_history(self, integ, cache):
         """Clear every datum kept from earlier steps; the state or the model has changed."""
 
+    def controller(self, opts):
+        """The step-size controller of a run, ``IController`` by default."""
+        return IController(opts, self)
+
     def initial_dt(self, integ):
         """The first step: ``opts.dt0``, or ``1e-6 * (tend - t0)`` without one."""
         opts = integ.opts
         if opts.dt0 is not None:
             return opts.dt0
         return 1e-6 * (opts.tend - opts.t0)
+
+    def __call__(self, dae, tspan, y0, opt=None):
+        """Integrate with this algorithm, called as legacy ``Rodas(dae, tspan, y0, opt)``.
+
+        The same as ``solve(dae, tspan, y0, alg=self, opt=opt)``, so that
+        code written for the legacy call, such as ``EventLoop``, runs
+        unchanged.
+        """
+        # integrator.py imports this module, so the Integrator is imported here
+        from Solverz.integrator.integrator import Integrator
+        _warn_scheme(opt, self)
+        if opt is not None and opt.profile:
+            start = perf_counter()
+            sol = Integrator(dae, tspan, y0, self, opt).solve()
+            end = perf_counter()
+            print(f"Time elapsed: {end - start}s")
+            return sol
+        return Integrator(dae, tspan, y0, self, opt).solve()
+
+
+def _warn_scheme(opt, alg):
+    """Warn once per call when ``opt.scheme`` names another method than ``alg``.
+
+    The algorithm selects the method and ``opt.scheme`` is not read. ``Opt()``
+    sets ``'rodas4'`` whether or not the caller chose it, so only another
+    value can be told apart as a choice. ``stacklevel=3`` points at the
+    caller of the public entry that calls this helper.
+    """
+    if opt is None:
+        return
+    scheme = opt.scheme
+    if scheme != 'rodas4' and scheme != alg.scheme:
+        warnings.warn(f"opt.scheme={scheme!r} is ignored; {type(alg).__name__}() integrates with "
+                      f"{alg.scheme!r}. Pass the algorithm of the method, for example "
+                      f"Rosenbrock.from_scheme(opt.scheme).", UserWarning, stacklevel=3)
 
 
 # inspect.signature is slow and EventLoop starts one call per segment, so each

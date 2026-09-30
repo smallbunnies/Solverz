@@ -7,12 +7,18 @@ formula, checked against an increment the test computes itself; on
 ``4 * SQRT_EPS`` of the magnitude of the state, where ``'legacy'`` at
 ``t = 0`` exceeds it on the algebraic row by more than three orders of
 magnitude.
+
+I4: within a run, ``F(t, y0)`` and ``dF/dt`` are evaluated once per step
+and kept on its retries, which the residuals ``vdp`` receives show.
 """
 import numpy as np
 import pytest
 
+from Solverz.integrator import Rodas4
 from Solverz.integrator.derivative import DFDT_POLICIES, SQRT_EPS, dfdt_legacy, dfdt_ode23s
+from Solverz.num_api.num_eqn import nDAE
 from Solverz.solvers.daesolver.rodas.rodas import dfdt
+from Solverz.solvers.option import Opt
 
 
 def _byte_equal(a, b):
@@ -121,3 +127,33 @@ def test_legacy_is_inaccurate_at_t0(model):
     assert err[1] > 1e3 * bound, (err, bound)
     err, bound = _bound_error(dfdt_ode23s, dae, y, 0.0, 1e-3)
     assert np.all(err <= bound)
+
+
+@pytest.mark.i4
+def test_F0_and_dFdt_are_evaluated_once_per_step(model):
+    """Each step evaluates ``F`` at its start state twice, at ``t`` and at
+    ``t + ddt``, however many attempts it takes; the first step also carries
+    the residual of ``DaeIc``. Every other residual is a stage residual."""
+    dae, y0 = model('vdp')
+    calls = []
+
+    def F(t, y, p, out=None):
+        calls.append((t, y.copy()))
+        return dae.F(t, y, p, out=out)
+
+    alg = Rodas4(legacy_compat=True)
+    sol = alg(nDAE(dae.M, F, dae.J, dae.p), [0, 20], y0, Opt(rtol=1e-6, atol=1e-9))
+    st = sol.stats
+    assert st.ret == 'success' and st.nreject > 0
+    s = alg.tableau.s
+    assert st.nfeval == len(calls) == 1 + st.nstep * (s + 1) + st.nreject * (s - 1)
+    starts = 0
+    for k in range(sol.T.size - 1):
+        t = sol.T[k]
+        at_start = sorted(tc for tc, y in calls if _byte_equal(y, sol.Y[k]))
+        assert len(at_start) == (3 if k == 0 else 2), k
+        tscale = np.maximum(0.1 * np.abs(t), 1e-8)
+        ddt = t + np.sqrt(np.spacing(1)) * tscale - t
+        assert at_start[0] == t and at_start[-1] == t + ddt
+        starts += len(at_start)
+    assert starts == 1 + 2 * st.nstep

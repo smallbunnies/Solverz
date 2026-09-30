@@ -7,7 +7,17 @@ configuration. Each policy names its ``dF/dt`` policy of ``derivative.py``
 and holds its error norm, a function ``error_norm(integ, e)`` that works in
 the Integrator's buffers ``_w``, ``_w2`` and ``_fin`` and returns an
 ``np.float64``.
+
+The loop asks the policy, in this order: ``check_error`` whether the step
+proposed for an attempt ends the run, and why; ``fix_dt_at_bounds`` and
+``modify_dt_for_tstops`` for the step of the attempt; after the attempt,
+``sanitize_EEst`` for the error the controller reads and ``dt_propose`` for
+the step the controller proposes; ``savevalues`` for the rows of an accepted
+step; ``handle_tstop`` and ``at_end`` whether the run is over.
+``initial_dt`` bounds the algorithm's first step.
 """
+import math
+
 import numpy as np
 
 __all__ = []
@@ -61,25 +71,131 @@ def rms_error_norm(integ, e):
 
 
 class LegacyRodasPolicy:
-    """The legacy-compatible configuration: legacy Rodas' ``dF/dt`` and error
-    norm, the latter for every algorithm."""
+    """The legacy-compatible configuration: the step control, the saving and
+    the end test of legacy Rodas, ``rodas.py:65-358`` without its events, and
+    its ``dF/dt`` and error norm, the latter for every algorithm.
+
+    Every expression is legacy's with the same NumPy functions, operand order
+    and types: ``t0``, ``tend``, the nodes and ``dtmax`` keep the types legacy
+    computes them with, so that an integer ``tspan`` gives the integer times
+    and steps it gives there. ``t`` advances by ``t + dt``, the step is
+    stretched to ``tend`` when it reaches it and otherwise capped at half the
+    remaining span, and the run ends when ``|tend - t|`` falls below
+    ``spacing(1)``. There are no ``tstops``.
+    """
 
     dfdt = 'legacy'
 
     def __init__(self, opts, alg):
         self.error_norm = legacy_error_norm
+        self.opts = opts
+        self.tend = opts.tend
+        self.saveat = opts.saveat
+        # rodas.py:80-81: fixed for the call, from t0 in its tspan dtype
+        self.hmin = 16 * np.spacing(opts.t0)
+        self.uround = np.spacing(1.0)
+
+    def initial_dt(self, integ, dt):
+        """The algorithm's first step clamped to ``[hmin, dtmax]``, ``rodas.py:116-117``."""
+        dt = np.maximum(dt, self.hmin)
+        return np.minimum(dt, self.opts.dtmax)
+
+    def check_error(self, integ):
+        """Why the step proposed for the next attempt ends the run, or ``None``;
+        the tests of ``rodas.py:135-143`` in their order, then a non-finite step."""
+        dt = integ.dt
+        if np.abs(dt) < self.uround:
+            return f"the step size {float(dt)!r} is too small"
+        if integ.nconsecutive_reject > self.opts.max_consecutive_reject:
+            return f"more than {self.opts.max_consecutive_reject} consecutive attempts were rejected"
+        if not np.isfinite(dt):
+            return f"the step size {float(dt)!r} is not finite"
+        return None
+
+    def fix_dt_at_bounds(self, integ):
+        """The step of the attempt, ``rodas.py:146-149``: stretched to ``tend``
+        when it reaches it, otherwise at most half the remaining span. A run
+        with a fixed step takes ``dt0`` and only the stretch."""
+        t, tend = integ.t, self.tend
+        if not self.opts.adaptive:
+            dt = self.opts.dt0
+            integ.dt = tend - t if t + dt >= tend else dt
+        elif t + integ.dt >= tend:
+            integ.dt = tend - t
+        else:
+            integ.dt = np.minimum(integ.dt, 0.5 * (tend - t))
+
+    def modify_dt_for_tstops(self, integ):
+        pass
+
+    def sanitize_EEst(self, integ):
+        """The ``1e6`` of a non-finite state is already inside the legacy norm."""
+
+    def dt_propose(self, integ, dtnew):
+        return dtnew
+
+    def savevalues(self, integ):
+        """The rows of the accepted step, as ``rodas.py:301-335`` saves them.
+
+        With two entries in ``tspan`` the step's end. With more, every node in
+        ``(tprev, t]``, each from the interpolant, ``tend`` included, and the
+        algorithm's ``addsteps`` once per step before the first node. The
+        condition is legacy's, ``t >= node > tprev``, so on a grid that does
+        not increase saving ends at the first node that lies at or before the
+        start of the step that reaches it.
+        """
+        if self.saveat is None:
+            integ.sol.push(integ.t, integ.u.copy())
+            return
+        nodes, idx = self.saveat, integ.saveat_idx
+        t, tprev, dt = integ.t, integ.tprev, integ.dt_step
+        while idx < len(nodes) and t >= nodes[idx] > tprev:
+            tq = nodes[idx]
+            integ.sol.push(tq, integ._interpolate((tq - tprev) / dt, np.empty(integ.n)))
+            idx += 1
+        integ.saveat_idx = idx
+
+    def handle_tstop(self, integ):
+        pass
+
+    def at_end(self, integ):
+        """``rodas.py:346``: an absolute test, which ``t = t + dt`` meets
+        unless the sum misses ``tend`` by more than ``spacing(1)``."""
+        return np.abs(self.tend - integ.t) < self.uround
+
+
+def dtmin(t):
+    """The smallest step at ``t``, ``16 * ulp(|t|)``, relative to ``t``.
+
+    ``math.ulp`` equals ``np.spacing`` for every finite non-negative float
+    and costs a plain C call.
+    """
+    return 16 * math.ulp(abs(t))
 
 
 class DefaultPolicy:
     """The default configuration: the ``dF/dt`` of ode23s and the error scaled
-    by ``max(|u|, |uprev|)``, in the norm the algorithm declares."""
+    by ``max(|u|, |uprev|)``, in the norm the algorithm declares.
+
+    ``t0``, ``tend`` and the steps are Python floats. The run ends when the
+    Integrator's heap of stop times, which holds ``tend``, is empty.
+    """
 
     dfdt = 'ode23s'
 
     def __init__(self, opts, alg):
+        self.opts = opts
         if alg.norm == 'max':
             self.error_norm = max_error_norm
         elif alg.norm == 'rms':
             self.error_norm = rms_error_norm
         else:
             raise ValueError(f"{alg.scheme}.norm is {alg.norm!r}; it must be 'rms' or 'max'")
+
+    def initial_dt(self, integ, dt):
+        """The algorithm's first step clamped to ``[dtmin(t0), dtmax]``."""
+        opts = self.opts
+        return min(opts.dtmax, max(dtmin(opts.t0), dt))
+
+    def at_end(self, integ):
+        return not integ.tstops

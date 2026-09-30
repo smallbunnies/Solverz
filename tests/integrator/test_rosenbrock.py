@@ -551,12 +551,15 @@ def test_the_residual_service():
     assert dae.F is not _F_plain and build(dae.F)._F is dae.F
     for F in (_F_plain, wrapped):
         integ = build(F)
+        # DaeIc evaluates the residual once at initialization
+        assert integ.stats.nfeval == 1
         r1, r2 = integ.F(0.25, y), integ.F(0.25, y)
         assert r1 is not r2 and _byte_equal(r1, _F_plain(0.25, y, {}))
         out = np.full(2, np.nan)
         assert integ.F(0.25, y, out=out) is out and _byte_equal(out, r1)
-        assert integ.stats.nfeval == 3
+        assert integ.stats.nfeval == 4
     integ = build(F_out)
+    assert integ.stats.nJeval == 0
     assert integ.J(0.0, y) is not None and integ.stats.nJeval == 1
 
 
@@ -568,18 +571,23 @@ def test_arithmetic_errors_of_the_model_become_step_failures():
         raise OverflowError('big')
 
     def F_value(t, y, p, out=None):
-        raise ValueError('not a failure')
+        # from t > 0 on, so that DaeIc at t = 0 passes
+        if t > 0:
+            raise ValueError('not a failure')
+        return _F_decay(t, y, p, out)
 
     y = np.ones(2)
+    # DaeIc at initialization already meets the error and fails the run
     integ = Integrator(_linear(F, J), [0, 1], y, Rodas4(), Opt())
+    assert integ.failed
     with pytest.raises(StepFailure, match='^ZeroDivisionError in F: boom$'):
         integ.F(0.0, y)
     with pytest.raises(StepFailure, match='^OverflowError in J: big$'):
         integ.J(0.0, y)
     integ = Integrator(_linear(F_value, _J_decay), [0, 1], y, Rodas4(), Opt())
     with pytest.raises(ValueError, match='not a failure'):
-        integ.F(0.0, y)
+        integ.F(0.5, y)
     # nor does the dispatch catch it
-    integ.dt = 0.1
+    integ.t, integ.dt = 0.0, 0.1
     with pytest.raises(ValueError, match='not a failure'):
         integ.perform_step()
