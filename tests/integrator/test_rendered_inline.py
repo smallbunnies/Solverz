@@ -8,30 +8,21 @@ not repeated here.
 Between the rendered and the inline model byte equality is not required,
 because Numba and NumPy evaluate ``**`` and transcendental functions with
 different routines. The criterion in the default configuration, the one used
-wherever a rendered model is compared with its inline form, is
-``rendered_matches_inline``: the numbers of accepted steps differ by at most
-2, and the saved rows by at most ``10 * rtol``.
+wherever a rendered model is compared with its inline form, the conformance
+kit included, is ``rendered_matches_inline`` of ``Solverz.integrator.testing``:
+the numbers of accepted steps differ by at most 2, and the saved rows by at
+most ``10 * rtol``.
 """
 import numpy as np
 import pytest
 
 from Solverz.integrator import Rosenbrock
+from Solverz.integrator.testing import rendered_matches_inline
 from Solverz.solvers.option import Opt
 
 from tests.integrator.test_legacy_transcription import SCHEMES
 
 pytestmark = pytest.mark.i5
-
-MAX_STEP_DIFFERENCE = 2
-MAX_DY_IN_RTOL = 10
-
-
-def rendered_matches_inline(rendered, inline, rtol):
-    """``(dsteps, dY)`` of two runs on one grid, and whether they meet the criterion."""
-    assert np.array_equal(rendered.T, inline.T), 'the two runs are not on one grid'
-    dsteps = abs(rendered.stats.nstep - inline.stats.nstep)
-    dY = float(np.max(np.abs(np.asarray(rendered.Y) - np.asarray(inline.Y))))
-    return dsteps, dY, dsteps <= MAX_STEP_DIFFERENCE and dY <= MAX_DY_IN_RTOL * rtol
 
 
 @pytest.mark.parametrize('scheme', SCHEMES)

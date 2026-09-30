@@ -429,6 +429,12 @@ def _root(c, te, integ):
     ``'left'`` it is the float after ``te``, since a ``'left'`` root is the
     last float before the crossing and equals ``te`` when the crossing lies
     between ``te`` and the next float.
+
+    A component that has crossed by the probe but not at the float before it
+    changes sign exactly where the event does, and its root is ``te`` without
+    a search. Rounding can make the interpolant change sign several times
+    within a few floats, and ``find_root`` ends on whichever sign change its
+    bracket leads to, so a search could separate two identical components.
     """
     st, i = c.st, c.i
     side = st.cb.rootfind
@@ -441,6 +447,10 @@ def _root(c, te, integ):
             gp = float(st.value(integ, probe)[i])
             if _same_sign(gp, gl):
                 return None
+            before = math.nextafter(probe, -math.inf)
+            gb = gl if before <= bottom else float(st.value(integ, before)[i])
+            if _same_sign(gb, gl):
+                return te
             top, gr = probe, gp
 
     def g(tau):
@@ -460,7 +470,9 @@ def locate(integ, states):
     acting components are located first, in increasing order of their
     bracket bottoms; a component whose root cannot lie at or before the
     earliest root found so far costs at most one evaluation instead of a
-    search. The recorded ones follow against the final ``te``.
+    search. An acting component whose root lies after an earlier root found
+    later is located again against it. The recorded ones follow against the
+    final ``te``.
     """
     crossings = []
     for st in states:
@@ -479,6 +491,19 @@ def locate(integ, states):
         found.append(c)
         if te is None or root < te:
             te = root
+    # a component located before te fell below its root may have crossed by
+    # te already, on another sign change of the rounded interpolant; it is
+    # located again against te, which can lower te once more
+    lowered = True
+    while lowered:
+        lowered = False
+        for c in found:
+            if c.root > te:
+                root = _root(c, te, integ)
+                if root is not None:
+                    c.root = root
+                    if root < te:
+                        te, lowered = root, True
     for c in recorded:
         root = _root(c, te, integ)
         if root is None:

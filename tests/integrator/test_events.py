@@ -195,6 +195,37 @@ def test_components_at_te_and_before_it(model, rootfind):
         assert sol.ye[1][0] <= 10
 
 
+def _height_signs(integ, te, n=6):
+    """The signs of the height on the interpolant of the last step at the
+    ``2n + 1`` floats around ``te``."""
+    taus = [te]
+    for _ in range(n):
+        taus.insert(0, math.nextafter(taus[0], -math.inf))
+        taus.append(math.nextafter(taus[-1], math.inf))
+    return [float(np.sign(integ._interpolate((tau - integ.tprev) / integ.dt_step, np.empty(2))[0]))
+            for tau in taus]
+
+
+@pytest.mark.i7b
+@pytest.mark.parametrize('rootfind', ['left', 'right'])
+@pytest.mark.parametrize('terminal', [[True, True], [True, False]], ids=['both_terminal', 'recorded_twin'])
+def test_identical_components_on_a_rounded_interpolant(model, rootfind, terminal):
+    """On ``[0, 30]`` Rodas4 crosses the ground in one step of 8.4, and the
+    rounded interpolant of the height changes sign several times within a
+    few floats of the impact. Two brackets of that one function can end on
+    different sign changes, yet the twin components are reported together."""
+    dae, y0 = model('ball')
+    cb = ContinuousCallback(lambda t, y, integ: np.array([y[0], y[0]]), direction=-1, terminal=terminal,
+                            record=True, rootfind=rootfind)
+    integ = init(dae, [0, 30], y0, opt=Opt(rtol=1e-6, atol=1e-8), callbacks=[cb])
+    sol = integ.solve()
+    signs = _height_signs(integ, sol.te[0])
+    assert sum(a != b for a, b in zip(signs, signs[1:])) >= 2, signs
+    assert sol.stats.ret == 'terminated'
+    assert sol.ie.tolist() == [0, 1] and sol.te[0] == sol.te[1] and _byte_equal(sol.ye[0], sol.ye[1])
+    assert abs(sol.te[0] - FIRST_IMPACT) <= 1e-14 * FIRST_IMPACT
+
+
 def _at_half():
     return _event(lambda t, y: t - 0.5, [1], [0])
 
