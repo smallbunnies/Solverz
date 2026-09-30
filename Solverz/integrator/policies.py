@@ -143,16 +143,22 @@ class LegacyRodasPolicy:
         algorithm's ``addsteps`` once per step before the first node. The
         condition is legacy's, ``t >= node > tprev``, so on a grid that does
         not increase saving ends at the first node that lies at or before the
-        start of the step that reaches it.
+        start of the step that reaches it. A node at the time ``te`` of an
+        event handled in the step is the state ``u`` there, so that the last
+        row of a terminal event is the recorded state; an event-free run
+        never takes this branch.
         """
         if self.saveat is None:
             integ.sol.push(integ.t, integ.u.copy())
             return
         nodes, idx = self.saveat, integ.saveat_idx
-        t, tprev, dt = integ.t, integ.tprev, integ.dt_step
+        t, tprev, dt, te = integ.t, integ.tprev, integ.dt_step, integ._te
         while idx < len(nodes) and t >= nodes[idx] > tprev:
             tq = nodes[idx]
-            integ.sol.push(tq, integ._interpolate((tq - tprev) / dt, np.empty(integ.n)))
+            if te is not None and tq == te:
+                integ.sol.push(tq, integ.u.copy())
+            else:
+                integ.sol.push(tq, integ._interpolate((tq - tprev) / dt, np.empty(integ.n)))
             idx += 1
         integ.saveat_idx = idx
 

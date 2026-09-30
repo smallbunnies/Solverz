@@ -1,0 +1,573 @@
+"""Continuous callbacks and the adapter of legacy ``opt.event``.
+
+A crossing is found after the step that contains it was accepted and is
+located on the step's interpolant, to adjacent floats. A component that is
+exactly zero at the start of a step is not a crossing, so nothing is
+reported at the initial point of a call, a zero at a step end is reported
+once, and a component that leaves zero is reported at its next crossing.
+Samples of the interpolant find a crossing that enters and leaves within
+one step, and the first of several. The earliest crossing of a terminal
+component ends the run with ``T[-1] == te`` and the last row equal to the
+recorded state, on every output, in both configurations. Every component
+that crosses at that time is reported with it, and crossings of recorded
+components before it are logged without shortening the step.
+"""
+import math
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+from Solverz import made_numerical
+from Solverz.integrator import ContinuousCallback, Rodas3, Rodas4, Rodas5P, Rosenbrock, init, solve
+from Solverz.integrator.callbacks import _brackets, _ContinuousState, find_root
+from Solverz.solvers.option import Opt
+
+from tests.integrator import models
+from tests.integrator.test_legacy_transcription import SCHEMES
+
+G = 9.8
+FIRST_IMPACT = 40 / G
+CONFIGS = [False, True]
+
+
+def _byte_equal(a, b):
+    a, b = np.asarray(a), np.asarray(b)
+    return a.dtype == b.dtype and a.shape == b.shape and a.tobytes() == b.tobytes()
+
+
+def _event(value, terminal, direction):
+    """A legacy ``opt.event`` from ``value(t, y)`` and fixed traits."""
+    def event(t, y):
+        return np.atleast_1d(value(t, y)), np.array(terminal), np.array(direction)
+    return event
+
+
+def _level_times(level):
+    """The two times at which the ball, from height 0 with velocity 20, passes ``level``."""
+    root = np.sqrt(20.0 ** 2 - 2 * G * level)
+    return 2 * level / (20.0 + root), (20.0 + root) / G
+
+
+# -- the bouncing ball and the orbit of test_rodas_event.py --------------------
+
+LEGACY_BOUNCES = np.array([4.081633047365558, 7.755103268847604, 11.061226369910107, 14.03673684129459,
+                           16.714695668619328, 19.124858513456523, 21.294005283692695, 23.246237159791765,
+                           25.003245923211466, 26.584554164220997])
+
+
+@pytest.mark.i6a
+def test_ten_bounces_as_the_legacy_test():
+    """``test_rodas_event.py:20-46`` with ``Rodas4()``: each call stops at the
+    impact, and the next starts there on the root with the velocity reversed."""
+    sdae, y0 = models.ball_model()
+    dae = made_numerical(sdae, y0, sparse=True)
+    opt = Opt(event=_event(lambda t, y: y[0], [1], [-1]))
+    te, tstart = [], 0
+    for _ in range(10):
+        sol = Rodas4()(dae, np.linspace(tstart, 30, 100), y0, opt)
+        assert sol.stats.ret == 'terminated' and sol.stats.succeed is True
+        assert sol.ie.tolist() == [0] and sol.te[0] > tstart
+        assert sol.T[-1] == sol.te[0] and np.all(np.diff(sol.T) > 0)
+        te.append(sol.te[0])
+        y0['x'][0] = 0
+        y0['x'][1] = -0.9 * sol.Y[-1]['x'][1]
+        tstart = sol.T[-1]
+    np.testing.assert_allclose(te, LEGACY_BOUNCES, rtol=1e-5, atol=0)
+    exact = np.cumsum(2 * 20 * 0.9 ** np.arange(10) / G)
+    print(f"max relative deviation of the bounce times: from legacy "
+          f"{np.max(np.abs(te / LEGACY_BOUNCES - 1)):.2e}, from the exact times {np.max(np.abs(te / exact - 1)):.2e}")
+
+
+def _orbit_event(t, y):
+    dDSQdt = 2 * (y[0:2] - np.array([1.2, 0])).dot(y[2:4])
+    return np.array([dDSQdt, dDSQdt]), np.array([1, 0]), np.array([1, -1])
+
+
+@pytest.fixture(scope='module')
+def orbit_reference(model):
+    dae, y0 = model('orbit')
+    return Rodas5P()(dae, [0, 7], y0, Opt(event=_orbit_event, rtol=1e-11, atol=1e-13))
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('scheme', SCHEMES)
+def test_orbit_against_a_tight_reference(model, orbit_reference, scheme):
+    """``test_rodas_event.py:49-97`` at ``rtol=1e-8``: the non-terminal
+    component 1 is recorded at the far point of the orbit, and the terminal
+    component 0 stops the run at the return.
+
+    The bounds are those of the integration, not of the event location: at
+    this tolerance the runs without events already deviate from the
+    reference by up to ``9.3e-7`` of the state at the event times (Rodas3),
+    and the largest deviations with events are ``1.1e-7`` for ``te`` and
+    ``1.8e-6`` for ``ye``. ``ye`` is measured relative to the largest entry
+    of its row, since ``y[1]`` at the return is about ``1e-9``.
+    """
+    ref = orbit_reference
+    assert ref.stats.ret == 'terminated' and ref.ie.tolist() == [1, 0]
+    dae, y0 = model('orbit')
+    sol = Rosenbrock.from_scheme(scheme)(dae, [0, 7], y0, Opt(event=_orbit_event, rtol=1e-8, atol=1e-10))
+    assert sol.stats.ret == 'terminated' and sol.ie.tolist() == [1, 0]
+    assert sol.T[-1] == sol.te[-1] and _byte_equal(sol.Y[-1], sol.ye[-1])
+    dte = np.max(np.abs(sol.te / ref.te - 1))
+    dye = np.max(np.abs(sol.ye - ref.ye) / np.max(np.abs(ref.ye), axis=1, keepdims=True))
+    print(f"{scheme}: te {sol.te}, relative deviation of te {dte:.2e}, of ye {dye:.2e}")
+    assert dte <= 1e-6
+    assert dye <= 1e-5
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('scheme', SCHEMES)
+def test_the_event_time_is_the_crossing_on_the_interpolant(model, scheme):
+    """With ``'right'`` the event time is the first float at which the
+    component has crossed or is zero on the interpolant of its step."""
+    dae, y0 = model('orbit')
+    integ = init(dae, [0, 7], y0, alg=Rosenbrock.from_scheme(scheme),
+                 opt=Opt(event=_orbit_event, rtol=1e-6, atol=1e-8))
+    while integ.step():
+        pass
+    assert integ.terminated
+    te = integ.t
+    assert integ.tprev < te < integ.t_step or te == integ.t_step
+
+    def g(tq):
+        return _orbit_event(tq, integ.interp(tq))[0][0]
+
+    # the terminal component crosses from negative to non-negative
+    assert g(te) >= 0
+    assert g(te) == 0 or g(np.nextafter(te, -np.inf)) < 0
+
+
+# -- terminal events and the last row -----------------------------------------
+
+def _twin_event():
+    return _event(lambda t, y: np.array([y[0], y[0]]), [1, 1], [-1, -1])
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+@pytest.mark.parametrize('grid', [False, True])
+def test_identical_components_are_reported_together(model, legacy_compat, grid):
+    dae, y0 = model('ball')
+    tspan = np.linspace(0, 10, 21) if grid else [0, 10]
+    sol = Rodas4(legacy_compat=legacy_compat)(dae, tspan, y0, Opt(event=_twin_event()))
+    assert sol.stats.ret == 'terminated'
+    assert sol.te.dtype == np.float64 and sol.ye.dtype == np.float64 and sol.ie.dtype == np.int64
+    assert sol.te.shape == (2,) and sol.te[0] == sol.te[1]
+    assert sol.ie.tolist() == [0, 1]
+    assert _byte_equal(sol.ye[0], sol.ye[1])
+    assert sol.T[-1] == sol.te[0] and _byte_equal(sol.Y[-1], sol.ye[-1])
+    assert np.all(np.diff(sol.T) > 0)
+    # 'right': the returned state lies on the ground or below it
+    assert sol.ye[0][0] <= 0
+    assert abs(sol.te[0] - FIRST_IMPACT) <= 1e-9 * FIRST_IMPACT
+    if grid:
+        nodes = tspan[tspan < sol.te[0]]
+        assert _byte_equal(sol.T[:-1], nodes)
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('rootfind', ['left', 'right'])
+def test_components_at_te_and_before_it(model, rootfind):
+    """On the descent, component 2 passes 15 first and is logged at its own
+    time; the terminal component 0 then stops the run at 10, and its twin,
+    component 1, which only records, is reported at the same float. With
+    ``'left'`` the twin's root equals ``te`` when the crossing lies between
+    ``te`` and the next float, so the test for a crossing by ``te`` is made
+    at that next float."""
+    dae, y0 = model('ball')
+    cb = ContinuousCallback(lambda t, y, integ: np.array([y[0] - 10, y[0] - 10, y[0] - 15]),
+                            direction=-1, terminal=[True, False, False], record=True, rootfind=rootfind)
+    sol = solve(dae, [0, 5], y0, callbacks=[cb])
+    assert sol.stats.ret == 'terminated'
+    assert sol.ie.tolist() == [2, 0, 1]
+    np.testing.assert_allclose(sol.te, [_level_times(15.0)[1]] + 2 * [_level_times(10.0)[1]], rtol=1e-9)
+    assert sol.te[1] == sol.te[2] == sol.T[-1] and sol.te[0] < sol.te[1]
+    assert _byte_equal(sol.ye[1], sol.ye[2]) and _byte_equal(sol.Y[-1], sol.ye[-1])
+    if rootfind == 'left':
+        assert sol.ye[1][0] >= 10
+    else:
+        assert sol.ye[1][0] <= 10
+
+
+def _at_half():
+    return _event(lambda t, y: t - 0.5, [1], [0])
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+def test_a_terminal_stop_on_a_grid(model, legacy_compat):
+    """``[t0, nodes <= te, te]``, with no duplicate when ``te`` is a node."""
+    dae, y0 = model('ball')
+    alg = Rodas4(legacy_compat=legacy_compat)
+    grid = np.linspace(0, 1, 11)
+    sol = alg(dae, grid, y0, Opt(event=_at_half()))
+    assert sol.stats.ret == 'terminated' and sol.te.tolist() == [0.5]
+    assert _byte_equal(sol.T, grid[:6])
+    assert _byte_equal(sol.Y[-1], sol.ye[0])
+    grid = np.linspace(0, 1, 8)
+    sol = alg(dae, grid, y0, Opt(event=_at_half()))
+    assert sol.te.tolist() == [0.5]
+    assert _byte_equal(sol.T, np.append(grid[:4], 0.5))
+    assert _byte_equal(sol.Y[-1], sol.ye[0])
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('method', [Rodas3, Rodas4])
+def test_a_terminal_crossing_at_a_step_end_that_is_a_node(model, method):
+    """The legacy-compatible configuration saves every node from the
+    interpolant, but a node at ``te`` is the state there, so the last row is
+    the recorded state. With the fixed step 0.1 the nodes are the step ends,
+    the sums of 0.1, and the interpolant of Rodas4 at the end of its fifth
+    step differs from the step end in the last bits, which the control
+    asserts; the interpolant of Rodas3 returns the step end exactly. In the
+    default configuration the fixed step, or a stop time, puts the step end
+    on the node."""
+    dae, y0 = model('ball')
+    fixed = dict(fix_h=True, hinit=0.1)
+    ends = method(legacy_compat=True)(dae, [0.0, 1.0], y0, Opt(**fixed))
+    grid = ends.T
+    assert grid.size == 11
+    if method is Rodas4:
+        nodes = method(legacy_compat=True)(dae, grid, y0, Opt(**fixed))
+        assert not _byte_equal(nodes.Y[5], ends.Y[5])
+    event = _event(lambda t, y: t - grid[5], [1], [0])
+    runs = [method(legacy_compat=True)(dae, grid, y0, Opt(event=event, **fixed)),
+            solve(dae, grid, y0, alg=method(), opt=Opt(event=event, **fixed)),
+            solve(dae, grid, y0, alg=method(), opt=Opt(event=event), tstops=[grid[5]])]
+    for sol in runs:
+        assert sol.stats.ret == 'terminated' and sol.te.tolist() == [grid[5]]
+        assert _byte_equal(sol.T, grid[:6])
+        assert _byte_equal(sol.Y[-1], sol.ye[0])
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+def test_a_terminal_event_stops_the_run(model, legacy_compat):
+    dae, y0 = model('ball')
+    t1, _ = _level_times(10.0)
+    integ = init(dae, [0, 4], y0, alg=Rodas4(legacy_compat=legacy_compat),
+                 opt=Opt(event=_event(lambda t, y: y[0] - 10, [1], [0])))
+    while integ.step():
+        pass
+    assert integ.terminated and integ.t < 4 and abs(integ.t - t1) <= 1e-9
+    assert integ.step() is False
+    sol = integ.postamble()
+    assert sol.stats.ret == 'terminated' and sol.T[-1] == integ.t == sol.te[0]
+    assert _byte_equal(sol.Y[-1], sol.ye[0])
+
+
+# -- where crossings are and are not reported ---------------------------------
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+def test_no_event_at_a_start_on_a_root(model, legacy_compat):
+    """The ball starts on the ground: a component that is zero at ``t0`` is
+    reported only at its crossing, here the impact."""
+    dae, y0 = model('ball')
+    assert y0[0] == 0
+    alg = Rodas4(legacy_compat=legacy_compat)
+    sol = alg(dae, [0, 5], y0, Opt(event=_event(lambda t, y: y[0], [0], [0])))
+    assert sol.stats.ret == 'success' and sol.ie.tolist() == [0]
+    assert abs(sol.te[0] - FIRST_IMPACT) <= 1e-9 * FIRST_IMPACT
+    # zero at t0, then negative, then back through zero at the impact
+    for direction, expected in ((0, 1), (+1, 1), (-1, 0)):
+        sol = alg(dae, [0, 5], y0, Opt(event=_event(lambda t, y: -y[0], [0], [direction])))
+        assert (0 if sol.te is None else sol.te.size) == expected
+        if expected:
+            assert abs(sol.te[0] - FIRST_IMPACT) <= 1e-9 * FIRST_IMPACT
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('hmax', [None, 0.01])
+def test_a_zero_at_a_step_end_is_reported_once(model, hmax):
+    """``g = (0.5 - t)(0.8 - t)`` reaches zero at the stop time 0.5, which is
+    reported once, turns negative from there, which is not a crossing, and
+    crosses at 0.8. Without ``hmax`` the step from 0.5 reaches past 0.8, so
+    the crossing lies in the step that leaves zero."""
+    dae, y0 = model('ball')
+    event = _event(lambda t, y: (0.5 - t) * (0.8 - t), [0], [0])
+    sol = solve(dae, [0, 1], y0, opt=Opt(event=event, hmax=hmax), tstops=[0.5])
+    assert sol.stats.ret == 'success' and sol.T[-1] == 1.0
+    T = sol.T.tolist()
+    k = T.index(0.5)
+    assert (T[k + 1] > 0.8) == (hmax is None)
+    assert sol.te.tolist() == [0.5, 0.8] and sol.ie.tolist() == [0, 0]
+    assert _byte_equal(sol.ye[0], sol.Y[k])
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+def test_a_crossing_just_after_the_start_of_a_long_step(model, legacy_compat):
+    """The ball passes ``2e-9`` about ``1e-10`` after the start of a first
+    step of length 1."""
+    dae, y0 = model('ball')
+    # the root of 20 t - 4.9 t**2 = 2e-9 in the form without cancellation
+    root = 4e-9 / (20.0 + np.sqrt(400.0 - 4 * 4.9 * 2e-9))
+    sol = Rodas4(legacy_compat=legacy_compat)(dae, [0, 10], y0,
+                                              Opt(hinit=1.0, event=_event(lambda t, y: y[0] - 2e-9, [1], [0])))
+    assert sol.stats.nstep == 1
+    assert sol.stats.ret == 'terminated' and abs(sol.te[0] - root) <= 1e-6 * root
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+def test_the_first_of_three_crossings_in_one_step(model, legacy_compat):
+    dae, y0 = model('ball')
+    cb = ContinuousCallback(lambda t, y, integ: (t - 0.2) * (t - 0.5) * (t - 0.8), terminal=True, record=True)
+    sol = solve(dae, [0, 2], y0, alg=Rodas4(legacy_compat=legacy_compat), opt=Opt(hinit=1.0, hmax=1.0),
+                callbacks=[cb])
+    assert sol.stats.nstep == 1 and sol.stats.ret == 'terminated'
+    assert abs(sol.te[0] - 0.2) <= 1e-12 and sol.ie.tolist() == [0]
+    assert sol.T[-1] == sol.te[0] and _byte_equal(sol.Y[-1], sol.ye[0])
+
+
+@pytest.mark.i6a
+def test_a_crossing_that_enters_and_leaves_within_one_step(model):
+    """``g = (t - 0.5)**2 - 1e-4`` is negative on ``(0.49, 0.51)`` only. The
+    first step is ``[0, 0.9]``, so that one of its ten sample points is 0.5;
+    with no interior sample the crossing is not seen."""
+    dae, y0 = model('ball')
+
+    def run(interp_points):
+        cb = ContinuousCallback(lambda t, y, integ: (t - 0.5) ** 2 - 1e-4, terminal=True, record=True,
+                                interp_points=interp_points)
+        return solve(dae, [0, 2], y0, opt=Opt(hinit=0.9, hmax=1.0), callbacks=[cb])
+
+    sol = run(10)
+    assert sol.stats.nstep == 1 and sol.stats.ret == 'terminated'
+    assert abs(sol.te[0] - 0.49) <= 1e-12
+    sol = run(2)
+    assert sol.stats.ret == 'success' and sol.te is None and sol.T[-1] == 2.0
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+def test_the_direction_filter(model, legacy_compat):
+    dae, y0 = model('ball')
+    up, down = _level_times(10.0)
+    alg = Rodas4(legacy_compat=legacy_compat)
+    for direction, expected in ((0, [up, down]), (+1, [up]), (-1, [down])):
+        cb = ContinuousCallback(lambda t, y, integ: y[0] - 10, direction=direction, record=True)
+        sol = solve(dae, [0, 4], y0, alg=alg, callbacks=[cb])
+        assert sol.stats.ret == 'success'
+        np.testing.assert_allclose(sol.te, expected, rtol=1e-9)
+        assert sol.ie.tolist() == [0] * len(expected)
+        sol = alg(dae, [0, 4], y0, Opt(event=_event(lambda t, y: y[0] - 10, [0], [direction])))
+        np.testing.assert_allclose(sol.te, expected, rtol=1e-9)
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+def test_the_result_without_and_with_events(model, legacy_compat):
+    dae, y0 = model('ball')
+    alg = Rodas4(legacy_compat=legacy_compat)
+    sol = alg(dae, [0, 1], y0, Opt(event=_event(lambda t, y: y[0] + 100, [1], [0])))
+    assert sol.stats.ret == 'success' and sol.te is None and sol.ye is None and sol.ie is None
+    sol = alg(dae, [0, 1], y0, Opt(event=_event(lambda t, y: y[0] - 1, [0], [0])))
+    assert sol.ie.dtype == np.int64 and sol.te.dtype == np.float64 and sol.ye.shape == (1, 2)
+
+
+@pytest.mark.i6a
+def test_a_left_event_restarted_from_its_state(model):
+    """The condition jumps from -1 to +1 between the float ``c`` and the
+    next, so ``'left'`` returns ``c``. A new call from ``(c, ye)`` meets the
+    same jump between the start of its first step and the next float, and
+    reports it at that next float, never at its initial point."""
+    dae, y0 = model('ball')
+    c = 0.3
+    cb = ContinuousCallback(lambda t, y, integ: -1.0 if t <= c else 1.0, terminal=True, record=True,
+                            rootfind='left')
+    first = solve(dae, [0, 1], y0, callbacks=[cb])
+    assert first.stats.ret == 'terminated' and first.te.tolist() == [c] and first.T[-1] == c
+    again = solve(dae, [c, 1], first.Y[-1], callbacks=[cb])
+    assert again.stats.ret == 'terminated' and again.stats.nstep == 1
+    assert again.te.tolist() == [math.nextafter(c, math.inf)]
+    assert again.T[0] == c and again.T[-1] == again.te[0]
+
+
+@pytest.mark.i6a
+def test_a_left_event_on_an_exact_zero_restarted_from_its_state(model):
+    """The search for the ascent through 10 meets an exact zero, which it
+    returns whatever the side, so the state lies on the surface. A new call
+    from it starts on a root, which is not a crossing, and reports the
+    descent."""
+    dae, y0 = model('ball')
+    cb = ContinuousCallback(lambda t, y, integ: y[0] - 10, terminal=True, record=True, rootfind='left')
+    first = solve(dae, [0, 4], y0, callbacks=[cb])
+    t1 = first.T[-1]
+    up, down = _level_times(10.0)
+    assert first.te[0] == t1 and abs(t1 - up) <= 1e-9
+    assert first.Y[-1][0] == 10
+    again = solve(dae, [t1, 4], first.Y[-1], callbacks=[cb])
+    assert again.stats.ret == 'terminated'
+    assert abs(again.te[0] - down) <= 1e-9
+
+
+@pytest.mark.i6a
+def test_find_root_returns_adjacent_floats():
+    """The bracket shrinks to two adjacent floats, from which ``'left'``
+    takes the lower and ``'right'`` the upper, except that ``'left'`` never
+    returns the start of the step; an exact zero met on the way is returned
+    whatever the side."""
+    def jump(c, strict):
+        return lambda tau: -1.0 if (tau < c if strict else tau <= c) else 1.0
+
+    below = math.nextafter(0.3, -math.inf)
+    for tstart in (0.0, 0.25):
+        assert find_root(jump(0.3, True), 0.25, 1.0, -1.0, 1.0, 'left', tstart) == below
+        assert find_root(jump(0.3, True), 0.25, 1.0, -1.0, 1.0, 'right', tstart) == 0.3
+    # the crossing between the bottom of the bracket and the next float
+    after = math.nextafter(0.25, math.inf)
+    g = jump(0.25, False)
+    assert find_root(g, 0.25, 1.0, -1.0, 1.0, 'left', 0.0) == 0.25
+    assert find_root(g, 0.25, 1.0, -1.0, 1.0, 'left', 0.25) == after
+    assert find_root(g, 0.25, 1.0, -1.0, 1.0, 'right', 0.25) == after
+    for side in ('left', 'right'):
+        # the first regula falsi point of a linear function on [0, 1]
+        assert find_root(lambda tau: tau - 0.5, 0.0, 1.0, -0.5, 0.5, side, 0.0) == 0.5
+        assert find_root(jump(0.3, True), 0.0, 1.0, -1.0, 0.0, side, 0.0) == 1.0
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('rootfind', ['left', 'right'])
+def test_a_component_crossing_after_te_costs_no_search(model, rootfind):
+    """In the one bracket ``[0, 1]`` of each component, the terminal
+    component 0 crosses at 0.5, where the first regula falsi point finds an
+    exact zero, and the recorded component 1 jumps at 0.7, which a search
+    would locate in about fifty calls. Component 1 costs the probe after
+    ``te`` only: for ``'right'`` the probe is ``te``, whose value is known,
+    and for ``'left'`` the float after it."""
+    dae, y0 = model('ball')
+    calls = []
+
+    def condition(t, y, integ):
+        calls.append(t)
+        return np.array([t - 0.5, 1.0 if t < 0.7 else -1.0])
+
+    cb = ContinuousCallback(condition, terminal=[True, False], record=True, rootfind=rootfind, interp_points=2)
+    sol = solve(dae, [0, 2], y0, opt=Opt(hinit=1.0, hmax=1.0), callbacks=[cb])
+    assert sol.stats.nstep == 1 and sol.stats.ret == 'terminated'
+    assert sol.te.tolist() == [0.5] and sol.ie.tolist() == [0]
+    probe = [math.nextafter(0.5, math.inf)] if rootfind == 'left' else []
+    assert calls == [0.0, 1.0, 0.5] + probe
+    assert sol.stats.ncondition == len(calls)
+
+
+class _Step:
+    """The accepted step ``[tprev, t]`` of an integrator, as the detection
+    reads it, for a condition of ``t`` alone."""
+
+    def __init__(self, tprev):
+        self.stats = SimpleNamespace(ncondition=0)
+        self.tprev = self.t = tprev
+        self.u = np.zeros(1)
+        self._cb_y = np.zeros(1)
+
+    def interp(self, tau, out):
+        return out
+
+
+def _nudged(condition, repeat_nudge, interp_points, fired):
+    """The brackets of the step ``[0, 1]`` after an event at 0 of the
+    components ``fired`` of a ``'left'`` callback."""
+    cb = ContinuousCallback(lambda t, y, integ: condition(t), record=True, repeat_nudge=repeat_nudge,
+                            interp_points=interp_points)
+    integ = _Step(0.0)
+    st = _ContinuousState(cb, 0, integ)
+    integ.t = 1.0
+    st.fired, st.fired_t = np.array(fired), 0.0
+    return {c.i: (c.bottom, c.top) for c in _brackets(st, integ)}
+
+
+@pytest.mark.i6a
+def test_the_repeat_nudge():
+    """A component that fired at the start of the step and has crossed by
+    ``tn`` has no event in the step; otherwise its bracket starts at ``tn``,
+    and when ``tn`` lies at or after the top of its bracket, the next
+    bracket after ``tn`` is searched. A component that did not fire keeps
+    its bracket. The nudge takes effect once the modification protocol
+    stores the fired components, so the stored state is set here."""
+    def condition(t):
+        return np.array([0.05 - t, 0.3 - t, 0.3 - t])
+
+    assert _nudged(condition, 0.1, 3, [0, 1]) == {1: (0.1, 0.5), 2: (0.0, 0.5)}
+
+    def condition(t):
+        return np.array([0.3 - t, (t - 0.2) * (t - 0.55) * (t - 0.8), 0.3 - t, (t - 0.2) * (t - 0.55)])
+
+    # tn = 0.6 lies after the first sample 0.5: component 0 has crossed by tn,
+    # 1 and 3 are back on their side, and only 1 crosses again, at 0.8
+    assert _nudged(condition, 0.6, 3, [0, 1, 3]) == {1: (0.6, 1.0), 2: (0.0, 0.5)}
+
+
+# -- the step as computed, the counts and the arguments -----------------------
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('scheme', SCHEMES)
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+def test_rows_before_a_terminal_event_are_those_of_the_run_without_it(model, scheme, legacy_compat):
+    """The state moves to ``te``, but the step's interpolant reads the end
+    state as computed, so every node before ``te`` is saved as without the
+    event."""
+    dae, y0 = model('ball')
+    grid = np.linspace(0, 30, 61)
+    alg = Rosenbrock.from_scheme(scheme, legacy_compat=legacy_compat)
+    opt = dict(rtol=1e-6, atol=1e-8)
+    with_event = alg(dae, grid, y0, Opt(event=_event(lambda t, y: y[0] - 10, [1], [-1]), **opt))
+    without = alg(dae, grid, y0, Opt(**opt))
+    k = int(np.searchsorted(grid, with_event.te[0]))
+    assert k >= 2 and grid[k - 1] < with_event.te[0]
+    assert _byte_equal(with_event.T[:k], without.T[:k])
+    assert _byte_equal(with_event.Y[:k], without.Y[:k])
+
+
+@pytest.mark.i6a
+def test_the_condition_calls_are_counted(model):
+    """The adapter is called at the end of every accepted step and at eight
+    interior samples of every step with a component that may cross."""
+    dae, y0 = model('ball')
+    calls = []
+
+    def event(t, y):
+        calls.append(t)
+        return np.array([y[0] + 100]), np.array([0]), np.array([0])
+
+    sol = Rodas4()(dae, [0, 1], y0, Opt(event=event))
+    assert sol.stats.ncondition == len(calls) == 1 + 9 * sol.stats.nstep
+    calls.clear()
+    sol = Rodas4()(dae, [0, 5], y0, Opt(event=_counted(calls, lambda t, y: y[0] - 10)))
+    assert sol.stats.ncondition == len(calls) and sol.te.size == 2
+
+
+def _counted(calls, value):
+    def event(t, y):
+        calls.append(t)
+        return np.array([value(t, y)]), np.array([0]), np.array([0])
+    return event
+
+
+@pytest.mark.i6a
+def test_callback_arguments(model):
+    cond = lambda t, y, integ: y[0]
+    for kwargs in (dict(direction=2), dict(direction=0.5), dict(direction=[[1]]), dict(rootfind='middle'),
+                   dict(interp_points=-1), dict(interp_points=2.5), dict(repeat_nudge=1.0),
+                   dict(save_positions=(True,)), dict(terminal=[[True]])):
+        with pytest.raises(ValueError):
+            ContinuousCallback(cond, **kwargs)
+    with pytest.raises(TypeError):
+        ContinuousCallback(None)
+    dae, y0 = model('ball')
+    recording = ContinuousCallback(cond, record=True)
+    with pytest.raises(ValueError, match='at most one'):
+        solve(dae, [0, 1], y0, callbacks=[recording, ContinuousCallback(cond, record=True)])
+    with pytest.raises(ValueError, match='at most one'):
+        solve(dae, [0, 1], y0, opt=Opt(event=_at_half()), callbacks=[recording])
+    with pytest.raises(TypeError, match='ContinuousCallback'):
+        solve(dae, [0, 1], y0, callbacks=[lambda t, y, integ: y[0]])
+    # traits of the wrong length, and a condition whose length changes
+    with pytest.raises(ValueError, match='direction'):
+        solve(dae, [0, 1], y0, callbacks=[ContinuousCallback(cond, direction=[1, -1])])
+    with pytest.raises(ValueError, match='fixed length'):
+        solve(dae, [0, 1], y0, callbacks=[ContinuousCallback(lambda t, y, integ: y[:1] if t == 0 else y)])

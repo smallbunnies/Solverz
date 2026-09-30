@@ -13,6 +13,7 @@ from Solverz.solvers.laesolver import get_linsolver, linsolver
 from Solverz.solvers.stats import Stats
 from Solverz.variable.variables import Vars
 from Solverz.integrator.algorithm import StepContext, StepFailure, check_style, _warn_scheme
+from Solverz.integrator.callbacks import ContinuousCallback, _ContinuousState, _LegacyEventCallback, locate
 from Solverz.integrator.derivative import DFDT_POLICIES
 from Solverz.integrator.linalg import IterationMatrix
 from Solverz.integrator.options import IntegratorOptions
@@ -138,8 +139,19 @@ class Integrator:
         if opts.legacy_compat and (tstops or any(len(getattr(cb, 'tstops', ())) for cb in callbacks)):
             raise ValueError(f"{type(alg).__name__}(legacy_compat=True) reproduces legacy Rodas, "
                              f"which has no tstops; pass tstops to {type(alg).__name__}()")
-        if callbacks or opts.event is not None:
-            raise NotImplementedError("the integrator core does not yet support opt.event or callbacks")
+        continuous = []
+        for cb in callbacks:
+            if not isinstance(cb, ContinuousCallback):
+                raise TypeError(f"callbacks holds ContinuousCallback objects, not {type(cb).__name__}")
+            if cb.affect is not None:
+                raise NotImplementedError("the integrator core does not yet support a ContinuousCallback "
+                                          "with an affect")
+            continuous.append(cb)
+        if opts.event is not None:
+            continuous.append(_LegacyEventCallback(opts.event))
+        if sum(cb.record for cb in continuous) > 1:
+            raise ValueError("at most one continuous callback of a run may record its crossings, "
+                             "and opt.event records its events")
         self.policy = policy = (LegacyRodasPolicy if opts.legacy_compat else DefaultPolicy)(opts, alg)
         self._dfdt = DFDT_POLICIES[policy.dfdt]
         self._error_norm = policy.error_norm
@@ -196,6 +208,9 @@ class Integrator:
         self._interp_ready = False
         self._interp_valid = True
         self._nl_eta = 1.0
+        self._u_step_buf = np.empty(n)
+        self._cb_y = np.empty(n)
+        self._te = None
 
         y, reason = self._daeic(self.u, opts.t0)
         if y is not None and y is not self.u:
@@ -223,6 +238,10 @@ class Integrator:
         self.next_step_tstop = False
         self.tstop_target = None
         self.dt_untruncated = None
+
+        # after DaeIc, so that the bottom values are those of the consistent initial state
+        self.continuous_callbacks = [_ContinuousState(cb, k, self) for k, cb in enumerate(continuous)]
+        self.discrete_callbacks = []
 
         self._pbar = None
         if opts.pbar:
@@ -464,8 +483,70 @@ class Integrator:
         self._skip_step = True
 
     def handle_callbacks(self):
-        """Save the rows of the accepted step."""
+        """Handle the callbacks of the accepted step, then save its rows
+        unless a callback saved them."""
+        self._te = None
+        saved = False
+        if self.continuous_callbacks:
+            saved = self._apply_continuous_callbacks()
+        if not saved:
+            self.policy.savevalues(self)
+
+    def _apply_continuous_callbacks(self):
+        """Locate and handle the crossings of the accepted step; whether rows were saved.
+
+        Without an acting crossing every recorded crossing is logged at its
+        root with the interpolated state, and the step stands. Otherwise the
+        earliest acting root ``te`` is one event instant for every callback:
+        ``t`` and ``u`` move to ``te`` and the interpolated state there, while
+        the step as computed stays available through ``u_step``, so that
+        every later interpolation of the step is unchanged; the recorded
+        crossings before ``te`` are logged, the rows up to ``te`` saved, and
+        every component that crosses at ``te`` is handled in list order, its
+        crossing logged with the state before any change and a terminal one
+        ending the run. The next step is proposed with the full length of
+        this one.
+        """
+        states = self.continuous_callbacks
+        te, found = locate(self, states)
+        if te is None:
+            for c in found:
+                self.events.record(c.root, self.interp(c.root), c.i)
+            for st in states:
+                st.g0 = st.g1
+            return False
+        u_e = self.interp(te)
+        self._detach()
+        self.t = te
+        np.copyto(self.u, u_e)
+        self._te = te
+        at_te = {}
+        for c in found:
+            if c.root < te:
+                self.events.record(c.root, self.interp(c.root), c.i)
+            else:
+                at_te.setdefault(c.st.order, []).append(c.i)
         self.policy.savevalues(self)
+        handled = [(states[k], at_te[k]) for k in sorted(at_te)]
+        if any(st.cb.save_positions[0] for st, _ in handled) and self.sol.last_t != te:
+            self.sol.push(te, self.u.copy())
+        for st, idx in handled:
+            if st.cb.record:
+                for i in idx:
+                    self.events.record(te, u_e, i)
+            if st.terminal[idx].any():
+                self.terminate()
+        if any(st.cb.save_positions[1] for st, _ in handled):
+            self.sol.push(te, self.u.copy())
+        self.dtpropose = self.dt_step
+        return True
+
+    def _detach(self):
+        """Keep the end state of the accepted step apart from ``u``, once per
+        step, before the core changes ``u``."""
+        if self.u_step is self.u:
+            np.copyto(self._u_step_buf, self.u)
+            self.u_step = self._u_step_buf
 
     def postamble(self):
         """Close the run and build its ``daesol``."""
