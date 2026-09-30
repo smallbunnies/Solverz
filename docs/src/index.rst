@@ -9,7 +9,7 @@ Solverz documentation
 
 `Solverz <https://github.com/smallbunnies/Solverz>`_ is a general-purpose modeling and simulation toolkit for Python. Define symbolic equations, generate numerical functions, and solve algebraic, differential, and finite-difference models.
 
-Start with :doc:`installation <install>` and the :ref:`introductory example <intro>`. The :ref:`modeling guide <gettingstarted>` explains variables, parameters, and equations. The :doc:`API reference <reference/index>` describes the modeling objects and solvers.
+Start with :doc:`installation <install>` and the :ref:`introductory example <intro>`. The :ref:`modeling guide <gettingstarted>` explains variables, parameters, and equations. The :doc:`integrator <integrator>` integrates DAEs with step-size control, output grids and events, and the :doc:`API reference <reference/index>` describes the modeling objects and solvers.
 
 Find worked examples in the `Solverz Cookbook <https://cookbook.solverz.org/latest/>`_. Advanced topics include :doc:`matrix calculus <matrix_calculus>`, :doc:`indexed equations <loopeqn>`, and :doc:`custom functions and code generation <advanced>`.
 
@@ -23,6 +23,13 @@ Find worked examples in the `Solverz Cookbook <https://cookbook.solverz.org/late
    install.md
    intro.md
    gettingstart.md
+
+.. toctree::
+   :hidden:
+   :caption: Solvers
+
+   integrator.md
+   integrator_adding_algorithms.md
 
 .. toctree::
    :hidden:

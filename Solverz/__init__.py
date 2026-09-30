@@ -7,6 +7,7 @@ from Solverz.sym_algebra.functions import (Sign, Abs, transpose, exp, Diag, Mat_
 from Solverz.variable.variables import Vars, TimeVars
 from Solverz.solvers import *
 from Solverz.code_printer import made_numerical, module_printer
+from Solverz.integrator import Rodas3, Rodas4, Rodasp, Rodas5P, ContinuousCallback, DiscreteCallback
 from Solverz.utilities.io import save, load, save_result
 from Solverz.utilities.profile import count_time
 from Solverz.utilities.miscellaneous import derive_incidence_matrix

@@ -21,7 +21,7 @@ with $v(0)=20$ and $h(0)=0$, we can just type the codes
 ```python
 import matplotlib.pyplot as plt
 import numpy as np
-from Solverz import Model, Var, Ode, Opt, made_numerical, Rodas
+from Solverz import Model, Var, Ode, Opt, made_numerical, Rodas4
 
 # Declare a simulation model
 m = Model()
@@ -43,10 +43,10 @@ def events(t, y):
     return value, isterminal, direction
 
 # Solve the DAE
-sol = Rodas(nbball,
-            np.linspace(0, 30, 100), 
-            y0, 
-            Opt(event=events))
+sol = Rodas4()(nbball,
+               np.linspace(0, 30, 100),
+               y0,
+               Opt(event=events))
 
 # Visualize
 plt.plot(sol.T, sol.Y['h'][:, 0])
@@ -58,7 +58,7 @@ Then we have
 
 ![image.png](/pics/res.png)
 
-The model is solved with the stiffly accurate Rosenbrock type method, but you can also write your own solvers by the 
+The model is solved with the stiffly accurate Rosenbrock method Rodas4 of the [integrator](integrator.md), but you can also write your own solvers by the 
 generated numerical interfaces. For example, the [multidimensional Newton method](https://en.wikipedia.org/wiki/Newton%27s_method) of 
 AEs is a scheme with formulae
 
