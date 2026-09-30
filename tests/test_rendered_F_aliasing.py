@@ -157,9 +157,14 @@ def test_kwargs_catch_all_is_not_an_out_parameter():
 
 
 def test_in_place_and_out_of_place_integrate_identically(rendered):
-    """A solver may not read a buffer after overwriting it. Integrating the
-    same residual once through its own ``out`` and once through a wrapper
-    that drops the keyword must give the same trajectory bit for bit."""
+    """Integrating a residual that accepts ``out`` and the same residual
+    behind a wrapper that drops the keyword must give the same trajectory
+    bit for bit.
+
+    ``Rodas`` passes no ``out``, so here this checks only that the ``nDAE``
+    adapter leaves the out-of-place path unchanged. For a solver that passes
+    ``out`` it also checks that the solver never reads a buffer after
+    overwriting it; the integrator core of #189 is the first such solver."""
     from Solverz.num_api.num_eqn import nDAE
     mdl, _, y = rendered
     F = mdl.F
