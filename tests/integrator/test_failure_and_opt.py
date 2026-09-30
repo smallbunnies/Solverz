@@ -10,11 +10,21 @@ zero; a residual that raises an exception of its own propagates. ``Opt``
 and ``y0`` are never written, the argument errors are raised before any
 step, an empty span gives one row, and the counters are the calls the
 model sees, those of ``DaeIc`` and ``dF/dt`` included.
+
+I5, in the default configuration: a residual that divides by zero at a stop
+time fails the run without raising, whether Numba raises
+``ZeroDivisionError`` there or NumPy returns ``inf``; ``opt=None`` is
+``Opt()`` and ``alg=None`` is ``Rodas4()``; an ``opt.scheme`` other than the
+algorithm's warns once per call of each entry, at the caller's line.
 """
+import sys
+import warnings
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from numba import njit
 from scipy.sparse import csc_array
 
 from Solverz import Eqn, Model, Ode, Var, made_numerical
@@ -384,3 +394,106 @@ def test_progress_bar_and_profile_change_nothing(capsys):
     sol = solve(dae, [0, 20], y0, alg=alg, opt=Opt(hinit=0.1, profile=True))
     assert _byte_equal(sol.Y, ref.Y)
     assert capsys.readouterr().out.startswith('Time elapsed: ')
+
+
+# -- I5: the default configuration --------------------------------------------
+
+
+def _pole(t):
+    return 1.0 / (t - 0.5)
+
+
+_pole_jit = njit(_pole)
+
+
+def _pole_model(pole):
+    """``x' = -x + 1e-30 / (t - 0.5)``, hand-built, with the quotient computed
+    by ``pole`` at the time converted to ``np.float64``.
+
+    The factor ``1e-30`` keeps the solution smooth up to ``t = 0.5``, so the
+    run reaches the stop time there, and the residuals that fail are those
+    evaluated at ``t = 0.5`` itself.
+    """
+    def F(t, y, p, out=None):
+        out = np.empty(1) if out is None else out
+        out[0] = -y[0] + 1e-30 * pole(np.float64(t))
+        return out
+
+    return nDAE(csc_array(np.eye(1)), F, lambda t, y, p: csc_array(-np.eye(1)), {})
+
+
+@pytest.mark.i5
+@pytest.mark.filterwarnings('ignore::RuntimeWarning')
+@pytest.mark.parametrize('compiled', [True, False], ids=['njit', 'numpy'])
+def test_a_division_by_zero_at_a_stop_time_fails_the_run(capsys, compiled):
+    pole = _pole_jit if compiled else _pole
+    # Numba's default error model raises where NumPy returns inf
+    if compiled:
+        with pytest.raises(ZeroDivisionError):
+            pole(np.float64(0.5))
+    else:
+        assert pole(np.float64(0.5)) == np.inf
+    capsys.readouterr()
+    integ = init(_pole_model(pole), [0, 1], np.ones(1), tstops=[0.5])
+    sol = integ.solve()
+    _failed(sol)
+    _one_line(capsys, 'rodas4')
+    assert sol.T.size >= 2 and 0.49 < sol.T[-1] <= 0.5 and sol.stats.nreject > 0
+    if compiled:
+        # the attempts at the pole failed on the converted exception
+        assert integ._stepfail_reason.startswith('ZeroDivisionError in F: ')
+    else:
+        # no attempt failed; the attempts at the pole were rejected on their error
+        assert integ._stepfail_reason is None
+
+
+@pytest.mark.i5
+@pytest.mark.parametrize('grid', [False, True], ids=['span', 'grid'])
+def test_opt_none_is_Opt_and_alg_none_is_Rodas4(grid):
+    dae, y0 = models.build('dae_test')
+    tspan = np.linspace(0, 20, 201) if grid else [0, 20]
+    ref = solve(dae, tspan, y0, alg=Rodas4(), opt=Opt())
+    assert ref.stats.ret == 'success'
+    for sol in (solve(dae, tspan, y0), solve(dae, tspan, y0, alg=None, opt=None), init(dae, tspan, y0).solve(),
+                Rodas4()(dae, tspan, y0)):
+        assert sol.stats.ret == 'success' and sol.stats.scheme == 'rodas4'
+        assert _byte_equal(sol.T, ref.T) and _byte_equal(sol.Y, ref.Y)
+
+
+def _scheme_warnings(record):
+    return [w for w in record if w.category is UserWarning and str(w.message).startswith('opt.scheme=')]
+
+
+def _here():
+    """The line after the caller's current one."""
+    return sys._getframe(1).f_lineno + 1
+
+
+@pytest.mark.i5
+def test_a_scheme_other_than_the_algorithm_warns_once_at_the_callers_line():
+    dae, y0 = models.build('dae_test')
+    tspan = [0, 1]
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter('always')
+        lines = [_here()]
+        solve(dae, tspan, y0, alg=Rodas4(), opt=Opt(scheme='rodas3'))
+        lines.append(_here())
+        init(dae, tspan, y0, alg=Rodas4(), opt=Opt(scheme='rodas3')).solve()
+        lines.append(_here())
+        Rodas4()(dae, tspan, y0, Opt(scheme='rodas3'))
+    found = _scheme_warnings(record)
+    assert len(found) == 3
+    for w, line in zip(found, lines):
+        assert str(w.message) == ("opt.scheme='rodas3' is ignored; Rodas4() integrates with 'rodas4'. Pass "
+                                  "the algorithm of the method, for example Rosenbrock.from_scheme(opt.scheme).")
+        assert Path(w.filename).resolve() == Path(__file__).resolve() and w.lineno == line
+
+    # Opt() sets scheme='rodas4' whether or not the caller chose it, and a
+    # scheme that names the algorithm's own method is no disagreement
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter('always')
+        for alg, opt in ((Rodas4(), Opt()), (Rodas4(), None), (Rodas3(), Opt(scheme='rodas3'))):
+            solve(dae, tspan, y0, alg=alg, opt=opt)
+            init(dae, tspan, y0, alg=alg, opt=opt).solve()
+            alg(dae, tspan, y0, opt)
+    assert _scheme_warnings(record) == []

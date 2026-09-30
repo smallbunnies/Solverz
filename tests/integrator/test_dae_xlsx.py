@@ -3,6 +3,10 @@
 I4: ``Rodas4(legacy_compat=True)`` reproduces the sheets ``rodas``, the nine
 accepted steps of legacy Rodas on ``[0, 20]``, and ``rodas_dense``, its 201
 nodes, within ``1e-8``, as ``tests/test_dae.py`` checks legacy Rodas.
+
+I5: ``Rodas4()`` in the default configuration takes other steps, so it is
+compared with ``rodas_dense`` only, within ``1e-2``; the sheet ``rodas`` has
+no time column and holds legacy's own steps.
 """
 from pathlib import Path
 
@@ -40,3 +44,15 @@ def test_the_compatible_rodas4_reproduces_the_sheets(sheets, dae_test, sheet, ts
     assert sol.stats.ret == 'success'
     assert ref.shape == sol.Y.array.shape
     assert np.max(np.abs(ref - sol.Y.array)) < 1e-8
+
+
+@pytest.mark.i5
+def test_the_default_rodas4_is_close_to_the_dense_sheet(sheets, dae_test):
+    dae, y0 = dae_test
+    sol = Rodas4()(dae, np.linspace(0, 20, 201), y0, Opt(hinit=0.1))
+    ref = np.asarray(sheets['rodas_dense'])
+    assert sol.stats.ret == 'success'
+    assert ref.shape == sol.Y.array.shape
+    dev = np.max(np.abs(ref - sol.Y.array))
+    print(f"default Rodas4 against the sheet rodas_dense: max deviation {dev:.3e}")
+    assert dev < 1e-2

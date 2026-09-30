@@ -16,6 +16,7 @@ the step the controller proposes; ``savevalues`` for the rows of an accepted
 step; ``handle_tstop`` and ``at_end`` whether the run is over.
 ``initial_dt`` bounds the algorithm's first step.
 """
+import heapq
 import math
 
 import numpy as np
@@ -177,14 +178,24 @@ class DefaultPolicy:
     """The default configuration: the ``dF/dt`` of ode23s and the error scaled
     by ``max(|u|, |uprev|)``, in the norm the algorithm declares.
 
-    ``t0``, ``tend`` and the steps are Python floats. The run ends when the
-    Integrator's heap of stop times, which holds ``tend``, is empty.
+    ``t0``, ``tend`` and ``dtmax`` are Python floats. A step is bounded by
+    ``dtmax`` and by ``dtmin(t)``, relative to the current time. The
+    Integrator's heap of stop times holds ``tend`` and the ``tstops`` of the
+    call; a step that would reach the next stop time, or end within 100
+    units in the last place before it, is shortened or stretched to end on it
+    exactly, and the run ends when the heap is empty. With more than two
+    entries in ``tspan`` the nodes are saved from the interpolant and never
+    change the steps.
     """
 
     dfdt = 'ode23s'
 
     def __init__(self, opts, alg):
         self.opts = opts
+        self.dtmax = opts.dtmax
+        self.max_consecutive_reject = opts.max_consecutive_reject
+        # Python floats with the bits of the float64 nodes, for scalar comparisons
+        self.nodes = None if opts.saveat is None else opts.saveat.tolist()
         if alg.norm == 'max':
             self.error_norm = max_error_norm
         elif alg.norm == 'rms':
@@ -196,6 +207,87 @@ class DefaultPolicy:
         """The algorithm's first step clamped to ``[dtmin(t0), dtmax]``."""
         opts = self.opts
         return min(opts.dtmax, max(dtmin(opts.t0), dt))
+
+    def check_error(self, integ):
+        """Why the step proposed for the next attempt ends the run, or ``None``.
+
+        A step below ``dtmin(t)`` ends the run only after a rejected or
+        failed attempt: a step proposed after an acceptance is bounded
+        below by ``dtmin`` already, and ``fix_dt_at_bounds`` raises any
+        other step to it.
+        """
+        dt = integ.dt
+        if not math.isfinite(dt):
+            return f"the step size {float(dt)!r} is not finite"
+        if integ.nconsecutive_reject > self.max_consecutive_reject:
+            return f"more than {self.max_consecutive_reject} consecutive attempts were rejected"
+        if integ.iter > 0 and not integ.accept_step and dt < dtmin(integ.t):
+            return f"the step size {float(dt)!r} is too small"
+        return None
+
+    def fix_dt_at_bounds(self, integ):
+        """The step of the attempt within ``[dtmin(t), dtmax]``."""
+        integ.dt = max(min(integ.dt, self.dtmax), dtmin(integ.t))
+
+    def modify_dt_for_tstops(self, integ):
+        """Truncate the attempt to end on the next stop time, or stretch it
+        there when it would end within ``100 ulp`` before it.
+
+        The step becomes the distance itself, so the step the algorithm
+        computes ends on the stop time up to one rounding of ``t + dt``;
+        on acceptance ``t`` is assigned the stop time exactly. The step
+        before truncation is kept for ``dt_propose``.
+        """
+        t, dt = integ.t, integ.dt
+        tstop = integ.tstops[0]
+        distance = tstop - t
+        integ.dt_untruncated = dt
+        if dt + 100 * math.ulp(max(abs(t), abs(tstop))) < distance:
+            integ.next_step_tstop = False
+        else:
+            integ.next_step_tstop = True
+            integ.tstop_target = tstop
+            integ.dt = distance
+
+    def sanitize_EEst(self, integ):
+        """``EEst = inf`` unless the error and the state are finite, so that
+        the controller shrinks the step by its smallest factor."""
+        if not (math.isfinite(integ.EEst) and integ._all_finite(integ.u)):
+            integ.EEst = np.inf
+
+    def dt_propose(self, integ, dtnew):
+        """The controller's step within ``[dtmin(t), dtmax]``; after a step
+        shortened only to meet a stop time, at least the step it replaced."""
+        if integ.next_step_tstop and integ.dt_untruncated > integ.dt:
+            dtnew = max(dtnew, integ.dt_untruncated)
+        return min(self.dtmax, max(dtmin(integ.t), dtnew))
+
+    def savevalues(self, integ):
+        """The rows of the accepted step.
+
+        With two entries in ``tspan`` the step's end, unless a callback has
+        saved a row at ``t`` already. With more, every node up to ``t``: a
+        node equal to ``t`` is ``u`` itself, and every other node comes from
+        the interpolant, so ``tend``, the last stop time, is saved exactly.
+        """
+        t = integ.t
+        nodes = self.nodes
+        if nodes is None:
+            if integ.sol.last_t != t:
+                integ.sol.push(t, integ.u.copy())
+            return
+        idx = integ.saveat_idx
+        while idx < len(nodes) and nodes[idx] <= t:
+            tq = nodes[idx]
+            integ.sol.push(tq, integ.interp(tq))
+            idx += 1
+        integ.saveat_idx = idx
+
+    def handle_tstop(self, integ):
+        """Pop the stop time the accepted step landed on."""
+        tstops, t = integ.tstops, integ.t
+        while tstops and tstops[0] == t:
+            heapq.heappop(tstops)
 
     def at_end(self, integ):
         return not integ.tstops
