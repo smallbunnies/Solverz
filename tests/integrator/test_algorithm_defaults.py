@@ -92,12 +92,18 @@ def test_style_check():
     check_style(_Formula())
 
 
+SERVICES = ('F', 'f', 'J', 'dFdt', 'W', 'implicit', 'error_norm')
+
+
 def test_step_context_reads_the_integrator():
     uprev = np.array([1.0, 2.0])
     opts = SimpleNamespace(rtol=1e-3, atol=1e-6, adaptive=True)
+    services = {name: (lambda *args, name=name: name) for name in SERVICES}
     integ = SimpleNamespace(n=2, uprev=uprev, t=0.0, dt=0.1, new_step=True,
-                            M='M', p={'k': 1}, opts=opts, cache='cache')
+                            M='M', p={'k': 1}, opts=opts, cache='cache', **services)
     s = StepContext(integ)
+    # the services are the Integrator's own, bound once
+    assert all(getattr(s, name) is services[name] for name in SERVICES)
     assert (s.n, s.t, s.h, s.new_step, s.M, s.p) == (2, 0.0, 0.1, True, 'M', {'k': 1})
     assert (s.rtol, s.atol, s.adaptive, s.cache) == (1e-3, 1e-6, True, 'cache')
     integ.t, integ.dt, integ.new_step, integ.M = 0.1, 0.05, False, 'M2'

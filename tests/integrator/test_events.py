@@ -21,7 +21,8 @@ import numpy as np
 import pytest
 
 from Solverz import made_numerical
-from Solverz.integrator import ContinuousCallback, Rodas3, Rodas4, Rodas5P, Rosenbrock, init, solve
+from Solverz.integrator import (ContinuousCallback, ImplicitEuler, Rodas3, Rodas4, Rodas5P, Rosenbrock,
+                                Trapezoid, init, solve)
 from Solverz.integrator.callbacks import _brackets, _ContinuousState, find_root
 from Solverz.solvers.daesolver.rodas.param import Rodas_param
 from Solverz.solvers.option import Opt
@@ -675,21 +676,29 @@ class _LinearRodas4(Rosenbrock):
 
 
 @pytest.mark.i6b
-@pytest.mark.parametrize('method', [Rodas3, _LinearRodas4])
+@pytest.mark.parametrize('method', [Rodas3, _LinearRodas4, ImplicitEuler, Trapezoid])
 def test_rows_before_an_acting_event_are_those_of_the_run_without_it(model, method):
     """The affect reverses the velocity at the descent through 10, and the
     state moves to ``te`` before it; the interpolants read the end state of
     the step as computed, so every node before ``te`` is saved as without
     the event. The grid puts nodes inside the crossing step before ``te``
-    for every method, which only the interpolant of that step gives."""
+    for every method, which only the interpolant of that step gives.
+
+    The steps of ``ImplicitEuler`` and ``Trapezoid`` are shorter than the
+    spacing of the grid, so the grid also gets a node halfway between the
+    start of the crossing step and ``te``, both taken from runs without a
+    grid; nodes change neither the steps nor ``te``."""
     dae, y0 = model('ball')
-    grid = np.linspace(0, 30, 601)
     opt = Opt(rtol=1e-6, atol=1e-8)
 
     def reverse(integ, idx):
         integ.u[1] = -integ.u[1]
 
     cb = ContinuousCallback(lambda t, y, integ: y[0] - 10, reverse, direction=-1, record=True)
+    steps = solve(dae, [0, 30], y0, alg=method(), opt=opt).T
+    te = solve(dae, [0, 30], y0, alg=method(), opt=opt, callbacks=[cb]).te[0]
+    start = steps[np.searchsorted(steps, te) - 1]
+    grid = np.union1d(np.linspace(0, 30, 601), [0.5 * (start + te)])
     integ = init(dae, grid, y0, alg=method(), opt=opt, callbacks=[cb])
     while integ.model_epoch == 0:
         assert integ.step()

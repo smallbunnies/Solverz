@@ -7,6 +7,7 @@ from time import perf_counter
 from types import SimpleNamespace
 
 import numpy as np
+from scipy.sparse import issparse
 
 from Solverz.solvers.daesolver.daeic import DaeIc
 from Solverz.solvers.laesolver import get_linsolver, linsolver
@@ -17,6 +18,7 @@ from Solverz.integrator.callbacks import (ContinuousCallback, DiscreteCallback, 
                                           _LegacyEventCallback, locate)
 from Solverz.integrator.derivative import DFDT_POLICIES
 from Solverz.integrator.linalg import IterationMatrix
+from Solverz.integrator.nlsolve import implicit as _implicit
 from Solverz.integrator.options import IntegratorOptions
 from Solverz.integrator.policies import DefaultPolicy, LegacyRodasPolicy
 from Solverz.integrator.rosenbrock import Rodas4, _pairing
@@ -71,6 +73,36 @@ def _residual(F):
     return F_
 
 
+def _one_to_one(M, n):
+    """``(rows, Mv)`` with ``y'[c] = F[rows[c]] / Mv[c]`` for every variable
+    ``c``, when ``M`` pairs every row with exactly one variable and every
+    variable with exactly one row; otherwise ``None``.
+
+    Such an ``M`` is a scaled permutation, the mass matrix of an ODE whose
+    equations may be declared in any order. ``rows`` is a contiguous
+    ``intp`` array, so that ``np.take`` gathers without a copy of it.
+    """
+    pairing = _pairing(M)
+    if pairing is None or pairing[0].size != n:
+        return None
+    rows, cols, Mv = pairing
+    order = np.argsort(cols)
+    return np.ascontiguousarray(rows[order], dtype=np.intp), np.ascontiguousarray(Mv[order])
+
+
+def _differential_rows(M, n):
+    """1.0 on the rows of ``M`` that hold a nonzero value, 0.0 on the others,
+    explicit zeros counting as zero; read-only."""
+    D = np.zeros(n)
+    if issparse(M):
+        coo = M.tocoo()
+        D[coo.row[coo.data != 0]] = 1.0
+    else:
+        D[np.any(np.asarray(M) != 0, axis=1)] = 1.0
+    D.flags.writeable = False
+    return D
+
+
 def solve(dae, tspan, y0, alg=None, opt=None, *, callbacks=(), tstops=()):
     """Integrate ``dae`` over ``tspan`` from ``y0`` and return a ``daesol``.
 
@@ -117,11 +149,12 @@ class Integrator:
     state is committed into ``uprev`` at the start of the next attempt, so
     between two ``step()`` calls both ends of the step are available.
 
-    The services ``F``, ``J``, ``F0``, ``J0``, ``dFdt`` and ``W`` count
-    every evaluation and factorization they make in ``stats``. ``F0``, ``J0``
-    and ``dFdt`` belong to the start of the step: each is evaluated on its
-    first request after a new step began and kept on the retries of that
-    step. ``W(gamma)`` is factorized once per ``gamma`` per attempt.
+    The services ``F``, ``f``, ``J``, ``F0``, ``J0``, ``dFdt``, ``W`` and
+    ``implicit`` count every evaluation, factorization and solve they make
+    in ``stats``. ``F0``, ``J0`` and ``dFdt`` belong to the start of the
+    step: each is evaluated on its first request after a new step began and
+    kept on the retries of that step. ``W(gamma)`` is factorized once per
+    ``gamma`` per attempt. ``ctx`` offers them to a formula algorithm.
 
     The loop follows OrdinaryDiffEq.jl: ``loopheader`` commits the accepted
     step or applies the controller's rejection and checks the proposed step,
@@ -179,9 +212,12 @@ class Integrator:
         self.model_epoch = 0
         self._F = _residual(dae.F)
         self._J = dae.J
+        # caches derived from M, each valid for the model_epoch it was built for
+        self._D = self._D_epoch = None
+        self._f_pairing = self._f_epoch = None
         if alg.explicit:
-            pairing = _pairing(self.M)
-            if pairing is None or pairing[0].size != n:
+            self._f_pairing, self._f_epoch = _one_to_one(self.M, n), self.model_epoch
+            if self._f_pairing is None:
                 raise TypeError(f"{alg.scheme} is explicit and cannot integrate a model with algebraic "
                                 f"equations or a singular mass matrix")
         self.stats = Stats(alg.scheme)
@@ -216,6 +252,9 @@ class Integrator:
         self._interp_ready = False
         self._interp_valid = True
         self._nl_eta = 1.0
+        self._nl_y, self._nl_G, self._nl_dz = np.empty(n), np.empty(n), np.empty(n)
+        self._nl_w, self._nl_w2 = np.empty(n), np.empty(n)
+        self._f_scratch = np.empty(n)
         self._u_step_buf = np.empty(n)
         self._cb_y = np.empty(n)
         self._te = None
@@ -285,6 +324,38 @@ class Integrator:
             raise StepFailure(f"{type(e).__name__} in F: {e}") from e
         return out
 
+    def f(self, t, y, out=None):
+        """``M^-1 F(t, y)``, into ``out`` or into a new array; one counted residual.
+
+        ``M`` must pair every row with exactly one variable, which an
+        explicit algorithm is guaranteed; otherwise ``TypeError``. The pairing
+        is found once per ``model_epoch``, and the derivative of variable
+        ``c`` is the residual of its row divided by its entry of ``M``.
+        """
+        if self._f_epoch != self.model_epoch:
+            self._f_pairing, self._f_epoch = _one_to_one(self.M, self.n), self.model_epoch
+        pairing = self._f_pairing
+        if pairing is None:
+            raise TypeError(f"{self.alg.scheme}: f = M^-1 F needs a mass matrix that pairs every row "
+                            f"with exactly one variable; this model has algebraic equations or a "
+                            f"singular mass matrix")
+        rows, Mv = pairing
+        Fy = self.F(t, y, out=self._f_scratch)
+        if out is None:
+            out = np.empty(self.n)
+        # mode='clip' gathers straight into out; 'raise' would buffer it
+        np.take(Fy, rows, out=out, mode='clip')
+        np.divide(out, Mv, out=out)
+        return out
+
+    def D(self):
+        """1.0 on the differential rows of ``M``, 0.0 on the algebraic rows,
+        whose values are all zero, explicit zeros included; read-only, built
+        once per ``model_epoch``."""
+        if self._D_epoch != self.model_epoch:
+            self._D, self._D_epoch = _differential_rows(self.M, self.n), self.model_epoch
+        return self._D
+
     def J(self, t, y):
         """The Jacobian of ``F`` at ``(t, y)``, evaluated at every call."""
         self.stats.nJeval += 1
@@ -328,6 +399,14 @@ class Integrator:
         if W is None:
             W = self._W_cache[gamma] = self.linalg.factorize(self.M, self.J0(), self.dt, gamma)
         return W
+
+    def implicit(self, t, gamma, rhs, y=None, out=None, slope=False):
+        """``y`` with ``M y - (dt*gamma) F(t, y) = rhs`` by the simplified Newton
+        iteration of ``nlsolve.py``, from ``y`` or ``uprev``, with the Newton
+        matrix ``W(gamma)``; ``(y, k)`` with ``slope=True``, where ``k = (M y -
+        rhs) / (dt*gamma)`` equals ``F(t, y)`` to the Newton tolerance. A
+        failed iteration raises ``StepFailure``."""
+        return _implicit(self, t, gamma, rhs, y, out, slope)
 
     def error_norm(self, e):
         """The scalar error of the vector ``e`` in the configuration's norm."""

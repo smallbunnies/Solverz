@@ -166,10 +166,24 @@ class StepContext:
     current attempt, and ``new_step`` is false on a retry of the same step.
     ``y0`` is a read-only view of ``integ.uprev`` that is valid during the
     attempt only; an algorithm that keeps it copies it. ``M`` is never
-    modified.
+    modified. ``D`` is 1.0 on the rows of ``M`` that hold a nonzero value and
+    0.0 on the algebraic rows, so ``D * v`` keeps the differential rows of
+    ``v``.
+
+    The services are those of the Integrator and count every evaluation in
+    ``Stats``. ``F(t, y, out=None)`` is the residual, ``f(t, y, out=None)``
+    the derivative ``M^-1 F`` of a model whose ``M`` pairs every row with
+    one variable, and ``J(t, y)`` the Jacobian. ``F0``, ``J0`` and
+    ``dFdt()`` belong to ``(t, y0)``: each is evaluated once per step and
+    kept on its retries. ``W(gamma)`` is the factorization of ``M -
+    (h*gamma) J0``, kept for the attempt; ``implicit(t, gamma, rhs, y=None,
+    out=None, slope=False)`` solves ``M y - h*gamma*F(t, y) = rhs`` by a
+    simplified Newton iteration with it; ``error_norm(e)`` is the scalar the
+    controller reads. ``out=`` is accepted wherever a vector is returned and
+    is never required.
     """
 
-    __slots__ = ('_integ', 'n', 'y0')
+    __slots__ = ('_integ', 'n', 'y0', 'F', 'f', 'J', 'dFdt', 'W', 'implicit', 'error_norm')
 
     def __init__(self, integ):
         self._integ = integ
@@ -177,6 +191,14 @@ class StepContext:
         y0 = integ.uprev.view()
         y0.flags.writeable = False
         self.y0 = y0
+        # bound once, so that a service costs one call, not two
+        self.F = integ.F
+        self.f = integ.f
+        self.J = integ.J
+        self.dFdt = integ.dFdt
+        self.W = integ.W
+        self.implicit = integ.implicit
+        self.error_norm = integ.error_norm
 
     @property
     def t(self):
@@ -199,6 +221,10 @@ class StepContext:
         return self._integ.p
 
     @property
+    def D(self):
+        return self._integ.D()
+
+    @property
     def rtol(self):
         return self._integ.opts.rtol
 
@@ -213,3 +239,11 @@ class StepContext:
     @property
     def cache(self):
         return self._integ.cache
+
+    @property
+    def F0(self):
+        return self._integ.F0()
+
+    @property
+    def J0(self):
+        return self._integ.J0()
