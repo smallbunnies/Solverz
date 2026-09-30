@@ -351,6 +351,33 @@ class klu_decomposition:
             raise RuntimeError(f"klu_solve failed (status {self._common.status})")
         return x
 
+    def solve_into(self, b, out):
+        """Solve ``A x = b`` into ``out`` and return ``out``.
+
+        ``klu_solve`` receives the values that :meth:`solve` hands it, so the
+        result is byte-equal to ``solve(b)``, without the copy that ``solve``
+        allocates. ``b`` and ``out`` are float64 vectors of length ``n``,
+        ``out`` C-contiguous and not sharing memory with ``b``.
+        """
+        n = self.shape[0]
+        # klu_solve writes n doubles through the raw pointer of out, and
+        # np.copyto would broadcast a short b silently.
+        if not (isinstance(out, np.ndarray) and out.dtype == np.float64 and out.shape == (n,)
+                and out.flags.c_contiguous and out.flags.writeable):
+            raise ValueError(f"out must be a writeable C-contiguous float64 vector of length {n}")
+        if not (isinstance(b, np.ndarray) and b.dtype == np.float64 and b.shape == (n,)):
+            raise ValueError(f"b must be a float64 vector of length {n}")
+        perm = self.symbolic.perm
+        if perm is not None:
+            np.take(b, perm, out=out)
+        else:
+            np.copyto(out, b)
+        _lib.klu_solve(self.symbolic.ptr, self._num, n, 1, out.ctypes.data_as(POINTER(c_double)),
+                       byref(self._common))
+        if self._common.status != _KLU_OK:
+            raise RuntimeError(f"klu_solve failed (status {self._common.status})")
+        return out
+
     def __del__(self):
         num = getattr(self, "_num", None)
         if num and KLU_AVAILABLE:
