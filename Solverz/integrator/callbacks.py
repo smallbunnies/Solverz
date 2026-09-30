@@ -1,5 +1,6 @@
 """Callbacks: conditions checked on every accepted step, their crossings
-located on the step's interpolant, and the adapter of legacy ``opt.event``.
+located on the step's interpolant, the adapter of legacy ``opt.event``, and
+discrete callbacks that change the run at the end of a step.
 
 A crossing is found after the step that contains it was accepted, from the
 bottom values of the condition at the start of the step, its values at the
@@ -12,7 +13,7 @@ import math
 
 import numpy as np
 
-__all__ = ['ContinuousCallback']
+__all__ = ['ContinuousCallback', 'DiscreteCallback', 'preset_time_callback']
 
 _ROOTFIND = ('left', 'right')
 
@@ -81,11 +82,14 @@ class ContinuousCallback:
 
     A terminal component ends the run at its crossing, and ``record=True``
     logs every crossing as ``(te, ye, ie)`` in the result; at most one
-    callback of a run records. ``affect(integ, idx)`` receives the indices of
-    the components that cross at the event time. A component acts on the
-    run if it is terminal or the callback has an ``affect``; the earliest
-    acting crossing ``te`` is one event instant for all callbacks, and every
-    component of any callback that crosses at ``te`` is handled there.
+    callback of a run records. ``affect(integ, idx)`` receives the int array
+    of the components that cross at the event time; it may change
+    ``integ.u``, entries of ``integ.dae.p`` and ``integ.dae.M.data``, and may
+    call ``integ.terminate()``, and the core then makes the state consistent
+    again with ``DaeIc``. A component acts on the run if it is terminal or
+    the callback has an ``affect``; the earliest acting crossing ``te`` is
+    one event instant for all callbacks, and every component of any callback
+    that crosses at ``te`` is handled there.
 
     The crossing is located on the step's interpolant, at the samples of
     ``interp_points`` points spread over the step and then to adjacent
@@ -158,6 +162,47 @@ class _LegacyEventCallback(ContinuousCallback):
         return value, direction, isterminal
 
 
+class DiscreteCallback:
+    """A change of the run at the end of an accepted step where a condition holds.
+
+    ``condition(t, y, integ)`` returns a bool and is evaluated after every
+    accepted step, after the continuous callbacks. Where it holds,
+    ``affect(integ)`` runs; it may change ``integ.u``, entries of
+    ``integ.dae.p`` and ``integ.dae.M.data``, and may call
+    ``integ.terminate()``, and the core then makes the state consistent
+    again with ``DaeIc``. ``save_positions`` saves the state before and
+    after the affect at ``t``; when every step is saved, the step's own row
+    at ``t`` is the state before it. ``tstops`` are stop times of the run,
+    so that a step ends exactly on each.
+    """
+
+    def __init__(self, condition, affect, *, save_positions=(True, True), tstops=()):
+        if not callable(condition):
+            raise TypeError("condition must be callable as condition(t, y, integ)")
+        if not callable(affect):
+            raise TypeError("affect must be callable as affect(integ)")
+        save_positions = tuple(save_positions)
+        if len(save_positions) != 2:
+            raise ValueError(f"save_positions must be a pair of bools, not {save_positions!r}")
+        self.condition = condition
+        self.affect = affect
+        self.save_positions = (bool(save_positions[0]), bool(save_positions[1]))
+        self.tstops = tuple(tstops)
+
+
+def preset_time_callback(times, affect, *, save_positions=(True, True)):
+    """A ``DiscreteCallback`` whose ``affect(integ)`` runs at each of ``times``.
+
+    The times are stop times of the run, so a step ends exactly on each of
+    them and the test of a time against the set is exact. A time outside
+    ``(t0, tend]`` is never reached, so its affect never runs.
+    """
+    times = tuple(times)
+    timeset = frozenset(float(x) for x in times)
+    return DiscreteCallback(lambda t, y, integ: t in timeset, affect, save_positions=save_positions,
+                            tstops=times)
+
+
 class _ContinuousState:
     """What one integration keeps of one continuous callback.
 
@@ -185,6 +230,13 @@ class _ContinuousState:
         self.values = {}
         self.fired = None
         self.fired_t = None
+
+    def restart(self, integ):
+        """The bottom values at ``(t, u)``, after the state or the model changed."""
+        g, direction, terminal = self.evaluate(integ, integ.t, integ.u)
+        if direction is not None:
+            self._traits(direction, terminal)
+        self.g0 = g
 
     def evaluate(self, integ, t, y):
         """``(g, direction, terminal)`` of one counted call of the condition;

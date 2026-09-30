@@ -10,7 +10,9 @@ one step, and the first of several. The earliest crossing of a terminal
 component ends the run with ``T[-1] == te`` and the last row equal to the
 recorded state, on every output, in both configurations. Every component
 that crosses at that time is reported with it, and crossings of recorded
-components before it are logged without shortening the step.
+components before it are logged without shortening the step. An affect
+changes the run at the event time; the rows before it are those of the
+step as computed, and a crossing it leaves in place is reported once.
 """
 import math
 from types import SimpleNamespace
@@ -21,6 +23,7 @@ import pytest
 from Solverz import made_numerical
 from Solverz.integrator import ContinuousCallback, Rodas3, Rodas4, Rodas5P, Rosenbrock, init, solve
 from Solverz.integrator.callbacks import _brackets, _ContinuousState, find_root
+from Solverz.solvers.daesolver.rodas.param import Rodas_param
 from Solverz.solvers.option import Opt
 
 from tests.integrator import models
@@ -571,3 +574,133 @@ def test_callback_arguments(model):
         solve(dae, [0, 1], y0, callbacks=[ContinuousCallback(cond, direction=[1, -1])])
     with pytest.raises(ValueError, match='fixed length'):
         solve(dae, [0, 1], y0, callbacks=[ContinuousCallback(lambda t, y, integ: y[:1] if t == 0 else y)])
+
+
+# -- affects ------------------------------------------------------------------
+
+@pytest.mark.i6b
+def test_ten_bounces_in_one_call(model):
+    """The bounces of ``test_ten_bounces_as_the_legacy_test`` in one call: a
+    ``'left'`` callback reverses 0.9 of the velocity at each impact. The
+    state at ``te`` lies just above the ground, so the next step starts on
+    the side the impact was reported from, and each bounce is reported
+    once, with the rows before and after the affect."""
+    dae, y0 = model('ball')
+
+    def bounce(integ, idx):
+        assert idx.dtype == np.int64 and idx.tolist() == [0]
+        integ.u[1] = -0.9 * integ.u[1]
+
+    cb = ContinuousCallback(lambda t, y, integ: y[0], bounce, direction=-1, record=True, rootfind='left')
+    sol = solve(dae, [0, 27], y0, callbacks=[cb])
+    assert sol.stats.ret == 'success' and sol.T[-1] == 27.0
+    assert sol.ie.tolist() == [0] * 10 and np.all(np.diff(sol.te) > 0)
+    np.testing.assert_allclose(sol.te, LEGACY_BOUNCES, rtol=1e-5, atol=0)
+    for te, ye in zip(sol.te, sol.ye):
+        k = np.flatnonzero(sol.T == te)
+        assert k.size == 2 and k[1] == k[0] + 1
+        before, after = sol.Y[k[0]], sol.Y[k[1]]
+        assert _byte_equal(before, ye) and ye[0] >= 0 and ye[1] < 0
+        assert after[0] == before[0] and after[1] == -0.9 * before[1]
+    exact = np.cumsum(2 * 20 * 0.9 ** np.arange(10) / G)
+    print(f"max relative deviation of the bounce times: from legacy "
+          f"{np.max(np.abs(sol.te / LEGACY_BOUNCES - 1)):.2e}, from the exact times "
+          f"{np.max(np.abs(sol.te / exact - 1)):.2e}")
+
+
+@pytest.mark.i6b
+@pytest.mark.parametrize('direction', [0, -1])
+def test_an_affect_that_leaves_the_state_unchanged_reports_each_crossing_once(model, direction):
+    """With ``'left'`` the state at ``te`` has not crossed yet, so the next
+    step starts before the crossing it was reported at, and meets it again
+    within its first float. The repeat nudge, which reads the components the
+    modification protocol stored, tells it apart from a new crossing."""
+    dae, y0 = model('ball')
+    at = []
+    cb = ContinuousCallback(lambda t, y, integ: y[0] - 10, lambda integ, idx: at.append(integ.t),
+                            direction=direction, record=True, rootfind='left')
+    sol = solve(dae, [0, 4], y0, callbacks=[cb])
+    up, down = _level_times(10.0)
+    expected = [up, down] if direction == 0 else [down]
+    assert sol.stats.ret == 'success'
+    np.testing.assert_allclose(sol.te, expected, rtol=1e-9)
+    assert sol.te.tolist() == at and sol.ie.tolist() == [0] * len(expected)
+
+
+@pytest.mark.i6b
+def test_callbacks_crossing_at_the_same_te(model):
+    """Two acting callbacks and a recording one cross at the same float on
+    the descent through 10. Both affects run in list order at ``te`` with
+    the state before any change, the recording callback logs its component
+    there as well, and the modification protocol runs once. The component
+    of the recording callback that passes 15 earlier is logged at its own
+    time."""
+    dae, y0 = model('ball')
+    calls = []
+
+    def note(integ, idx):
+        calls.append(('a', integ.t, idx.tolist(), integ.model_epoch, integ.u[1]))
+
+    def reverse(integ, idx):
+        calls.append(('c', integ.t, idx.tolist(), integ.model_epoch, integ.u[1]))
+        integ.u[1] = -integ.u[1]
+
+    a = ContinuousCallback(lambda t, y, integ: y[0] - 10, note, direction=-1)
+    b = ContinuousCallback(lambda t, y, integ: np.array([y[0] - 15, y[0] - 10]), direction=-1, record=True)
+    c = ContinuousCallback(lambda t, y, integ: y[0] - 10, reverse, direction=-1)
+    integ = init(dae, [0, 5], y0, callbacks=[a, b, c])
+    while not calls:
+        assert integ.step()
+    te = integ.t
+    assert integ.model_epoch == 1 and integ.u[1] > 0
+    assert [x[:4] for x in calls] == [('a', te, [0], 0), ('c', te, [0], 0)]
+    assert calls[0][4] == calls[1][4] < 0
+    sol = integ.solve()
+    assert sol.stats.ret == 'success' and integ.model_epoch == 1 and len(calls) == 2
+    assert sol.ie.tolist() == [0, 1]
+    np.testing.assert_allclose(sol.te, [_level_times(15.0)[1], _level_times(10.0)[1]], rtol=1e-9)
+    assert sol.te[1] == te and sol.ye[1][1] < 0
+    k = np.flatnonzero(sol.T == te)
+    assert k.size == 2 and _byte_equal(sol.Y[k[0]], sol.ye[1]) and sol.Y[k[1]][1] == -sol.ye[1][1]
+
+
+class _LinearRodas4(Rosenbrock):
+    """Rodas4 with the linear interpolant of ``Algorithm``, which reads the
+    end state of the step as the interpolants of ``ImplicitEuler`` and
+    ``Trapezoid`` do."""
+
+    scheme = 'rodas4_linear'
+    tableau = Rodas_param('rodas4')
+    interpolation = 'linear'
+
+
+@pytest.mark.i6b
+@pytest.mark.parametrize('method', [Rodas3, _LinearRodas4])
+def test_rows_before_an_acting_event_are_those_of_the_run_without_it(model, method):
+    """The affect reverses the velocity at the descent through 10, and the
+    state moves to ``te`` before it; the interpolants read the end state of
+    the step as computed, so every node before ``te`` is saved as without
+    the event. The grid puts nodes inside the crossing step before ``te``
+    for every method, which only the interpolant of that step gives."""
+    dae, y0 = model('ball')
+    grid = np.linspace(0, 30, 601)
+    opt = Opt(rtol=1e-6, atol=1e-8)
+
+    def reverse(integ, idx):
+        integ.u[1] = -integ.u[1]
+
+    cb = ContinuousCallback(lambda t, y, integ: y[0] - 10, reverse, direction=-1, record=True)
+    integ = init(dae, grid, y0, alg=method(), opt=opt, callbacks=[cb])
+    while integ.model_epoch == 0:
+        assert integ.step()
+    tprev = integ.tprev
+    with_event = integ.solve()
+    without = solve(dae, grid, y0, alg=method(), opt=opt)
+    te = with_event.te[0]
+    assert np.any((grid > tprev) & (grid < te))
+    k = int(np.searchsorted(grid, te))
+    assert k >= 2 and grid[k - 1] < te
+    assert _byte_equal(with_event.T[:k], without.T[:k])
+    assert _byte_equal(with_event.Y[:k], without.Y[:k])
+    # the rows at te, before and after the affect, follow
+    assert with_event.T[k] == with_event.T[k + 1] == te

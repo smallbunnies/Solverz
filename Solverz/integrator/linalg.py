@@ -79,6 +79,22 @@ class IterationMatrix:
         # returns, so the factorizations of a call share it.
         self._scaled = np.empty(integ.n)
 
+    def reset(self):
+        """Return the cache to the state from which a new call starts, after
+        the model changed within the call.
+
+        The SuperLU ordering is dropped, and so is a KLU analysis that holds
+        a row matching, which depends on the values of the matrix that
+        triggered it; an analysis without a matching depends only on the
+        pattern and is kept. A run changed at ``t1`` is then byte-equal to
+        two calls split at ``t1``, on either backend.
+        """
+        cache = self.cache
+        cache.superlu = None
+        sym = cache.symbolic
+        if sym is not None and sym.perm is not None:
+            cache.symbolic = None
+
     def build(self, M, J, dt, gamma):
         """``(Wm, rscale, dtgamma)``: the row-scaled matrix ``diag(rscale) (M -
         (dt*gamma) J)``, the row scaling and ``dt * gamma``."""

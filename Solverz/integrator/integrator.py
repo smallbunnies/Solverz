@@ -13,7 +13,8 @@ from Solverz.solvers.laesolver import get_linsolver, linsolver
 from Solverz.solvers.stats import Stats
 from Solverz.variable.variables import Vars
 from Solverz.integrator.algorithm import StepContext, StepFailure, check_style, _warn_scheme
-from Solverz.integrator.callbacks import ContinuousCallback, _ContinuousState, _LegacyEventCallback, locate
+from Solverz.integrator.callbacks import (ContinuousCallback, DiscreteCallback, _ContinuousState,
+                                          _LegacyEventCallback, locate)
 from Solverz.integrator.derivative import DFDT_POLICIES
 from Solverz.integrator.linalg import IterationMatrix
 from Solverz.integrator.options import IntegratorOptions
@@ -125,9 +126,15 @@ class Integrator:
     The loop follows OrdinaryDiffEq.jl: ``loopheader`` commits the accepted
     step or applies the controller's rejection and checks the proposed step,
     ``perform_step`` is the algorithm's attempt, and ``loopfooter`` accepts
-    or rejects it, advances ``t`` and saves. The configuration's policy
-    decides the bounds, the saving and the end test, so the loop has no
-    branch on the configuration.
+    or rejects it, advances ``t``, handles the callbacks and saves. The
+    configuration's policy decides the bounds, the saving and the end test,
+    so the loop has no branch on the configuration.
+
+    The state or the model changes inside a call in two places only: in a
+    callback's affect, and between two ``step()`` calls followed by
+    ``model_modified()``. Both run the modification protocol, which makes
+    the state consistent with ``DaeIc`` and discards everything derived from
+    the old state or model.
     """
 
     def __init__(self, dae, tspan, y0, alg, opt=None, callbacks=(), tstops=()):
@@ -139,14 +146,15 @@ class Integrator:
         if opts.legacy_compat and (tstops or any(len(getattr(cb, 'tstops', ())) for cb in callbacks)):
             raise ValueError(f"{type(alg).__name__}(legacy_compat=True) reproduces legacy Rodas, "
                              f"which has no tstops; pass tstops to {type(alg).__name__}()")
-        continuous = []
+        continuous, discrete = [], []
         for cb in callbacks:
-            if not isinstance(cb, ContinuousCallback):
-                raise TypeError(f"callbacks holds ContinuousCallback objects, not {type(cb).__name__}")
-            if cb.affect is not None:
-                raise NotImplementedError("the integrator core does not yet support a ContinuousCallback "
-                                          "with an affect")
-            continuous.append(cb)
+            if isinstance(cb, ContinuousCallback):
+                continuous.append(cb)
+            elif isinstance(cb, DiscreteCallback):
+                discrete.append(cb)
+            else:
+                raise TypeError(f"callbacks holds ContinuousCallback and DiscreteCallback objects, "
+                                f"not {type(cb).__name__}")
         if opts.event is not None:
             continuous.append(_LegacyEventCallback(opts.event))
         if sum(cb.record for cb in continuous) > 1:
@@ -231,8 +239,11 @@ class Integrator:
             self.tstops = []
         else:
             t0, tend = opts.t0, opts.tend
+            stops = list(tstops)
+            for cb in discrete:
+                stops += cb.tstops
             # sorted, and so already a heap, with tend its largest entry
-            self.tstops = sorted({float(x) for x in tstops if t0 < x < tend})
+            self.tstops = sorted({float(x) for x in stops if t0 < x < tend})
             if tend > t0:
                 self.tstops.append(tend)
         self.next_step_tstop = False
@@ -241,7 +252,7 @@ class Integrator:
 
         # after DaeIc, so that the bottom values are those of the consistent initial state
         self.continuous_callbacks = [_ContinuousState(cb, k, self) for k, cb in enumerate(continuous)]
-        self.discrete_callbacks = []
+        self.discrete_callbacks = discrete
 
         self._pbar = None
         if opts.pbar:
@@ -394,6 +405,25 @@ class Integrator:
         self.retcode = 'terminated'
         self.finished = True
 
+    def model_modified(self):
+        """Run the modification protocol after the caller changed the state or
+        the model between two ``step()`` calls.
+
+        The caller changes ``u``, an array of ``dae.p`` or ``dae.M.data``, or
+        rebinds ``dae.p`` or ``dae.M``, and then calls this; it is the only
+        supported way to do so. The state is made consistent at ``t`` with
+        ``DaeIc``, whose failure ends the run. The change may have overwritten
+        the end state of the step just taken, so ``interp`` accepts only
+        ``tq == t`` until the next accepted step. Before the first step the
+        changed state is the start of that step. After a failure there is
+        nothing to modify and the call does nothing.
+        """
+        if self.failed:
+            return
+        if self.iter > 0:
+            self._interp_valid = False
+        self._modification_protocol()
+
     def loopheader(self):
         """Commit the accepted step or apply the rejection, then check and
         bound the step of the next attempt; ``False`` when the run fails."""
@@ -483,12 +513,18 @@ class Integrator:
         self._skip_step = True
 
     def handle_callbacks(self):
-        """Handle the callbacks of the accepted step, then save its rows
-        unless a callback saved them."""
+        """Handle the continuous and then the discrete callbacks of the
+        accepted step, then save its rows unless a callback saved them."""
         self._te = None
         saved = False
         if self.continuous_callbacks:
             saved = self._apply_continuous_callbacks()
+            if self.failed:
+                return
+        if self.discrete_callbacks:
+            saved = self._apply_discrete_callbacks(saved)
+            if self.failed:
+                return
         if not saved:
             self.policy.savevalues(self)
 
@@ -503,9 +539,10 @@ class Integrator:
         every later interpolation of the step is unchanged; the recorded
         crossings before ``te`` are logged, the rows up to ``te`` saved, and
         every component that crosses at ``te`` is handled in list order, its
-        crossing logged with the state before any change and a terminal one
-        ending the run. The next step is proposed with the full length of
-        this one.
+        crossing logged with the state before any change, a terminal one
+        ending the run and an ``affect`` receiving the components of its
+        callback. After the affects, the modification protocol runs once. The
+        next step is proposed with the full length of this one.
         """
         states = self.continuous_callbacks
         te, found = locate(self, states)
@@ -530,16 +567,107 @@ class Integrator:
         handled = [(states[k], at_te[k]) for k in sorted(at_te)]
         if any(st.cb.save_positions[0] for st, _ in handled) and self.sol.last_t != te:
             self.sol.push(te, self.u.copy())
+        affected = False
         for st, idx in handled:
             if st.cb.record:
                 for i in idx:
                     self.events.record(te, u_e, i)
             if st.terminal[idx].any():
                 self.terminate()
+            if st.cb.affect is not None:
+                if not affected:
+                    self._freeze_step()
+                    affected = True
+                st.cb.affect(self, np.array(idx, dtype=np.int64))
+        if affected and not self._modification_protocol(handled):
+            return True
         if any(st.cb.save_positions[1] for st, _ in handled):
             self.sol.push(te, self.u.copy())
         self.dtpropose = self.dt_step
         return True
+
+    def _apply_discrete_callbacks(self, saved):
+        """Apply, in list order, every discrete callback whose condition holds
+        at ``(t, u)``, unless the run is terminated; whether rows were saved.
+
+        The rows up to ``t`` are saved once, before the first affect, unless
+        the continuous callbacks, which ``saved`` reports, have saved them.
+        Each callback then saves the state before its affect unless a row at
+        ``t`` was saved already, runs its affect and the modification
+        protocol, and saves the state after it; its ``save_positions`` selects
+        these two saves. A callback that terminates the run ends the list.
+        """
+        t = self.t
+        for cb in self.discrete_callbacks:
+            if self.terminated:
+                break
+            self.stats.ncondition += 1
+            if not cb.condition(t, self.u, self):
+                continue
+            if not saved:
+                # once per step end: the legacy savevalues pushes (t, u)
+                # without looking at the last saved row
+                self.policy.savevalues(self)
+                saved = True
+            if cb.save_positions[0] and self.sol.last_t != t:
+                self.sol.push(t, self.u.copy())
+            self._freeze_step()
+            cb.affect(self)
+            if not self._modification_protocol():
+                break
+            if cb.save_positions[1]:
+                self.sol.push(t, self.u.copy())
+        return saved
+
+    def _modification_protocol(self, fired=()):
+        """Make the run consistent after the state or the model changed at
+        ``t``; ``False`` when ``DaeIc`` fails, which ends the run.
+
+        The model is read again from ``dae`` and ``model_epoch`` advances, so
+        that every cache derived from ``M`` is rebuilt; the linear-solver
+        cache returns to the state of a new call; ``DaeIc`` makes ``u``
+        consistent; ``F0``, ``J0`` and ``dF/dt`` are evaluated anew at the
+        next attempt and the algorithm clears its history; the bottom values
+        of the continuous callbacks are taken at the changed state. ``fired``
+        holds the components of each continuous callback that crossed at
+        ``t``, which a ``'left'`` callback keeps for the repeat nudge of the
+        next step. The next commit makes ``u`` the start of the next step.
+        """
+        self._detach()
+        dae = self.dae
+        self.M = dae.M
+        self.p = dae.p
+        self.model_epoch += 1
+        self.linalg.reset()
+        y, reason = self._daeic(self.u, self.t)
+        if reason is not None:
+            self._fail(reason)
+            return False
+        if y is not self.u:
+            np.copyto(self.u, y)
+        if self.iter == 0:
+            # no step to commit: the changed state starts the first step
+            np.copyto(self.uprev, self.u)
+            self.u_step = self.u
+        self.new_step = True
+        self._nl_eta = 1.0
+        self.alg.reset_history(self, self.cache)
+        for st in self.continuous_callbacks:
+            st.restart(self)
+        for st, idx in fired:
+            if st.cb.rootfind == 'left':
+                st.fired = np.array(idx, dtype=np.int64)
+                st.fired_t = self.t
+        return True
+
+    def _freeze_step(self):
+        """Keep the accepted step as computed before an affect changes the
+        state, the parameters or the mass matrix: its end state, and the data
+        that ``addsteps`` computes from them for the interpolant."""
+        self._detach()
+        if not self._interp_ready:
+            self.alg.addsteps(self, self.cache)
+            self._interp_ready = True
 
     def _detach(self):
         """Keep the end state of the accepted step apart from ``u``, once per
