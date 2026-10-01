@@ -562,13 +562,15 @@ The factorization is `lu_decomposition(Wm, backend=self.backend, cache=self.cach
 
 `solve(b, out=None)` first scales the right-hand side into a buffer that the factorization object owns, `np.multiply(self.rscale, b, out=self._scaled)`, which gives the bits of legacy's `rscale * rhs` (`rodas.py:191, :200`) without an allocation. It then solves:
 
-- KLU: `lu.solve_into(self._scaled, out)`, a method added to `klu_decomposition` in `Solverz/solvers/klu_backend.py`. It performs the steps of the existing `solve` (`klu_backend.py:338-352`) into the caller's buffer: `np.take(b, perm, out=out)` when the analysis holds a matching, else `np.copyto(out, b)`, then `klu_solve` in place on `out`, and `RuntimeError` on a bad status. The values handed to `klu_solve` are those of `solve`, so the result is byte-equal. `out` must be a C-contiguous float64 vector of length `n` that does not share memory with `b`. The existing `solve` is unchanged, so no legacy caller is affected.
+- KLU: `lu.solve_into(self._scaled, out)`, a method added to `klu_decomposition` in `Solverz/solvers/klu_backend.py`. It performs the steps of the existing `solve` (`klu_backend.py:338-352`) into the caller's buffer: `np.take(b, perm, out=out, mode='clip')` when the analysis holds a matching, else `np.copyto(out, b)`, then `klu_solve` in place on `out`, and `RuntimeError` on a bad status. The values handed to `klu_solve` are those of `solve`, so the result is byte-equal. `out` must be a C-contiguous float64 vector of length `n` that does not share memory with `b`. The existing `solve` is unchanged, so no legacy caller is affected.
 - Dense, default configuration: `dgetrs` on a copy of the scaled vector made into `out`, with `overwrite_b=True`.
 - SuperLU and the dense legacy-compatible path: the backend returns a new array (`laesolver.py:274-277`, `:156-162`), which is copied into `out`. C2 accepts this allocation.
 
 Without `out`, `solve` returns a new array. With `out`, it writes into `out` and returns it; `out` must be C-contiguous and of length `n`, otherwise `ValueError`, since a strided target such as a column of `K` cannot be handed to `klu_solve`.
 
 Recorded at I2. The scaled right-hand side lives in one buffer of the `IterationMatrix` that all its factorizations share, since the backend consumes it before a solve returns, so no factorization allocates one, and `out` may be `b` itself. `solve` also raises `ValueError` for a `b` that is not a vector of length `n`, which `np.multiply` would broadcast silently, and `solve_into` checks both of its vectors, since `klu_solve` writes `n` values through the raw pointer of `out`.
+
+Recorded at the C2 review. The gather passes `mode='clip'`. In its default mode `'raise'`, `np.take` with `out` gathers into a temporary copy of `out` and writes it back, so that an index error cannot leave `out` half written; every KLU solve above the matching threshold then allocated one vector of length `n`, against the allocation rule of Sections 10.3 and 12.2. `perm` is a permutation of `range(n)`, so `'clip'` changes no index and the result is byte-equal. `Integrator.f` gathers the same way.
 
 ### 8.3 Sparse and dense `J` and `M`
 

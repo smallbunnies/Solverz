@@ -369,7 +369,9 @@ class klu_decomposition:
             raise ValueError(f"b must be a float64 vector of length {n}")
         perm = self.symbolic.perm
         if perm is not None:
-            np.take(b, perm, out=out)
+            # mode='clip' gathers straight into out; 'raise' would buffer it.
+            # perm is a permutation, so no index is clipped.
+            np.take(b, perm, out=out, mode='clip')
         else:
             np.copyto(out, b)
         _lib.klu_solve(self.symbolic.ptr, self._num, n, 1, out.ctypes.data_as(POINTER(c_double)),

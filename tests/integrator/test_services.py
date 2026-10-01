@@ -5,14 +5,15 @@ iteration whose remaining error is below ``KAPPA`` in the weighted norm of
 the run, and its slope equals ``F(t, y)`` to the same tolerance; a Newton
 iteration that diverges, converges too slowly or meets a non-finite value
 rejects the attempt. Its weight takes the larger of the iterate and the
-start of the step, and the rate estimate of a call starts the next one
-until the model changes. ``W(gamma)`` is factorized once per ``gamma`` per
+start of the step, and the rate estimate of a call starts the next one until
+the model changes. ``W(gamma)`` is factorized once per ``gamma`` per
 attempt. ``F0``, ``J0`` and ``dFdt()`` are evaluated once per step and kept
 on its retries. ``D`` marks the algebraic rows, a stored zero of ``M``
 included, and is rebuilt when the model changes. ``f`` is ``M^-1 F`` on a
 model whose ``M`` is a scaled permutation, follows a change of ``M``, and
-raises on a model with algebraic equations. ``out=`` gives the bytes of the out-of-place call and,
-for ``F`` and ``f``, allocates no array. Every evaluation is counted.
+raises on a model with algebraic equations. ``out=`` gives the bytes of the
+out-of-place call and, for ``F``, ``f`` and a KLU solve, with or without a
+row matching, allocates no array. Every evaluation is counted.
 
 ``ImplicitEuler`` and ``Trapezoid`` converge with their orders, and ``D``
 keeps an algebraic residual that the consistent initialization left in
@@ -30,6 +31,9 @@ from Solverz.integrator import Algorithm, ImplicitEuler, Trapezoid, solve
 from Solverz.integrator.integrator import Integrator
 from Solverz.integrator.nlsolve import KAPPA
 from Solverz.num_api.num_eqn import nDAE
+from Solverz.solvers import klu_backend
+from Solverz.solvers.klu_backend import KLU_AVAILABLE, klu_decomposition, set_klu_matching
+from Solverz.solvers.laesolver import linsolver
 from Solverz.solvers.option import Opt
 
 pytestmark = pytest.mark.i7a
@@ -557,6 +561,34 @@ def test_F_and_f_into_out_allocate_no_array():
         peak = _peak(lambda: service(0.5, y, out=out))
         print(f"{service.__name__}: peak {peak} bytes into out, against {size} bytes of a state")
         assert peak < size // 4
+
+
+@pytest.mark.skipif(not KLU_AVAILABLE, reason='libklu is not available')
+@pytest.mark.parametrize('matching', [True, False], ids=['matching', 'plain'])
+def test_a_klu_solve_into_out_allocates_no_array(matching):
+    """Under KLU a solve into ``out`` allocates no array, also when the
+    analysis holds a row matching, through which the right-hand side is
+    gathered into ``out``; ``np.take`` in its default mode ``'raise'``
+    buffers the whole vector there."""
+    saved = (klu_backend._MATCHING, klu_backend.MATCHING_MIN_N)
+    set_klu_matching(matching, min_n=2)
+    try:
+        dae, y0 = _big()
+        with linsolver('klu'):
+            integ = Integrator(dae, [0, 1], y0, _Formula(lambda s: None), Opt())
+        W = integ.W(0.5)
+        # the guard: the analysis holds a matching exactly when it is asked for
+        assert isinstance(W.lu, klu_decomposition) and (W.lu.symbolic.perm is not None) == matching
+        b, out = y0 * 1.5, np.empty(N_BIG)
+        size = 8 * N_BIG
+        assert _byte_equal(W.solve(b, out=out), W.solve(b))
+        # the control: the solve into a new array allocates the result
+        assert _peak(lambda: W.solve(b)) >= size
+        peak = _peak(lambda: W.solve(b, out=out))
+        print(f"matching {matching}: peak {peak} bytes into out, against {size} bytes of a state")
+        assert peak < size // 4
+    finally:
+        set_klu_matching(*saved)
 
 
 def test_out_gives_the_bytes_of_the_out_of_place_call(model):
