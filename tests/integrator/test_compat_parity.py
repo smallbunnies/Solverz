@@ -11,6 +11,8 @@ entry, a grid that does not increase, and the controller options. Each
 call gets its own ``Opt``, since legacy writes ``hmax`` and ``facmax`` into
 the one it receives. The step counts agree too, since both runs take the
 same attempts; the residual counts differ by design and are not compared.
+Where legacy never ends, at a fixed step that does not divide the span, the
+configuration stretches its last step to ``tend``.
 
 The negative control runs two calls on one model from different initial
 states and compares each with its own legacy call, so that anything one call
@@ -19,7 +21,7 @@ leaves behind for the next shows as a difference.
 import numpy as np
 import pytest
 
-from Solverz.integrator import Rosenbrock
+from Solverz.integrator import Rosenbrock, init
 from Solverz.solvers.daesolver.rodas.rodas import Rodas
 from Solverz.solvers.klu_backend import KLU_AVAILABLE
 from Solverz.solvers.laesolver import linsolver
@@ -148,3 +150,22 @@ def test_consecutive_calls_under_the_row_matching(klu_matching_low, scheme):
     with linsolver('klu'):
         for y in (y0, _second_state(), y0):
             _parity(dae, y, np.linspace(0, 20, 201), kwargs)
+
+
+@pytest.mark.parametrize('scheme', SCHEMES)
+def test_a_fixed_step_that_does_not_divide_the_span(model, scheme):
+    """Beyond parity: legacy's fixed-step form steps past ``tend`` when the
+    step does not divide the span, and never ends. The compatible
+    configuration stretches its last fixed step to ``tend``, so that the run
+    ends there. The run is driven step by step, so that a run without the
+    stretch fails after ten steps instead of running on."""
+    dae, y0 = model('dae_test')
+    integ = init(dae, [0, 1], y0, alg=Rosenbrock.from_scheme(scheme, legacy_compat=True),
+                 opt=Opt(fix_h=True, hinit=0.3))
+    for _ in range(10):
+        if not integ.step():
+            break
+    assert integ.finished and not integ.failed
+    sol = integ.postamble()
+    assert sol.stats.ret == 'success'
+    assert sol.T.tolist() == [0.0, 0.3, 0.6, 0.8999999999999999, 1.0]
