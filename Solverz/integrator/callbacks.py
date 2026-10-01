@@ -3,11 +3,11 @@ located on the step's interpolant, the adapter of legacy ``opt.event``, and
 discrete callbacks that change the run at the end of a step.
 
 A crossing is found after the step that contains it was accepted, from the
-bottom values of the condition at the start of the step, its values at the
-end and, for the components that may cross, at interior points of the
-interpolant. The step itself is never shortened to find it. ``locate``
-returns the earliest crossing that acts on the run and every crossing up to
-it; the Integrator then handles them at that one time.
+bottom values of the condition at the start of the step, its values at
+interior points of the interpolant and at the end. The step itself is never
+shortened to find it. ``locate`` returns the earliest crossing that acts on
+the run and every crossing up to it; the Integrator then handles them at
+that one time.
 """
 import math
 
@@ -289,11 +289,9 @@ class _ContinuousState:
         from the values ``g``: -1 needs a positive value, +1 a negative one."""
         return ~((self.down[idx] & ~(g > 0)) | (self.up[idx] & ~(g < 0)))
 
-    def eligible(self):
-        """The components that may cross in the step from its start: acting
-        or recorded, nonzero at the start, and in an allowed direction."""
-        g0 = self.g0
-        return self.relevant & (g0 != 0) & self.allowed(slice(None), g0)
+    def allows(self, i, g):
+        """``allowed`` for the one component ``i`` and the nonzero float ``g``."""
+        return not ((self.down[i] and g < 0) or (self.up[i] and g > 0))
 
 
 class _Crossing:
@@ -328,95 +326,104 @@ def _sample_times(integ, npoints):
 
 
 def _brackets(st, integ):
-    """The brackets of the components of ``st`` that cross in the accepted step.
+    """The brackets of the crossings of the components of ``st`` in the accepted step.
 
-    For every eligible component the bracket is the first subinterval of the
-    sample points at whose top it has crossed or is zero, so a crossing that
-    enters and leaves within the step is found, and the first of several. A
-    component that is exactly zero at the start of the step is not crossing
-    there; its reference is the first sample at which it is nonzero, if its
-    direction allows that sign, so that its next crossing is found even
-    inside the same step.
+    Every acting or recorded component is followed from the start of the
+    step through the sample points, against a reference, its last nonzero
+    value. At a sample at which it is zero or of the other sign it has
+    crossed: the subinterval that ends there is its bracket if its direction
+    allows a crossing from the sign of the reference, and the sample becomes
+    the reference either way, so that a crossing against the direction is
+    followed by the next one in it. A component that is zero, at the start
+    of the step or at a sample, is not crossing there, and its next nonzero
+    sample is its reference. An acting component needs only its first
+    crossing, since the run continues from the earliest acting one. A
+    component that only records never shortens the step, so every crossing
+    of it is bracketed. A crossing that enters and leaves between two
+    samples is not seen.
     """
-    tprev, t = integ.tprev, integ.t
+    tprev = integ.tprev
     st.end(integ)
-    npoints = st.cb.interp_points
-    g0, g1 = st.g0, st.g1
-    pending = np.flatnonzero(st.eligible())
-    # without interior samples a component that leaves zero cannot cross
-    # again before the end of the step
-    waiting = np.flatnonzero(st.relevant & (g0 == 0)) if npoints >= 3 else pending[:0]
-    if pending.size == 0 and waiting.size == 0:
+    tracked = np.flatnonzero(st.relevant)
+    if tracked.size == 0:
         return []
+    acting = st.acting
+    fired = st.fired if st.cb.rootfind == 'left' and st.fired is not None and st.fired_t == tprev else None
+    ref = st.g0.copy()
     found = []
-    if npoints < 3:
-        for i in pending[g1[pending] * g0[pending] <= 0]:
-            found.append(_Crossing(st, i, tprev, t, g0[i], g1[i]))
-    else:
-        ref = g0 if waiting.size == 0 else g0.copy()
-        prev_tau, prev_g = tprev, g0
-        for tau in _sample_times(integ, npoints):
-            gk = st.value(integ, tau)
-            if pending.size:
-                hit = gk[pending] * ref[pending] <= 0
-                if hit.any():
-                    for i in pending[hit]:
-                        found.append(_Crossing(st, i, prev_tau, tau, prev_g[i], gk[i]))
-                    pending = pending[~hit]
-            if waiting.size:
-                left = gk[waiting] != 0
-                if left.any():
-                    w = waiting[left]
-                    w = w[st.allowed(w, gk[w])]
-                    ref[w] = gk[w]
-                    pending = np.concatenate((pending, w))
-                    waiting = waiting[~left]
-            if pending.size == 0 and waiting.size == 0:
-                break
-            prev_tau, prev_g = tau, gk
-    if st.cb.rootfind == 'left' and st.fired is not None and st.fired_t == tprev:
-        found = _nudge(st, integ, found)
+    first = True
+    prev_tau, prev_g = tprev, st.g0
+    for tau in _sample_times(integ, st.cb.interp_points):
+        gk = st.value(integ, tau)
+        g, r = gk[tracked], ref[tracked]
+        left = (r == 0) & (g != 0)
+        crossed = (r != 0) & (g * r <= 0)
+        if left.any():
+            w = tracked[left]
+            ref[w] = gk[w]
+        if crossed.any():
+            pos = np.flatnonzero(crossed)
+            c = tracked[pos]
+            ok = st.allowed(c, ref[c])
+            ref[c] = gk[c]
+            done = np.zeros(tracked.size, dtype=bool)
+            for p, i in zip(pos[ok], c[ok]):
+                if first and fired is not None and i in fired:
+                    found += _nudge(st, integ, i, tau, prev_g[i], gk[i])
+                    done[p] = True
+                else:
+                    found.append(_Crossing(st, i, prev_tau, tau, prev_g[i], gk[i]))
+                    done[p] = acting[i]
+            if done.any():
+                tracked = tracked[~done]
+                if tracked.size == 0:
+                    break
+        first = False
+        prev_tau, prev_g = tau, gk
     return found
 
 
-def _nudge(st, integ, found):
-    """Move the bottom of a bracket that starts at an event reported at the
-    start of the step, of a component that fired there, to ``tn``, by
-    ``repeat_nudge`` of the step; a component that has crossed by ``tn``
-    crosses the surface it was reported on, and has no event in this step."""
+def _nudge(st, integ, i, top, gl, gr):
+    """The crossings of component ``i`` of a ``'left'`` callback that fired at
+    the start of the step, whose first crossing lies in the bracket from the
+    start to ``top``, with the values ``gl`` and ``gr`` at its ends.
+
+    The condition is evaluated at ``tn``, ``repeat_nudge`` of the step after
+    its start. If the component has not crossed by ``tn``, which lies before
+    ``top``, its bracket starts at ``tn``. Otherwise its crossing up to ``tn``
+    is the event already reported: it has crossed the surface it was
+    reported on, or crossed it and returned within the nudge interval, and
+    its crossings are those after ``tn``.
+    """
     tprev = integ.tprev
     tn = tprev + st.cb.repeat_nudge * (integ.t - tprev)
-    kept = []
-    for c in found:
-        if c.bottom != tprev or c.i not in st.fired:
-            kept.append(c)
-            continue
-        gn = float(st.value(integ, tn)[c.i])
-        if gn * c.gl <= 0:
-            continue
-        if tn < c.top:
-            c.bottom, c.gl = tn, gn
-            kept.append(c)
-            continue
-        # the bracket lies inside the nudge interval, and the component is
-        # back on its side by tn: a crossing after tn is a new event
-        c = _bracket_after(st, integ, c.i, tn, gn)
-        if c is not None:
-            kept.append(c)
-    return kept
+    gn = float(st.value(integ, tn)[i])
+    if gn * gl > 0 and tn < top:
+        found = [_Crossing(st, i, tn, top, gn, gr)]
+        return found if st.acting[i] else found + _scan(st, integ, i, top, gr)
+    return _scan(st, integ, i, tn, gn)
 
 
-def _bracket_after(st, integ, i, tb, gb):
-    """The first bracket of component ``i`` after ``tb``, with ``gb != 0`` its
-    value there, whose top is a sample point; ``None`` without one."""
+def _scan(st, integ, i, tb, gb):
+    """The crossings of component ``i`` after the time ``tb``, at which its
+    value is ``gb``, over the sample points after ``tb``, by the rules of
+    ``_brackets``."""
+    found = []
+    ref = gb
     for tau in _sample_times(integ, st.cb.interp_points):
         if tau <= tb:
             continue
         gk = float(st.value(integ, tau)[i])
-        if gk * gb <= 0:
-            return _Crossing(st, i, tb, tau, gb, gk)
+        if ref == 0.0:
+            ref = gk
+        elif gk * ref <= 0.0:
+            if st.allows(i, ref):
+                found.append(_Crossing(st, i, tb, tau, gb, gk))
+                if st.acting[i]:
+                    break
+            ref = gk
         tb, gb = tau, gk
-    return None
+    return found
 
 
 def _root(c, te, integ):
@@ -464,11 +471,11 @@ def locate(integ, states):
 
     Returns ``(te, found)``. ``te`` is the earliest root of an acting
     component, or ``None``. ``found`` holds the crossings, with their
-    ``root``, of every acting or recorded component whose root lies at or
-    before ``te``, or of every recorded component when no acting one
-    crosses, in increasing time, ties by callback and then by index. The
-    acting components are located first, in increasing order of their
-    bracket bottoms; a component whose root cannot lie at or before the
+    ``root``, whose root lies at or before ``te``, or every crossing when no
+    acting component crosses: the first of each acting component and all of
+    each recorded one, in increasing time, ties by callback and then by
+    index. The acting components are located first, in increasing order of
+    their bracket bottoms; a component whose root cannot lie at or before the
     earliest root found so far costs at most one evaluation instead of a
     search. An acting component whose root lies after an earlier root found
     later is located again against it. The recorded ones follow against the

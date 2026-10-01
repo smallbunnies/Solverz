@@ -6,17 +6,18 @@ exactly zero at the start of a step is not a crossing, so nothing is
 reported at the initial point of a call, a zero at a step end is reported
 once, and a component that leaves zero is reported at its next crossing if
 its direction allows it. Samples of the interpolant find a crossing that
-enters and leaves within one step, and the first of several. The earliest
-crossing of a terminal component ends the run with ``T[-1] == te`` and the
-last row equal to the recorded state, on every output, in both
-configurations, with the rows at ``te`` that ``save_positions`` selects.
-Every component that crosses at that time is reported with it, and
-crossings of recorded components before it are logged without shortening
-the step. The adapter of ``opt.event`` takes its traits from the end of
-each step. An affect changes the run at the event time; the rows before it
-are those of the step as computed, and a crossing it leaves in place is
-reported once, also by a callback that only records it and after a second
-change at the same time.
+enters and leaves within one step, every crossing of a component that only
+records, and the first crossing in its direction of an acting one, also
+after a crossing against it in the same step. The earliest crossing of a
+terminal component ends the run with ``T[-1] == te`` and the last row equal
+to the recorded state, on every output, in both configurations, with the
+rows at ``te`` that ``save_positions`` selects. Every component that crosses
+at that time is reported with it, and crossings of recorded components
+before it are logged without shortening the step. The adapter of
+``opt.event`` takes its traits from the end of each step. An affect changes
+the run at the event time; the rows before it are those of the step as
+computed, and a crossing it leaves in place is reported once, also by a
+callback that only records it and after a second change at the same time.
 """
 import math
 from types import SimpleNamespace
@@ -374,6 +375,65 @@ def test_the_first_of_three_crossings_in_one_step(model, legacy_compat):
     assert sol.T[-1] == sol.te[0] and _byte_equal(sol.Y[-1], sol.ye[0])
 
 
+# steps of 4 on [0, 8]: the ball passes 10 upwards and downwards inside the first step
+LONG_STEPS = dict(hinit=4.0, hmax=4.0)
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+@pytest.mark.parametrize('direction', [0, -1, +1])
+def test_every_crossing_of_a_recorded_component_in_one_step(model, legacy_compat, direction):
+    """A component that only records never shortens the step, so each of its
+    crossings in one step is logged that its direction allows: with -1 the
+    descent, which follows an ascent against the direction, and with 0
+    both. The adapter of ``opt.event`` records the same."""
+    dae, y0 = model('ball')
+    up, down = _level_times(10.0)
+    expected = {0: [up, down], -1: [down], +1: [up]}[direction]
+    alg = Rodas4(legacy_compat=legacy_compat)
+    cb = ContinuousCallback(lambda t, y, integ: y[0] - 10, direction=direction, record=True)
+    runs = [solve(dae, [0, 8], y0, alg=alg, opt=Opt(**LONG_STEPS), callbacks=[cb]),
+            alg(dae, [0, 8], y0, Opt(event=_event(lambda t, y: y[0] - 10, [0], [direction]), **LONG_STEPS))]
+    for sol in runs:
+        assert sol.stats.ret == 'success' and sol.T.tolist() == [0.0, 4.0, 8.0]
+        np.testing.assert_allclose(sol.te, expected, rtol=1e-9)
+        assert sol.ie.tolist() == [0] * len(expected)
+        np.testing.assert_allclose(sol.ye[:, 0], 10.0, rtol=1e-9)
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+def test_every_recorded_crossing_before_te_in_one_step(model, legacy_compat):
+    """Both crossings of 10 by a recorded component lie in the first step,
+    before the terminal component of another callback stops the run at 3.9,
+    and both are logged."""
+    dae, y0 = model('ball')
+    up, down = _level_times(10.0)
+    record = ContinuousCallback(lambda t, y, integ: y[0] - 10, record=True)
+    stop = ContinuousCallback(lambda t, y, integ: t - 3.9, terminal=True)
+    sol = solve(dae, [0, 8], y0, alg=Rodas4(legacy_compat=legacy_compat), opt=Opt(**LONG_STEPS),
+                callbacks=[record, stop])
+    assert sol.stats.ret == 'terminated' and sol.stats.nstep == 1
+    assert abs(sol.T[-1] - 3.9) <= 1e-15
+    np.testing.assert_allclose(sol.te, [up, down], rtol=1e-9)
+    assert sol.ie.tolist() == [0, 0]
+
+
+@pytest.mark.i6a
+@pytest.mark.parametrize('legacy_compat', CONFIGS)
+def test_an_acting_crossing_after_one_against_its_direction(model, legacy_compat):
+    """Inside the first step the ball passes 10 upwards, against the direction
+    -1 of the terminal component, and then downwards, which stops the run."""
+    dae, y0 = model('ball')
+    _, down = _level_times(10.0)
+    cb = ContinuousCallback(lambda t, y, integ: y[0] - 10, direction=-1, terminal=True, record=True)
+    sol = solve(dae, [0, 8], y0, alg=Rodas4(legacy_compat=legacy_compat), opt=Opt(**LONG_STEPS),
+                callbacks=[cb])
+    assert sol.stats.ret == 'terminated' and sol.stats.nstep == 1
+    np.testing.assert_allclose(sol.te, [down], rtol=1e-9)
+    assert sol.T[-1] == sol.te[0] and _byte_equal(sol.Y[-1], sol.ye[0])
+
+
 @pytest.mark.i6a
 def test_a_crossing_that_enters_and_leaves_within_one_step(model):
     """``g = (t - 0.5)**2 - 1e-4`` is negative on ``(0.49, 0.51)`` only. The
@@ -624,6 +684,44 @@ def test_the_repeat_nudge():
     # tn = 0.6 lies after the first sample 0.5: component 0 has crossed by tn,
     # 1 and 3 are back on their side, and only 1 crosses again, at 0.8
     assert _nudged(condition, 0.6, 3, [0, 1, 3]) == {1: (0.6, 1.0), 2: (0.0, 0.5)}
+
+    # a component that only records and has crossed by tn = 0.1, the event
+    # already reported, is followed from tn and crosses back after 0.5
+    def condition(t):
+        return np.array([(0.05 - t) * (0.6 - t)])
+
+    assert _nudged(condition, 0.1, 3, [0]) == {0: (0.5, 1.0)}
+
+
+def _all_brackets(condition, **kwargs):
+    """``(i, bottom, top)`` of every bracket in the step ``[0, 1]``, sampled at
+    multiples of 0.2."""
+    cb = ContinuousCallback(lambda t, y, integ: condition(t), interp_points=6, **kwargs)
+    integ = _Step(0.0)
+    st = _ContinuousState(cb, 0, integ)
+    integ.t = 1.0
+    return sorted((c.i, c.bottom, c.top) for c in _brackets(st, integ))
+
+
+@pytest.mark.i6a
+def test_the_brackets_of_every_crossing_of_a_recorded_component():
+    """``g = (t - 0.1)(t - 0.5)(t - 0.7)`` changes sign between the samples 0
+    and 0.2, 0.4 and 0.6, and 0.6 and 0.8. A component that only records has
+    a bracket for each change its direction allows, and a change against its
+    direction moves its reference only; a terminal twin has the bracket of
+    its first crossing only."""
+    def g(t):
+        return (t - 0.1) * (t - 0.5) * (t - 0.7)
+
+    def twins(t):
+        return np.array([g(t), g(t)])
+
+    assert _all_brackets(twins, record=True, terminal=[False, True]) == [
+        (0, 0.0, 0.2), (0, 0.4, 0.6), (0, 0.6, 0.8), (1, 0.0, 0.2)]
+    assert _all_brackets(twins, record=True, terminal=[False, True], direction=-1) == [
+        (0, 0.4, 0.6), (1, 0.4, 0.6)]
+    assert _all_brackets(twins, record=True, terminal=[False, True], direction=+1) == [
+        (0, 0.0, 0.2), (0, 0.6, 0.8), (1, 0.0, 0.2)]
 
 
 @pytest.mark.i7b
