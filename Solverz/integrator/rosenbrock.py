@@ -112,9 +112,10 @@ class Rosenbrock(Algorithm):
     ``error_order`` are then the tableau's ``pord``. ``interpolation`` is
     ``'ntrp1'``, the dense output of the tableau's ``c``, ``d`` and ``e``,
     ``'hermite'``, the cubic Hermite interpolant between the two ends of the
-    step and their slopes, or ``'linear'``; a subclass that does not state it
-    gets ``'ntrp1'`` when the tableau has ``c``, ``d`` and ``e`` and
-    ``'linear'`` otherwise.
+    step and their slopes, or ``'linear'``; a class that states a tableau
+    and not ``interpolation`` gets ``'ntrp1'`` when the tableau has ``c``,
+    ``d`` and ``e`` and ``'linear'`` otherwise, whatever its parent states,
+    since the parent's choice describes the parent's tableau.
 
     ``legacy_compat=True`` selects the configuration that reproduces legacy
     Rodas. The argument is keyword-only, so that a class passed where an

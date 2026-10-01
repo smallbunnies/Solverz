@@ -37,7 +37,8 @@ class Algorithm:
 
     Traits: ``scheme`` names the method in ``Stats`` and messages; ``order``
     is its order; the error estimate is ``O(h**error_order)``, which sets the
-    controller exponent ``1/error_order``; ``interp_order`` is the order of
+    controller exponent ``1/error_order``, with ``order`` in place of
+    ``error_order`` when that is ``None``; ``interp_order`` is the order of
     the interpolant; ``adaptive`` is true when ``perform_step`` returns an
     error estimate; ``explicit`` is true when the method never solves with
     ``W``; ``norm`` is ``'rms'`` or ``'max'``.
