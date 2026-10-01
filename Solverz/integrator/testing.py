@@ -259,8 +259,11 @@ def _contract(kit):
         dae, y0 = kit.model('A')
         try:
             init(dae, [0, 1], y0, alg, kit.opt())
-        except TypeError:
-            pass
+        except TypeError as e:
+            # the core's refusal, and not a TypeError of the algorithm's own
+            _require('is explicit and cannot integrate a model with algebraic equations' in str(e),
+                     f"the Integrator raised on a model with an algebraic equation, but not for the "
+                     f"explicit trait: TypeError: {e}")
         else:
             raise _Failed("the Integrator accepted an explicit algorithm on a model with an algebraic "
                           "equation")

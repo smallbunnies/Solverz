@@ -319,6 +319,17 @@ def test_contract_rejects_bad_traits(traits, message):
     assert message in _fails(alg, 'contract')
 
 
+def test_contract_rejects_a_refusal_of_an_explicit_algorithm_for_another_reason(monkeypatch):
+    """The core refuses an explicit algorithm on A with its own message; any
+    other ``TypeError`` from ``init`` is no such refusal."""
+    def refuses(self, *args, **kwargs):
+        raise TypeError('an unrelated error')
+
+    monkeypatch.setattr(Integrator, '__init__', refuses)
+    message = _fails(_ExplicitEuler(), 'contract', run=_check, names=('contract',))
+    assert 'not for the explicit trait: TypeError: an unrelated error' in message
+
+
 def test_contract_rejects_a_step_of_the_wrong_style():
     assert 'does not define perform_step' in _fails(_NoPerformStep(), 'contract')
     assert 'inplace = True needs 2' in _fails(_WrongStyle(), 'contract')
