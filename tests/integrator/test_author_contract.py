@@ -6,14 +6,15 @@ break the contract. A subclass may change the style and keeps every hook of
 its parent, and a Rosenbrock method is its table.
 
 ``check_algorithm`` passes for every built-in algorithm and for toy
-algorithms of the other traits: explicit, and without an error estimate. Each
-check rejects an algorithm broken in the way the check guards against, and
-each broken algorithm below passes every earlier check. The checks ``Opt``
-and ``y0`` are shown alone. The contract gives no algorithm access to the
-caller's ``Opt`` or ``y0``, so ``y0`` fails only with a core that writes the
-initial state. An algorithm with a state across calls breaks the
-repeatability that ``Opt`` checks, but the two calls of ``saveat`` meet it
-first.
+algorithms of the other traits: explicit, and without an error estimate.
+Each check rejects an algorithm broken in the way the check guards against,
+and each broken algorithm below passes every earlier check; an algebraic
+variable left wrong by the step, or interpolated wrongly, is rejected
+although ``x`` stays accurate. The checks ``Opt`` and ``y0`` are shown
+alone. The contract gives no algorithm access to the caller's ``Opt`` or
+``y0``, so ``y0`` fails only with a core that writes the initial state. An
+algorithm with a state across calls breaks the repeatability that ``Opt``
+checks, but the two calls of ``saveat`` meet it first.
 """
 import re
 from types import SimpleNamespace
@@ -278,15 +279,16 @@ class _ClearedFsalTrapezoid(_FsalTrapezoid):
 
 # explicit Euler overflows on C, as it should
 @pytest.mark.filterwarnings('ignore:overflow encountered:RuntimeWarning')
-@pytest.mark.parametrize('alg, skipped', [(_Heun(), ('inconsistent start',)),
-                                          (_ExplicitEuler(), ('inconsistent start',)),
+@pytest.mark.parametrize('alg, skipped', [(_Heun(), ('algebraic event', 'inconsistent start')),
+                                          (_ExplicitEuler(), ('algebraic event', 'inconsistent start')),
                                           (_ClearedFsalTrapezoid(), ())],
                          ids=['explicit', 'fixed_step', 'history_cleared'])
 def test_toy_algorithms_pass_the_kit(alg, skipped):
-    """An explicit algorithm runs on E and skips the inconsistent start; one
-    without an error estimate runs with the fixed step ``2**-6``, and explicit
-    Euler, whose numerical solution of ``x' = x**3`` overflows only after the
-    blow-up at 0.5, still fails before the end."""
+    """An explicit algorithm runs on E and skips the algebraic event and the
+    inconsistent start; one without an error estimate runs with the fixed
+    step ``2**-6``, and explicit Euler, whose numerical solution of ``x' =
+    x**3`` overflows only after the blow-up at 0.5, still fails before the
+    end."""
     results = check_algorithm(alg)
     assert tuple(results) == tuple(c for c in CHECKS[:-1] if c not in skipped)
     main = ('E',) if alg.explicit else ('A', 'P')
@@ -344,6 +346,34 @@ def test_order_rejects_an_order_the_method_does_not_reach():
     assert 'is below 5 - 0.3' in _fails(_Overclaimed(), 'order')
 
 
+def _algebraic(integ):
+    """The variables whose columns of ``M`` hold no nonzero value."""
+    return np.flatnonzero(np.asarray(abs(integ.M).sum(axis=0)).ravel() == 0)
+
+
+class _FrozenAlgebraic(Rodas4):
+    """Keeps every algebraic variable at its value at the start of the step,
+    as a step built from the slopes of the differential rows alone does, and
+    interpolates it so, consistently with the step. ``x`` stays accurate,
+    since every stage solves the algebraic equation again."""
+
+    scheme = 'frozen_algebraic'
+
+    def perform_step(self, integ, cache):
+        super().perform_step(integ, cache)
+        alg = _algebraic(integ)
+        integ.u[alg] = integ.uprev[alg]
+
+    def interpolant(self, integ, cache, theta, out):
+        super().interpolant(integ, cache, theta, out)
+        alg = _algebraic(integ)
+        out[alg] = integ.uprev[alg]
+
+
+def test_order_rejects_an_algebraic_variable_that_the_step_leaves_wrong():
+    assert 'is below 4 - 0.3' in _fails(_FrozenAlgebraic(), 'order')
+
+
 class _OverclaimedDense(Rodas4):
     scheme = 'overclaimed_dense'
     interp_order = 5
@@ -367,10 +397,23 @@ class _HeldEnd(Rodas4):
         np.copyto(out, integ.u_step)
 
 
+class _SecantAlgebraic(Rodas4):
+    """Interpolates the algebraic variables along the secant of the step, an
+    interpolant of order 2 where Rodas4 declares 3; ``x`` keeps its own."""
+
+    scheme = 'secant_algebraic'
+
+    def interpolant(self, integ, cache, theta, out):
+        super().interpolant(integ, cache, theta, out)
+        alg = _algebraic(integ)
+        out[alg] = integ.uprev[alg] + theta * (integ.u_step[alg] - integ.uprev[alg])
+
+
 @pytest.mark.parametrize('alg, message', [(_OverclaimedDense(), 'largest interpolation errors'),
+                                          (_SecantAlgebraic(), 'largest interpolation errors'),
                                           (_HeldStart(), 'at theta = 1 deviates from the end'),
                                           (_HeldEnd(), 'at theta = 0 is not uprev')],
-                         ids=['order', 'end', 'start'])
+                         ids=['order', 'algebraic', 'end', 'start'])
 def test_interpolant_rejects_a_wrong_interpolant(alg, message):
     assert message in _fails(alg, 'interpolant')
 
@@ -442,6 +485,22 @@ class _ReadsU(Rodas3):
 
 def test_events_on_a_grid_rejects_an_interpolant_that_reads_u():
     assert 'a row saved before the event differs' in _fails(_ReadsU(), 'events on a grid')
+
+
+class _WrongBetweenSamples(Rodas4):
+    """Adds ``0.1 sin(4 pi theta)`` to the algebraic variables, which vanishes
+    at the points 0, 0.25, 0.5, 0.75 and 1 that the interpolant check reads,
+    and moves a crossing of ``z`` located between them."""
+
+    scheme = 'wrong_between_samples'
+
+    def interpolant(self, integ, cache, theta, out):
+        super().interpolant(integ, cache, theta, out)
+        out[_algebraic(integ)] += 0.1 * np.sin(4 * np.pi * theta)
+
+
+def test_algebraic_event_rejects_a_wrong_interpolant_of_an_algebraic_variable():
+    assert 'z reaches 0.5 at' in _fails(_WrongBetweenSamples(), 'algebraic event')
 
 
 class _WithoutD(ImplicitEuler):

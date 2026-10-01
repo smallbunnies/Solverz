@@ -19,7 +19,7 @@ import numpy as np
 
 from Solverz.num_api.num_eqn import nDAE
 from Solverz.integrator.algorithm import check_style
-from Solverz.integrator.callbacks import preset_time_callback
+from Solverz.integrator.callbacks import ContinuousCallback, preset_time_callback
 from Solverz.integrator.integrator import init, solve
 
 __all__ = ['check_algorithm']
@@ -35,7 +35,10 @@ MAX_STEP_DIFFERENCE = 2
 MAX_DY_IN_RTOL = 10
 
 CHECKS = ('contract', 'order', 'interpolant', 'saveat', 'tstops', 'events', 'events on a grid',
-          'inconsistent start', 'history', 'failure', 'out', 'Opt', 'y0', 'counts', 'rendered')
+          'algebraic event', 'inconsistent start', 'history', 'failure', 'out', 'Opt', 'y0', 'counts',
+          'rendered')
+# the checks that need an algebraic equation, which an explicit algorithm cannot integrate
+ALGEBRAIC = ('algebraic event', 'inconsistent start')
 
 
 def rendered_matches_inline(rendered, inline, rtol):
@@ -61,8 +64,9 @@ def check_algorithm(alg, *, order_tol=0.3, rendered=False):
     values it measured. Which models and step sizes a check uses depends only
     on the declared traits: an explicit algorithm runs on an ODE, and an
     algorithm without an error estimate with the fixed step ``2**-6``. The
-    measured orders must reach the declared ``order`` and ``interp_order``
-    within ``order_tol``. ``rendered=True`` adds the comparison with a model
+    orders measured from the errors of every variable, the algebraic ones
+    included, must reach the declared ``order`` and ``interp_order`` within
+    ``order_tol``. ``rendered=True`` adds the comparison with a model
     rendered by ``module_printer``, which compiles it with Numba.
     """
     names = CHECKS if rendered else CHECKS[:-1]
@@ -87,7 +91,7 @@ def _check(alg, names, order_tol=0.3):
     for name in CHECKS:
         if name not in names:
             continue
-        if name == 'inconsistent start' and kit.explicit:
+        if name in ALGEBRAIC and kit.explicit:
             continue
         try:
             results[name] = _CHECK[name](kit)
@@ -112,8 +116,25 @@ def _byte_equal(a, b):
     return a.dtype == b.dtype and a.shape == b.shape and a.tobytes() == b.tobytes()
 
 
-def _x_exact(t):
-    return 0.5 * (np.exp(-t) + np.sin(t) - np.cos(t))
+# the exact solution of every variable of A, P and E with k = 1
+_EXACT = {'x': lambda t: 0.5 * (np.exp(-t) + np.sin(t) - np.cos(t)), 'z': np.sin, 's': np.sin, 'c': np.cos}
+
+
+def _exact(y0v):
+    """The exact solution of A, P or E, whose ``Vars`` is ``y0v``: a function
+    of ``t`` that returns one row per time, its entries in the order of
+    ``y0v``."""
+    columns = [(_EXACT[var], int(idx[0])) for var, idx in y0v.a.v.items()]
+    n = int(y0v.a.total_size)
+
+    def exact(t):
+        t = np.asarray(t, dtype=np.float64)
+        out = np.empty(t.shape + (n,))
+        for f, j in columns:
+            out[..., j] = f(t)
+        return out
+
+    return exact
 
 
 def _steps(integ):
@@ -145,7 +166,8 @@ def _symbolic(sz, name):
     A: ``x' = -x + z``, ``0 = z - k s``, ``s' = c``, ``c' = -s`` from ``x = z =
     s = 0``, ``c = 1``, with ``k = 1``; the forcing is carried by an
     oscillator, so that ``dF/dt`` is zero and cannot limit a measured order,
-    and ``x(t) = (exp(-t) + sin t - cos t)/2``. P: A with its equations
+    and ``x(t) = (exp(-t) + sin t - cos t)/2``, ``z(t) = s(t) = sin t``,
+    ``c(t) = cos t``. P: A with its equations
     declared as ``c'``, ``z``, ``x'``, ``s'``, so that the rows of ``M`` are not
     aligned with the variables. E: A without ``z``, declared as ``c'``, ``x'``,
     ``s'``, so that ``M`` is a permutation. A_delta: A from ``z = 1e-7``,
@@ -273,14 +295,17 @@ def _contract(kit):
 def _fixed_step_runs(kit):
     """Per main model, the runs with ``h = 2**-k``, ``k = 1..6``, through ``step()``.
 
-    Each run gives the largest error of ``x`` over its saved rows and the
-    largest error of ``x`` interpolated at ``theta`` 0.25, 0.5 and 0.75 of
-    every step. The first fault of the interpolant is kept for the
+    Each run gives the largest error over its saved rows and the largest
+    error interpolated at ``theta`` 0.25, 0.5 and 0.75 of every step, both
+    over every variable. A wrong algebraic variable need not show in ``x``,
+    since every stage solves the algebraic equation again, so ``x`` never
+    sees a stale ``z``. The first fault of the interpolant is kept for the
     interpolant check, so that the order check reads only the steps.
     """
     runs = {}
     for name in kit.main:
         dae, y0 = kit.model(name)
+        exact = _exact(kit.vars(name))
         run = SimpleNamespace(errors=[], interior=[], end_deviation=0.0, fault=None)
         for k in ORDER_STEPS:
             opt = kit.opt(fix_h=True, hinit=2.0 ** -k, rtol=1e-12, atol=1e-14)
@@ -290,21 +315,21 @@ def _fixed_step_runs(kit):
                 if run.fault is not None:
                     continue
                 try:
-                    worst = max(worst, _interpolate_step(integ, run))
+                    worst = max(worst, _interpolate_step(integ, run, exact))
                 except _Failed as e:
                     run.fault = f"on {name} with h = 2**-{k} {e}"
                 except Exception as e:
                     run.fault = f"on {name} with h = 2**-{k} the interpolant raised {type(e).__name__}: {e}"
             sol = integ.solve()
             _succeeded(sol, f"the run on {name} with h = 2**-{k}")
-            run.errors.append(float(np.max(np.abs(sol.Y[:, 0] - _x_exact(sol.T)))))
+            run.errors.append(float(np.max(np.abs(sol.Y - exact(sol.T)))))
             run.interior.append(worst)
         runs[name] = run
     return runs
 
 
-def _interpolate_step(integ, run):
-    """The largest interior error of ``x`` in the step just accepted.
+def _interpolate_step(integ, run, exact):
+    """The largest interior error in the step just accepted, over every variable.
 
     The two ends are evaluated through the algorithm's interpolant, since
     ``interp`` returns ``uprev`` and ``u`` themselves there: ``theta = 0`` must
@@ -323,7 +348,7 @@ def _interpolate_step(integ, run):
     worst = 0.0
     for theta in (0.25, 0.5, 0.75):
         tq = integ.tprev + theta * integ.dt_step
-        worst = max(worst, abs(integ.interp(tq)[0] - _x_exact(tq)))
+        worst = max(worst, float(np.max(np.abs(integ.interp(tq) - exact(tq)))))
     return worst
 
 
@@ -344,11 +369,11 @@ def _order_criterion(kit, errors, declared, what, model):
 
 
 def _order(kit):
-    """The largest error of ``x`` over the saved rows, since the error at ``t = 1``
+    """The largest error over the saved rows, since the error at ``t = 1``
     alone can be ruled by a higher-order term where the first-order error
     coefficient passes near zero, as for ``ImplicitEuler`` on A."""
     runs = kit.memo('fixed', lambda: _fixed_step_runs(kit))
-    return {name: _order_criterion(kit, r.errors, kit.alg.order, 'largest errors of x', name)
+    return {name: _order_criterion(kit, r.errors, kit.alg.order, 'largest errors', name)
             for name, r in runs.items()}
 
 
@@ -358,7 +383,7 @@ def _interpolant(kit):
     for name, r in runs.items():
         _require(r.fault is None, r.fault)
         out[name] = _order_criterion(kit, r.interior, kit.alg.interp_order,
-                                     'largest interpolation errors of x', name)
+                                     'largest interpolation errors', name)
         out[name]['end_deviation'] = r.end_deviation
     return out
 
@@ -462,6 +487,25 @@ def _events_on_grid(kit):
     _require(_byte_equal(with_event.T[:n], without.T[:n]) and _byte_equal(with_event.Y[:n], without.Y[:n]),
              "a row saved before the event differs from the run without the event")
     return {'rows': n}
+
+
+def _algebraic_event(kit):
+    """A terminal crossing of the algebraic variable ``z = sin t`` of A through
+    0.5, at ``pi/6``, located on the interpolant of ``z``."""
+    dae, y0 = kit.model('A')
+    iz = int(kit.vars('A').a.v['z'][0])
+    cb = ContinuousCallback(lambda t, y, integ: y[iz] - 0.5, direction=1, terminal=True, record=True)
+    sol = solve(dae, [0, 1], y0, kit.alg, kit.opt(rtol=1e-6, atol=1e-8), callbacks=[cb])
+    te_exact = math.pi / 6
+    tol = 1e-3 * te_exact if kit.adaptive else 10 * H_FIX
+    _require(sol.stats.ret == 'terminated', f"the run ended with ret = {sol.stats.ret!r}, not where z "
+                                            f"reaches 0.5")
+    te = float(sol.te[0])
+    _require(abs(te - te_exact) <= tol,
+             f"z reaches 0.5 at {te!r}, {abs(te - te_exact):.3e} from {te_exact!r}")
+    _require(sol.T[-1] == te and _byte_equal(sol.Y[-1], sol.ye[0]),
+             "the run does not end at the event with its recorded state")
+    return {'te': te, 'deviation': abs(te - te_exact)}
 
 
 def _inconsistent_start(kit):
@@ -636,6 +680,7 @@ _CHECK = {
     'tstops': _tstops,
     'events': _events,
     'events on a grid': _events_on_grid,
+    'algebraic event': _algebraic_event,
     'inconsistent start': _inconsistent_start,
     'history': _history,
     'failure': _failure,
