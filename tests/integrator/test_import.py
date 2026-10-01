@@ -36,6 +36,15 @@ ALLOWED = {
 }
 
 
+def _absolute(node, path):
+    """The absolute name of the module of the ``ImportFrom`` ``node`` in ``path``."""
+    if not node.level:
+        return node.module
+    pkg = path.parent.relative_to(PACKAGE.parent).parts
+    base = '.'.join(pkg[:len(pkg) - node.level + 1])
+    return f"{base}.{node.module}" if node.module else base
+
+
 def _module_level_imports(path):
     """Absolute names imported by the statements that run at import time,
     including those under a module-level ``if`` or ``try``."""
@@ -47,12 +56,7 @@ def _module_level_imports(path):
         if isinstance(node, ast.Import):
             names += [a.name for a in node.names]
         elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                pkg = path.parent.relative_to(PACKAGE.parent).parts
-                base = '.'.join(pkg[:len(pkg) - node.level + 1])
-                names.append(f"{base}.{node.module}" if node.module else base)
-            else:
-                names.append(node.module)
+            names.append(_absolute(node, path))
         elif isinstance(node, (ast.If, ast.Try)):
             for field in ('body', 'orelse', 'finalbody'):
                 stack += getattr(node, field, [])
@@ -61,13 +65,23 @@ def _module_level_imports(path):
     return names
 
 
-def _all_imports(path):
-    tree = ast.parse(path.read_text(), filename=str(path))
-    for node in ast.walk(tree):
+def _all_imports(path, source=None):
+    """Absolute names of every import in ``path``, or in ``source`` read as
+    that file; relative imports are resolved, and ``from X import y`` also
+    gives ``X.y``, since ``y`` may be a submodule, as in ``from Solverz
+    import integrator``."""
+    text = path.read_text() if source is None else source
+    for node in ast.walk(ast.parse(text, filename=str(path))):
         if isinstance(node, ast.Import):
             yield from (a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            yield node.module
+        elif isinstance(node, ast.ImportFrom):
+            base = _absolute(node, path)
+            yield base
+            yield from (f"{base}.{a.name}" for a in node.names)
+
+
+def _is_integrator(name):
+    return name == 'Solverz.integrator' or name.startswith('Solverz.integrator.')
 
 
 def test_integrator_imports_only_the_allowed_solverz_modules():
@@ -88,7 +102,21 @@ def test_no_module_outside_the_integrator_imports_it():
         if {'test', 'tests'} & set(rel.parts[:-1]):
             continue
         for name in _all_imports(path):
-            assert not name.startswith('Solverz.integrator'), f"{rel} imports {name}"
+            assert not _is_integrator(name), f"{rel} imports {name}"
+
+
+@pytest.mark.parametrize('source', [
+    'from ....integrator import Algorithm',
+    'from .... import integrator',
+    'from Solverz import integrator',
+    'from Solverz.integrator.rosenbrock import Rodas4',
+    'import Solverz.integrator',
+    'def f():\n    from ....integrator import solve\n'])
+def test_the_scan_sees_every_form_of_an_import_of_the_integrator(source):
+    # read as a legacy module four packages below Solverz, which imports
+    # its neighbours in the relative form
+    path = PACKAGE / 'solvers' / 'daesolver' / 'rodas' / 'rodas.py'
+    assert any(_is_integrator(name) for name in _all_imports(path, source)), source
 
 
 @pytest.mark.parametrize('module', ['Solverz.integrator'] + sorted(

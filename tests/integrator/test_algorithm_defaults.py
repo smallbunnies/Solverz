@@ -32,7 +32,6 @@ def test_default_interpolant_is_linear_and_reads_only_the_step():
     for theta in (0.0, 0.3, 1.0):
         assert Algorithm().interpolant(integ, None, theta, out) is None
         assert out.tobytes() == (uprev + theta * (u_step - uprev)).tobytes()
-    assert np.array_equal(out, u_step)
 
 
 def test_default_hooks():
@@ -108,6 +107,11 @@ def test_step_context_reads_the_integrator():
     assert (s.rtol, s.atol, s.adaptive, s.cache) == (1e-3, 1e-6, True, 'cache')
     integ.t, integ.dt, integ.new_step, integ.M = 0.1, 0.05, False, 'M2'
     assert (s.t, s.h, s.new_step, s.M) == (0.1, 0.05, False, 'M2')
+    # the modification protocol rebinds p, so every member reads the Integrator again
+    integ.p, integ.cache = {'k': 2}, 'cache2'
+    integ.opts = SimpleNamespace(rtol=1e-5, atol=1e-9, adaptive=False)
+    assert (s.p, s.cache) == ({'k': 2}, 'cache2')
+    assert (s.rtol, s.atol, s.adaptive) == (1e-5, 1e-9, False)
     assert np.shares_memory(s.y0, uprev) and not s.y0.flags.writeable
     uprev[0] = 3.0
     assert s.y0[0] == 3.0

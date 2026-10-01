@@ -268,13 +268,38 @@ def test_out_must_be_a_contiguous_float64_vector(model, backend):
                 list(range(n))):
         with pytest.raises(ValueError):
             W.solve(b, out=out)
-    with pytest.raises(ValueError):
-        W.solve(np.ones(n + 1))
-    with pytest.raises(ValueError):
-        W.solve(np.ones((n, 1)))
+    # the scaling by rscale broadcasts a b of length 1 or a scalar without an
+    # error, so only the check of b's shape refuses them
+    for b_bad in (np.ones(n + 1), np.ones((n, 1)), np.ones(1), np.float64(1.0)):
+        with pytest.raises(ValueError, match='b must be a vector of length'):
+            W.solve(b_bad)
     assert im.stats.nsolve == 0
     W.solve(b, out=K[:, 0].copy())
     assert im.stats.nsolve == 1
+
+
+@pytest.mark.i2
+@pytest.mark.skipif(not KLU_AVAILABLE, reason='libklu is not available')
+def test_a_klu_solve_goes_through_solve_into(model, monkeypatch):
+    """Under KLU every solve writes into its target through ``solve_into``;
+    ``klu_decomposition.solve`` would allocate the result and copy it."""
+    dae, y0 = model('ladder', 'inline_sparse', 12)
+    n = y0.size
+    t, y, J = _point(dae, y0)
+    with linsolver('klu'):
+        im = IterationMatrix(_integ(n))
+    W = im.factorize(dae.M, J, 0.1, GAMMAS[0])
+    assert isinstance(W.lu, klu_decomposition)
+    b = dae.F(t, y, dae.p)
+    ref = W.lu.solve(W.rscale * b)
+
+    def allocating(self, rhs):
+        raise AssertionError('klu_decomposition.solve was called')
+
+    monkeypatch.setattr(klu_decomposition, 'solve', allocating)
+    assert _byte_equal(W.solve(b), ref)
+    buf = np.full(n, np.nan)
+    assert W.solve(b, out=buf) is buf and _byte_equal(buf, ref)
 
 
 def _singular():

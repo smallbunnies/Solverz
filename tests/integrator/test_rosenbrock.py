@@ -164,6 +164,19 @@ def test_a_subclass_takes_its_traits_from_its_tableau():
     assert WithDense.interp_order == 1
     assert Plain.interpolation == 'linear'
     assert (Stated.interpolation, Stated.order, Stated.error_order) == ('hermite', 3, 4)
+    # a parent's interpolation describes the parent's tableau, so a class that
+    # states a tableau of its own and no interpolation derives it anew
+    class PlainRodas4(Rodas4):
+        tableau = plain
+
+    class DenseRodas3(Rodas3):
+        tableau = dense
+
+    class KeptRodas3(Rodas3):
+        scheme = 'kept'
+
+    assert (PlainRodas4.interpolation, DenseRodas3.interpolation) == ('linear', 'ntrp1')
+    assert KeptRodas3.interpolation == 'hermite' and KeptRodas3.tableau is Rodas3.tableau
     with pytest.raises(TypeError, match='has no c, d and e'):
         class NoDense(Rosenbrock):
             tableau = plain
@@ -328,6 +341,37 @@ def test_the_default_rodas3_slopes_pair_rows_and_variables(model):
     _accept(integ, 0.1, 0.05)
     integ.interp(0.12)
     assert c.pairing is not pairing and c.pairing_epoch == integ.model_epoch
+
+
+def test_the_default_rodas3_slopes_divide_by_the_entries_of_M():
+    """``2 x' = -x`` in row 0, ``-0.5 w' = 0.5 w`` in row 1 and ``0 = z - x/2``
+    in row 2, with ``y = (z, x, w)``: the slope of a paired variable is its
+    residual row divided by its entry of ``M``, which is not 1."""
+    M = csc_array(np.array([[0.0, 2.0, 0.0], [0.0, 0.0, -0.5], [0.0, 0.0, 0.0]]))
+
+    def F(t, y, p, out=None):
+        out = np.empty(3) if out is None else out
+        out[0] = -y[1]
+        out[1] = 0.5 * y[2]
+        out[2] = y[0] - 0.5 * y[1]
+        return out
+
+    def J(t, y, p):
+        return csc_array(np.array([[0.0, -1.0, 0.0], [0.0, 0.0, 0.5], [1.0, -0.5, 0.0]]))
+
+    integ = Integrator(nDAE(M, F, J, {}), [0, 1], np.array([0.5, 1.0, 1.0]), Rodas3(), Opt())
+    _accept(integ, 0.0, 0.1)
+    integ.interp(0.04)
+    c = integ.cache
+    rows, cols, Mv = c.pairing
+    assert rows.tolist() == [0, 1] and cols.tolist() == [1, 2] and Mv.tolist() == [2.0, -0.5]
+    F0 = F(0.0, integ.uprev, None)
+    F1 = F(integ.t_step, integ.u_step, None)
+    assert _byte_equal(c.s0[cols], F0[rows] / Mv) and _byte_equal(c.s1[cols], F1[rows] / Mv)
+    # the derivatives of the model itself
+    assert c.s0[1] == -integ.uprev[1] / 2.0 and c.s0[2] == -integ.uprev[2]
+    secant = (integ.u_step - integ.uprev) / integ.dt_step
+    assert c.s0[0] == c.s1[0] == secant[0]
 
 
 def test_the_default_rodas3_slopes_without_a_pairing_are_secants():
@@ -523,6 +567,30 @@ def test_the_formula_dispatch(model):
     integ.dt = 0.1
     integ.perform_step()
     assert _byte_equal(integ.u, integ.uprev + 0.1) and integ.EEst is None
+
+
+class _NoStep(Algorithm):
+    # adaptive, so that without the style check the construction would succeed
+    scheme = 'no_step'
+    order = 1
+    adaptive = True
+
+
+class _InplaceOfOneParameter(_NoStep):
+    scheme = 'inplace_of_one'
+    inplace = True
+
+    def perform_step(self, s):
+        return s.y0
+
+
+def test_the_integrator_checks_the_style_before_anything_else(model):
+    dae, y0 = model('dae_test')
+    for alg, message in ((Algorithm(), 'Algorithm does not define perform_step'),
+                         (_NoStep(), '_NoStep does not define perform_step'),
+                         (_InplaceOfOneParameter(), 'takes 1 parameters after self, but inplace = True needs 2')):
+        with pytest.raises(TypeError, match=message):
+            Integrator(dae, [0, 1], y0, alg, Opt())
 
 
 # -- the residual service -------------------------------------------------------

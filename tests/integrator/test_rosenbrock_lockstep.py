@@ -12,9 +12,15 @@ ordering it carries evolve as legacy's do. ``u`` must be byte-equal to
 counters must show ``s + 1`` residuals and one Jacobian on the first attempt
 of a step and ``s - 1`` residuals on a retry.
 
+Every buffer of the cache and ``u`` hold ``NaN`` before each attempt, so an
+attempt that read a stage matrix or a work vector it had not written, such
+as a ``K`` not zeroed, would not give legacy's bytes.
+
 On a grid, every accepted step is then interpolated at the nodes it covers,
 as the legacy-compatible saving does it, through ``addsteps`` and
-``interpolant``, and every row must be byte-equal to legacy's saved row.
+``interpolant``, and every row must be byte-equal to legacy's saved row. The
+hooks describe the step through ``t_step`` and ``u_step`` only, so ``t`` is
+moved away from the step and ``u`` holds ``NaN`` while they run.
 """
 import numpy as np
 import pytest
@@ -59,8 +65,11 @@ def _save_nodes(integ, a, nodes, inext, Y, row):
     Returns the index of the next node."""
     alg = integ.alg
     told, tnew = a.t, a.t + a.dt
-    integ.tprev, integ.t, integ.t_step, integ.dt_step = told, tnew, tnew, a.dt
-    integ.u_step = integ.u
+    integ.tprev, integ.t_step, integ.dt_step = told, tnew, a.dt
+    integ.u_step = integ.u.copy()
+    # after an event t and u differ from the step's end, which the hooks never read
+    integ.t = tnew + a.dt
+    integ.u.fill(np.nan)
     ready = False
     while inext < nodes.size and tnew >= nodes[inext] > told:
         if not ready:
@@ -71,6 +80,15 @@ def _save_nodes(integ, a, nodes, inext, Y, row):
         assert _byte_equal(row, Y[inext]), f"node {inext} at t = {nodes[inext]!r}"
         inext += 1
     return inext
+
+
+def _poison(integ):
+    """``NaN`` in ``u`` and in every float buffer of the cache: ``K``, the work
+    vectors of a step and the slopes of the Rodas3 interpolant."""
+    integ.u.fill(np.nan)
+    for value in vars(integ.cache).values():
+        if isinstance(value, np.ndarray) and value.dtype == np.float64:
+            value.fill(np.nan)
 
 
 def _lockstep(dae, y0, tspan, kwargs):
@@ -86,6 +104,7 @@ def _lockstep(dae, y0, tspan, kwargs):
     inext = 1
     row = np.empty(y0.size)
     for k, a in enumerate(attempts):
+        _poison(integ)
         integ.t, integ.dt = a.t, a.dt
         np.copyto(integ.uprev, a.y0)
         integ.new_step = a.reject == 0

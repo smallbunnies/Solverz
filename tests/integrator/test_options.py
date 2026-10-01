@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from Solverz.integrator import IntegratorOptions
-from Solverz.solvers.laesolver import linsolver
+from Solverz.solvers.laesolver import linsolver, resolve_backend
 from Solverz.solvers.option import Opt
 
 
@@ -123,6 +123,18 @@ def test_linsolver_is_resolved_when_read():
     with linsolver('superlu'):
         o = IntegratorOptions.from_opt(Opt(), _alg(), [0, 1])
     assert o.linsolver == 'superlu'
+    with linsolver('klu'):
+        o = IntegratorOptions.from_opt(Opt(), _alg(), [0, 1])
+    # 'superlu' when libklu is missing, as every solver of Solverz degrades it
+    assert o.linsolver == resolve_backend('klu')
+
+
+@pytest.mark.parametrize('name', ['klu', 'superlu'])
+def test_a_linsolver_of_the_call_overrides_the_global_one(name):
+    other = 'superlu' if name == 'klu' else 'klu'
+    with linsolver(other):
+        o = IntegratorOptions.from_opt(Opt(linsolver=name), _alg(), [0, 1])
+    assert o.linsolver == resolve_backend(name)
 
 
 def test_t0_equal_to_tend_is_accepted():

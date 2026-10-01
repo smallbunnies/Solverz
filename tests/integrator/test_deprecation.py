@@ -38,7 +38,10 @@ def _here():
 
 
 def _deprecations(record):
-    return [w for w in record if issubclass(w.category, DeprecationWarning)]
+    """The deprecation warnings of legacy Rodas in ``record``; a deprecation
+    that a newer NumPy, SciPy or tqdm emits on the same path is not one."""
+    return [w for w in record if issubclass(w.category, DeprecationWarning)
+            and str(w.message).startswith('Rodas is deprecated')]
 
 
 def _assert_points_here(record, line):

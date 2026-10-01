@@ -4,12 +4,14 @@
 iteration whose remaining error is below ``KAPPA`` in the weighted norm of
 the run, and its slope equals ``F(t, y)`` to the same tolerance; a Newton
 iteration that diverges, converges too slowly or meets a non-finite value
-rejects the attempt. ``W(gamma)`` is factorized once per ``gamma`` per
+rejects the attempt. Its weight takes the larger of the iterate and the
+start of the step, and the rate estimate of a call starts the next one
+until the model changes. ``W(gamma)`` is factorized once per ``gamma`` per
 attempt. ``F0``, ``J0`` and ``dFdt()`` are evaluated once per step and kept
 on its retries. ``D`` marks the algebraic rows, a stored zero of ``M``
 included, and is rebuilt when the model changes. ``f`` is ``M^-1 F`` on a
-model whose ``M`` is a scaled permutation and raises on a model with
-algebraic equations. ``out=`` gives the bytes of the out-of-place call and,
+model whose ``M`` is a scaled permutation, follows a change of ``M``, and
+raises on a model with algebraic equations. ``out=`` gives the bytes of the out-of-place call and,
 for ``F`` and ``f``, allocates no array. Every evaluation is counted.
 
 ``ImplicitEuler`` and ``Trapezoid`` converge with their orders, and ``D``
@@ -194,6 +196,60 @@ def test_an_exact_newton_matrix_converges_at_the_second_residual():
     assert not integ.force_stepfail
     np.testing.assert_allclose(integ.u, [2.0 / 2.5], rtol=1e-15)
     assert F.calls - calls == integ.stats.nsolve == 2
+
+
+def test_the_rate_estimate_of_a_call_starts_the_next_one():
+    """``W = 2`` against ``1 + h a = 1.5`` contracts the Newton error by
+    ``theta = 1/4`` per iteration towards ``y = 4/3``, so a converged call
+    leaves ``eta = theta/(1 - theta)`` near 1/3. A second call from ``4/3 +
+    2.8e-5``, whose first correction is 0.016 in the weighted norm, stops
+    after one residual with that estimate, ``(1/3)**0.8 * 0.016 < KAPPA``,
+    and needs two from the estimate 1 of a fresh Integrator. The
+    modification protocol resets it."""
+    got = {}
+
+    def body(s):
+        rhs = 2.0 * s.y0
+        y = s.implicit(s.t + s.h, 1.0, rhs)
+        got['eta'] = integ._nl_eta
+        near = np.array([4.0 / 3.0 + 2.8e-5])
+        for name in ('carried', 'reset'):
+            if name == 'reset':
+                integ._nl_eta = 1.0
+            calls = F.calls
+            s.implicit(s.t + s.h, 1.0, rhs, y=near)
+            got[name] = F.calls - calls
+        return _zero_error(y, s)
+
+    F = _Counted(_linear_F(0.5))
+    integ = Integrator(_scalar(F, _constant_J(1.0)), [0, 1], np.ones(1), _Formula(body), Opt())
+    _attempt(integ, 0.0, 1.0)
+    assert not integ.force_stepfail
+    assert abs(got['eta'] - 1 / 3) <= 0.02
+    assert (got['carried'], got['reset']) == (1, 2)
+    assert integ._nl_eta != 1.0
+    integ.model_modified()
+    assert integ._nl_eta == 1.0
+
+
+def test_the_newton_weight_takes_the_larger_of_the_iterate_and_the_start():
+    """From ``uprev = 100`` towards ``y = 1``, the weight ``atol + rtol
+    max(|y|, |uprev|)`` is about 0.1, so a first correction of ``7.5e-5`` is
+    ``7.5e-4`` in the weighted norm and ends the iteration at one residual;
+    a weight of ``|y|`` alone would make it 0.075 and take two."""
+    got = {}
+
+    def body(s):
+        calls = F.calls
+        got['y'] = s.implicit(s.t + s.h, 1.0, np.array([1.5]), y=np.array([1.0 + 1e-4]))
+        got['calls'] = F.calls - calls
+        return _zero_error(got['y'], s)
+
+    F = _Counted(_linear_F(0.5))
+    integ = Integrator(_scalar(F, _constant_J(1.0)), [0, 1], np.array([100.0]), _Formula(body), Opt())
+    _attempt(integ, 0.0, 1.0)
+    assert not integ.force_stepfail and got['calls'] == 1
+    np.testing.assert_allclose(got['y'], [1.0 + 2.5e-5], rtol=1e-14)
 
 
 # -- W, F0, J0 and dF/dt ----------------------------------------------------------
@@ -390,6 +446,37 @@ def test_f_divides_by_the_entries_of_a_scaled_permutation():
     r = F(0.25, y, None)
     assert _byte_equal(f, np.array([r[1] / -0.5, r[0] / 2.0]))
     np.testing.assert_allclose(f, np.linalg.solve(M.toarray(), r), rtol=1e-15)
+
+
+def test_the_pairing_of_f_is_rebuilt_when_the_model_changes():
+    """``f`` divides by the entries of ``M`` that the modification protocol
+    read last, and raises once a row of ``M`` holds only a stored zero."""
+    M = csc_array(np.array([[0.0, 2.0], [-0.5, 0.0]]))
+
+    def F(t, y, p, out=None):
+        out = np.empty(2) if out is None else out
+        out[0] = y[0] + t
+        out[1] = y[1] ** 2 - 1.0
+        return out
+
+    def J(t, y, p):
+        return csc_array(np.array([[1.0, 0.0], [0.0, 2 * y[1]]]))
+
+    integ = Integrator(nDAE(M, F, J, {}), [0, 1], np.array([0.3, 1.0]), _Formula(lambda s: _zero_error(s.y0, s)),
+                       Opt())
+    y = np.array([0.3, -1.7])
+    r = F(0.25, y, None)
+    assert _byte_equal(integ.ctx.f(0.25, y), np.array([r[1] / -0.5, r[0] / 2.0]))
+    # column 1 holds the entry of row 0, the second value of M.data
+    M.data[1] = 4.0
+    integ.model_modified()
+    assert _byte_equal(integ.ctx.f(0.25, y), np.array([r[1] / -0.5, r[0] / 4.0]))
+    # row 1 becomes 0 = y[1]**2 - 1, which the state satisfies
+    M.data[0] = 0.0
+    integ.model_modified()
+    assert not integ.failed
+    with pytest.raises(TypeError, match='f = M\\^-1 F needs a mass matrix that pairs every row'):
+        integ.ctx.f(0.25, y)
 
 
 def test_f_raises_on_a_model_with_algebraic_equations(model):

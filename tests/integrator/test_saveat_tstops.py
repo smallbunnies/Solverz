@@ -129,8 +129,11 @@ def test_the_last_step_ends_on_tend(model, span, fixed):
     opt = Opt(fix_h=True, hinit=0.1) if fixed else Opt(rtol=1e-6, atol=1e-8)
     for grid in (False, True):
         tspan = np.linspace(span[0], span[1], 7) if grid else list(span)
-        sol = Rodas4()(dae, tspan, y0, opt)
+        sol, times, _ = _run(init(dae, tspan, y0, alg=Rodas4(), opt=opt))
         assert sol.stats.ret == 'success'
+        # on a grid the last row is the node tend wherever the last step
+        # ends, so the time of that step is asserted itself
+        assert times[-1] == span[1]
         assert sol.T[-1] == span[1] and np.all(np.diff(sol.T) > 0)
         if fixed and not grid:
             # the sum of the steps misses tend by a few roundings, and the last

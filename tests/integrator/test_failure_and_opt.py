@@ -4,19 +4,25 @@ I4, in the legacy-compatible configuration and with in-place test
 algorithms: a failing run returns the rows saved so far with ``ret ==
 'failed'``, ``succeed is False`` and ``stats.t_fail``, prints exactly one
 line and never raises, whether the solution blows up, the error test rejects
-more than 100 attempts in a row, every attempt raises ``StepFailure``, the
-initial values have no consistent completion, or the residual divides by
-zero; a residual that raises an exception of its own propagates. ``Opt``
-and ``y0`` are never written, the argument errors are raised before any
-step, an empty span gives one row, and the counters are the calls the
-model sees, those of ``DaeIc`` and ``dF/dt`` included.
+more than 100 attempts in a row, an error of ``NaN`` makes the next step
+``NaN``, every attempt raises ``StepFailure``, the state of a run with a
+fixed step overflows, the initial values have no consistent completion or
+a singular algebraic Jacobian, or the residual divides by zero; a residual
+that raises an exception of its own propagates, and an accepted step ends a
+streak of rejections. ``Opt`` and ``y0`` are never written, the argument
+errors are raised before any step, an empty span gives one row, and the
+counters are the calls the model sees, those of ``DaeIc`` and ``dF/dt``
+included.
 
-I5, in the default configuration: a residual that divides by zero at a stop
-time fails the run without raising, whether Numba raises
-``ZeroDivisionError`` there or NumPy returns ``inf``; ``opt=None`` is
-``Opt()`` and ``alg=None`` is ``Rodas4()``; an ``opt.scheme`` other than the
-algorithm's warns once per call of each entry, at the caller's line.
+I5, in the default configuration: each reason of a failure in its exact
+line, and an error or a state that is not finite turned into ``EEst =
+inf``; a residual that divides by zero at a stop time fails the run without
+raising, whether Numba raises ``ZeroDivisionError`` there or NumPy returns
+``inf``; ``opt=None`` is ``Opt()`` and ``alg=None`` is ``Rodas4()``; an
+``opt.scheme`` other than the algorithm's warns once per call of each
+entry, at the caller's line.
 """
+import math
 import sys
 import warnings
 from pathlib import Path
@@ -73,8 +79,14 @@ def _no_real_solution(sparse):
 
 
 def _decay(F):
-    """``x' = F`` on two variables, hand-built."""
-    return nDAE(csc_array(np.eye(2)), F, lambda t, y, p: csc_array(-np.eye(2)), {})
+    """``x' = F`` on two variables, hand-built, and the initial state ``[1, 1]``."""
+    return nDAE(csc_array(np.eye(2)), F, lambda t, y, p: csc_array(-np.eye(2)), {}), np.ones(2)
+
+
+def _F_decay(t, y, p, out=None):
+    out = np.empty(2) if out is None else out
+    np.negative(y, out=out)
+    return out
 
 
 def _singular_algebraic_block(dense, J=None):
@@ -163,6 +175,80 @@ def test_more_than_100_rejections_fail_the_run(capsys):
     # an error of 1 is accepted
     integ = init(dae, [0, 1], y0, alg=_Const(1.0))
     assert integ.step() and (integ.stats.nstep, integ.stats.nreject) == (1, 0)
+
+
+class _Streaks(_Const):
+    """Rejects ``streak`` attempts in a row and accepts the next, ``cycles``
+    times, and then accepts every attempt."""
+
+    scheme = 'streaks'
+
+    def __init__(self, streak, cycles, legacy_compat):
+        super().__init__(0.0)
+        self.streak, self.cycles, self.legacy_compat = streak, cycles, legacy_compat
+        self.k = 0
+
+    def perform_step(self, integ, cache):
+        np.copyto(integ.u, integ.uprev)
+        k, self.k = self.k, self.k + 1
+        rejected = k < self.cycles * (self.streak + 1) and k % (self.streak + 1) < self.streak
+        integ.EEst = np.float64(1.0001 if rejected else 0.0)
+
+
+@pytest.mark.i4
+@pytest.mark.parametrize('legacy_compat', [True, False], ids=['compat', 'default'])
+def test_an_accepted_step_ends_a_streak_of_rejections(legacy_compat):
+    """Two streaks of 60 rejections, 120 in all, do not end the run, since
+    the limit counts consecutive rejections only."""
+    dae, y0 = _decay(_F_decay)
+    sol = _Streaks(60, 2, legacy_compat)(dae, [0, 1], y0, Opt())
+    assert sol.stats.ret == 'success' and sol.T[-1] == 1
+    assert sol.stats.nreject == 120 and sol.stats.nstep > 2
+
+
+class _Overflow(_Const):
+    """Multiplies the state by ``1e200`` at every attempt."""
+
+    scheme = 'overflow'
+
+    def __init__(self, legacy_compat):
+        super().__init__(0.0)
+        self.legacy_compat = legacy_compat
+
+    def perform_step(self, integ, cache):
+        np.multiply(integ.uprev, 1e200, out=integ.u)
+
+
+@pytest.mark.i4
+@pytest.mark.filterwarnings('ignore:overflow encountered:RuntimeWarning')
+@pytest.mark.parametrize('legacy_compat', [True, False], ids=['compat', 'default'])
+def test_a_state_that_is_not_finite_fails_a_run_with_a_fixed_step(capsys, legacy_compat):
+    dae, y0 = _decay(_F_decay)
+    capsys.readouterr()
+    sol = _Overflow(legacy_compat)(dae, [0, 1], y0, Opt(fix_h=True, hinit=0.25))
+    _failed(sol)
+    assert _byte_equal(sol.T, np.array([0.0, 0.25]))
+    assert _byte_equal(sol.Y, np.array([[1.0, 1.0], [1e200, 1e200]]))
+    assert _one_line(capsys, 'overflow') == ("overflow: the state is not finite at t = 0.25; "
+                                             "the solution is returned up to t = 0.25.")
+
+
+@pytest.mark.i4
+@pytest.mark.filterwarnings('ignore:invalid value encountered:RuntimeWarning')
+def test_a_nan_error_fails_the_run_on_a_step_that_is_not_finite(capsys):
+    """With ``atol = 0`` a component that stays exactly zero gives the error
+    ``0/0``. The legacy norm keeps the ``NaN``, which rejects the attempt,
+    and the controller proposes a ``NaN`` step, which fails the run at the
+    next attempt with the rows saved so far."""
+    dae, _ = _decay(_F_decay)
+    y0 = np.array([1.0, 0.0])
+    capsys.readouterr()
+    sol = Rodas4(legacy_compat=True)(dae, [0, 1], y0, Opt(atol=0.0))
+    _failed(sol)
+    assert _byte_equal(sol.T, np.array([0.0])) and _byte_equal(sol.Y, y0[None, :])
+    assert (sol.stats.nstep, sol.stats.nreject) == (0, 1)
+    assert _one_line(capsys, 'rodas4') == ("rodas4: the step size nan is not finite at t = 0.0; "
+                                           "the solution is returned up to t = 0.0.")
 
 
 @pytest.mark.i4
@@ -268,7 +354,7 @@ def test_a_residual_error_of_its_own_propagates():
         raise ValueError('a residual error of its own')
 
     with pytest.raises(ValueError, match='a residual error of its own'):
-        Rodas4(legacy_compat=True)(_decay(F), [0, 1], np.ones(2), Opt())
+        Rodas4(legacy_compat=True)(_decay(F)[0], [0, 1], np.ones(2), Opt())
 
 
 @pytest.mark.i4
@@ -280,7 +366,7 @@ def test_a_division_by_zero_in_the_residual_fails_the_run(capsys):
         np.negative(y, out=out)
         return out
 
-    sol = Rodas4(legacy_compat=True)(_decay(F), [0, 1], np.ones(2), Opt())
+    sol = Rodas4(legacy_compat=True)(_decay(F)[0], [0, 1], np.ones(2), Opt())
     _failed(sol)
     assert sol.T.size >= 2 and sol.T[-1] < 0.5
     assert sol.stats.nreject > 0
@@ -492,7 +578,8 @@ def test_a_division_by_zero_at_a_stop_time_fails_the_run(capsys, compiled):
     integ = init(_pole_model(pole), [0, 1], np.ones(1), tstops=[0.5])
     sol = integ.solve()
     _failed(sol)
-    _one_line(capsys, 'rodas4')
+    # the steps from the pole shrink below dtmin(0.5) before 100 rejections
+    assert ' is too small at t = 0.5; ' in _one_line(capsys, 'rodas4')
     assert sol.T.size >= 2 and 0.49 < sol.T[-1] <= 0.5 and sol.stats.nreject > 0
     if compiled:
         # the attempts at the pole failed on the converted exception
@@ -500,6 +587,54 @@ def test_a_division_by_zero_at_a_stop_time_fails_the_run(capsys, compiled):
     else:
         # no attempt failed; the attempts at the pole were rejected on their error
         assert integ._stepfail_reason is None
+
+
+class _DefaultFailing(_Failing):
+    scheme = 'failing'
+    legacy_compat = False
+
+
+class _DefaultConst(_Const):
+    legacy_compat = False
+
+
+@pytest.mark.i5
+def test_the_failure_reasons_of_the_default_configuration(capsys):
+    """Each reason of the table of Section 5.8 in its exact line: a step
+    halved by failures below ``dtmin(t)``, which from ``t = 1`` takes nine
+    halvings of ``1e-12``, before the rejection limit; more than 100
+    rejections in a row; and a step that is not finite."""
+    dae, y0 = _decay(_F_decay)
+    capsys.readouterr()
+    sol = _DefaultFailing()(dae, [1.0, 2.0], y0, Opt(hinit=1e-12))
+    _failed(sol)
+    k = next(k for k in range(1, 100) if 1e-12 / 2 ** k < 16 * math.ulp(1.0))
+    assert k == 9 and (sol.stats.nstep, sol.stats.nreject) == (0, k)
+    assert _one_line(capsys, 'failing') == (f"failing: the step size {1e-12 / 2 ** k!r} is too small at t = 1.0; "
+                                            f"the solution is returned up to t = 1.0.")
+    sol = _DefaultConst(1.0001)(dae, [0, 1], y0, Opt())
+    _failed(sol)
+    assert (sol.stats.nstep, sol.stats.nreject) == (0, 101)
+    assert _one_line(capsys, 'const') == ("const: more than 100 consecutive attempts were rejected at t = 0.0; "
+                                          "the solution is returned up to t = 0.0.")
+    integ = init(dae, [0, 1], y0)
+    integ.dt = math.nan
+    assert integ.step() is False
+    _failed(integ.postamble())
+    assert _one_line(capsys, 'rodas4') == ("rodas4: the step size nan is not finite at t = 0.0; "
+                                           "the solution is returned up to t = 0.0.")
+
+
+@pytest.mark.i5
+def test_the_default_configuration_turns_a_non_finite_error_or_state_into_inf():
+    dae, y0 = _decay(_F_decay)
+    integ = init(dae, [0, 1], y0)
+    for u, EEst, expected in (([1.0, 1.0], 0.5, 0.5), ([np.nan, 1.0], 0.5, np.inf), ([1.0, -np.inf], 0.5, np.inf),
+                              ([1.0, 1.0], np.nan, np.inf), ([1.0, 1.0], np.inf, np.inf)):
+        integ.u[:] = u
+        integ.EEst = np.float64(EEst)
+        integ.policy.sanitize_EEst(integ)
+        assert integ.EEst == expected, (u, EEst)
 
 
 @pytest.mark.i5

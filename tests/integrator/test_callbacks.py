@@ -7,7 +7,8 @@ from the old model, returns the linear-solver cache to the state of a new
 call, and saves the rows before and after the change that
 ``save_positions`` asks for. A run changed at ``t1`` is then byte-equal
 after ``t1`` to two calls split there, on either backend. A ``DaeIc``
-failure ends the run with the rows saved so far and never raises.
+failure ends the run with the rows saved so far and never raises, and
+``model_modified()`` after a failure does nothing.
 """
 import math
 
@@ -224,6 +225,30 @@ def test_an_interpolation_after_an_affect_describes_the_step_as_computed():
     integ = init(dae, [0, 1], y0, alg=Rodas3(), callbacks=[preset_time_callback([0.5], change)])
     _to_half(integ)
     assert integ.model_epoch == 1 and integ.u[0] == 0.0
+    tq = 0.5 * (integ.tprev + 0.5)
+    assert integ.tprev == ref.tprev and _byte_equal(integ.interp(tq), ref.interp(tq))
+    assert _byte_equal(integ.interp(0.5), integ.u)
+
+
+def test_an_interpolation_after_a_continuous_affect_at_a_step_end_describes_the_step_as_computed():
+    """``t - 0.5`` crosses at the stop time 0.5 with ``'right'``, so ``te`` is
+    the end of the step and ``interp(te)`` needs no interpolant, and without
+    interior samples the location interpolates nowhere either. The data of
+    the Rodas3 interpolant are still computed before the affect, which sets
+    ``x`` to 0 and doubles ``M.data[0]``, so an interpolation inside the step
+    is that of the run without the affect."""
+    def change(integ, idx):
+        integ.u[0] = 0.0
+        integ.dae.M.data[0] = 2.0
+
+    dae, y0 = _relay()
+    ref = init(dae, [0, 1], y0, alg=Rodas3(), tstops=[0.5])
+    _to_half(ref)
+    dae, y0 = _relay()
+    cb = ContinuousCallback(lambda t, y, integ: t - 0.5, change, rootfind='right', interp_points=2)
+    integ = init(dae, [0, 1], y0, alg=Rodas3(), callbacks=[cb], tstops=[0.5])
+    _to_half(integ)
+    assert integ.t_step == 0.5 and integ.model_epoch == 1 and integ.u[0] == 0.0
     tq = 0.5 * (integ.tprev + 0.5)
     assert integ.tprev == ref.tprev and _byte_equal(integ.interp(tq), ref.interp(tq))
     assert _byte_equal(integ.interp(0.5), integ.u)
@@ -483,21 +508,33 @@ def test_a_run_changed_at_half_equals_two_calls_split_there(backend, matching_se
 
 # -- failure -------------------------------------------------------------------
 
-@pytest.mark.parametrize('grid', [False, True])
-def test_a_daeic_failure_after_a_callback(capsys, grid):
-    """``0 = z**2 + k`` has no real solution once ``k`` is 1. The run fails at
-    0.5 with the rows saved so far, the row before the affect included, and
-    never raises."""
+def _unsolvable():
+    """``x' = -x + z``, ``0 = z**2 + k`` from ``x = 0``, ``z = 2`` with ``k =
+    -4``; the algebraic equation has no real solution once ``k`` is 1."""
     m = Model()
     m.x = Var('x', [0.0])
     m.z = Var('z', [2.0])
     m.k = Param('k', [-4.0])
     m.fx = Ode('fx', f=-m.x + m.z, diff_var=m.x)
     m.gz = Eqn('gz', m.z ** 2 + m.k)
-    dae, y0 = _numerical(m)
+    return _numerical(m)
+
+
+@pytest.mark.parametrize('kind', ['discrete', 'continuous'])
+@pytest.mark.parametrize('grid', [False, True])
+def test_a_daeic_failure_after_a_callback(capsys, grid, kind):
+    """``k`` becomes 1 at 0.5. The run fails there with the rows saved so far,
+    the row before the affect included and no row after it, and never
+    raises. With ``'right'`` the crossing of ``t - 0.5`` is 0.5 itself."""
+    dae, y0 = _unsolvable()
     capsys.readouterr()
     tspan = np.linspace(0, 1, 4) if grid else [0, 1]
-    sol = solve(dae, tspan, y0, callbacks=[preset_time_callback([0.5], _set_k(1.0))])
+    if kind == 'discrete':
+        cb = preset_time_callback([0.5], _set_k(1.0))
+    else:
+        cb = ContinuousCallback(lambda t, y, integ: t - 0.5, lambda integ, idx: _set_k(1.0)(integ),
+                                rootfind='right')
+    sol = solve(dae, tspan, y0, callbacks=[cb])
     assert sol.stats.ret == 'failed' and sol.stats.succeed is False and sol.stats.t_fail == 0.5
     assert sol.T[-1] == 0.5 and _rows_at(sol, 0.5).size == 1 and abs(sol.Y[-1][1] - 2.0) <= 1e-9
     if grid:
@@ -505,3 +542,19 @@ def test_a_daeic_failure_after_a_callback(capsys, grid):
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 1 and lines[0].startswith('rodas4: DaeIc found no consistent initial values')
     assert lines[0].endswith('at t = 0.5; the solution is returned up to t = 0.5.')
+
+
+def test_model_modified_after_a_failure_does_nothing(capsys):
+    """After the run failed there is nothing to modify: the call neither runs
+    ``DaeIc`` again nor prints a second line."""
+    dae, y0 = _unsolvable()
+    integ = init(dae, [0, 1], y0, callbacks=[preset_time_callback([0.5], _set_k(1.0))])
+    while integ.step():
+        pass
+    assert integ.failed and integ.stats.t_fail == 0.5
+    capsys.readouterr()
+    epoch, nfeval, u = integ.model_epoch, integ.stats.nfeval, integ.u.copy()
+    integ.model_modified()
+    assert (integ.model_epoch, integ.stats.nfeval) == (epoch, nfeval) and _byte_equal(integ.u, u)
+    assert capsys.readouterr().out == ''
+    assert integ.postamble().stats.ret == 'failed'

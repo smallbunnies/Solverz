@@ -125,6 +125,8 @@ def test_the_entries_agree_with_a_callback(model):
     cb = ContinuousCallback(lambda t, y, integ: y[0], bounce, direction=-1)
     results = _four(dae, [0, 10], y0, Rodas4, lambda: Opt(rtol=1e-6, atol=1e-8), callbacks=[cb])
     assert results[0].stats.ret == 'success'
+    # the ball stays above the ground only if the affect ran
+    assert results[0].Y[:, 0].min() >= 0
     _assert_same(results)
 
 
