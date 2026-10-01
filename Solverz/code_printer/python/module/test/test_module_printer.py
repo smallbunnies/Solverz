@@ -334,7 +334,8 @@ def test_print_inner_J():
     assert code_dict['code_inner_J'] == expected5
 
 
-expected6 = """def F_(t, y_, p_):
+expected6 = """def F_(t, y_, p_, out=None):
+    _F_ = out if out is not None else np.zeros((_F_size_, ))
     omega = y_[0:10]
     delta = y_[10:15]
     x = y_[15:18]

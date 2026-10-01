@@ -4,7 +4,7 @@ import numpy as np
 from sympy import symbols, pycode
 from sympy.codegen.ast import FunctionCall as SpFuncCall, Assignment
 
-from Solverz.code_printer.python.utilities import FunctionCall, parse_p, parse_trigger_func, \
+from Solverz.code_printer.python.utilities import residual_buffer, FunctionCall, parse_p, parse_trigger_func, \
     print_var, print_param, print_trigger, print_F_J_prototype, print_eqn_assignment, zeros
 from Solverz.sym_algebra.symbols import iVar, Para
 from Solverz.equation.eqn import Eqn, Ode
@@ -202,9 +202,12 @@ def test_eqn_assignment():
     EqnAddr.add('a', 10)
     EqnAddr.add('b', 5)
     eqn_decl = print_eqn_assignment(EQNs, EqnAddr)
-    assert eqn_decl[0] == Assignment(_F_, zeros(15))
-    assert eqn_decl[1] == Assignment(_F_[0:10], delta*omega)
-    assert eqn_decl[2] == Assignment(_F_[10:15], lam*y+x)
+    # the residual array itself is declared by ``residual_buffer`` in
+    # ``print_F``, so the assignments start at the first equation
+    assert len(eqn_decl) == 2
+    assert eqn_decl[0] == Assignment(_F_[0:10], delta*omega)
+    assert eqn_decl[1] == Assignment(_F_[10:15], lam*y+x)
+    assert pycode(residual_buffer(15)) == '_F_ = out if out is not None else np.zeros((15, ))'
 
     eqn_decl = print_eqn_assignment(EQNs, EqnAddr, True)
     assert eqn_decl[0] == Assignment(_F_[0:10], FunctionCall('inner_F0', [delta, omega]))

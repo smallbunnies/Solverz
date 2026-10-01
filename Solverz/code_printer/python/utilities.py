@@ -8,7 +8,8 @@ from datetime import datetime
 import numpy as np
 from sympy.codegen.ast import Assignment, AddAugmentedAssignment
 from sympy import pycode, symbols, Function, Symbol, Expr, Number as SymNumber
-from sympy.codegen.ast import real, FunctionPrototype, FunctionDefinition, Return, FunctionCall as SymFuncCall
+from sympy.codegen.ast import real, FunctionPrototype, FunctionDefinition, Return, FunctionCall as SymFuncCall, \
+    Attribute, Variable
 from sympy.utilities.lambdify import _import, _module_present, _get_namespace
 from scipy.sparse import sparray, csc_array
 from numbers import Number
@@ -129,7 +130,56 @@ def print_trigger(PARAM: Dict[str, ParamBase]):
     return trigger_declaration
 
 
-def print_F_J_prototype(eqs_type: str, func_name: str, nstep=0):
+#: Marks a parameter of a :class:`PyFunctionDefinition` that prints with a
+#: ``None`` default, so the generated function may be called without it.
+optional = Attribute('optional')
+
+
+class PyFunctionDefinition(FunctionDefinition):
+    """A ``FunctionDefinition`` whose ``optional`` parameters print as
+    ``name=None``.
+
+    SymPy's Python printer prints every parameter bare, so a keyword with a
+    default cannot be expressed through ``Variable.value``; ``none`` there is
+    indistinguishable from "no value". The attribute carries the intent
+    instead.
+    """
+
+    def _pythoncode(self, printer, **kwargs):
+        params = []
+        for var in self.parameters:
+            s = printer._print(var.symbol)
+            if optional in var.attrs:
+                s += '=None'
+            params.append(s)
+        body = '\n'.join(printer._print(stmt) for stmt in self.body)
+        return "def {name}({parameters}):\n{body}".format(
+            name=printer._print(self.name),
+            parameters=', '.join(params),
+            body=printer._indent_codestring(body))
+
+    def _numpycode(self, printer, **kwargs):
+        return self._pythoncode(printer, **kwargs)
+
+
+class IfNone(Function):
+    """``IfNone(x, default)`` prints ``x if x is not None else default``."""
+
+    def _numpycode(self, printer, **kwargs):
+        x = printer._print(self.args[0])
+        return f'{x} if {x} is not None else {printer._print(self.args[1])}'
+
+    def _pythoncode(self, printer, **kwargs):
+        return self._numpycode(printer, **kwargs)
+
+
+def print_F_J_prototype(eqs_type: str, func_name: str, nstep=0, out=False):
+    """The prototype of ``F_`` or ``J_``.
+
+    With ``out=True`` the parameter list ends in ``out=None``, the array the
+    residual is written into when the caller supplies one: the in-place form
+    of SciML's ``f!(du, u, p, t)``, spelled the way NumPy spells it.
+    """
     if func_name not in ['F_', 'J_']:
         raise ValueError(f"Func name {func_name} not supported!")
     t, y_, p_ = symbols('t y_ p_', real=True)
@@ -152,8 +202,18 @@ def print_F_J_prototype(eqs_type: str, func_name: str, nstep=0):
     else:  # eqs_type != 'FDAE' and nstep == 0
         pass
 
+    if out:
+        xtra_args.append(Variable(symbols('out', real=True), type=real,
+                                  attrs=[optional]))
     fp = FunctionPrototype(real, func_name, args + xtra_args)
     return fp
+
+
+def residual_buffer(size):
+    """The first statement of a generated ``F_``: the caller's ``out`` array
+    when there is one, else a fresh zero array of ``size`` entries."""
+    return Assignment(iVar('_F_', internal_use=True),
+                      IfNone(symbols('out', real=True), zeros(size, )))
 
 
 def print_Hvp_prototype(eqs_type: str, func_name: str = 'Hvp_', nstep=0):
@@ -246,9 +306,6 @@ def print_eqn_assignment(EQNs: Dict[str, Eqn],
                          module_printer=False):
     _F_ = iVar('_F_', internal_use=True)
     eqn_declaration = []
-    if not module_printer:
-        eqn_declaration.append(Assignment(_F_, zeros(EqnAddr.total_size, )))
-        # Whereas in module printer, the _F_ is predeclared for only once.
     count = 0
     for eqn_name in EQNs.keys():
         eqn_address = EqnAddr[eqn_name]

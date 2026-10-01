@@ -139,11 +139,11 @@ expected_J_sp1 = """def J_(t, y_, p_):
     return sps.coo_array((data, (row, col)), (2, 2)).tocsc()
 """.strip()
 
-expected_F1 = """def F_(t, y_, p_):
+expected_F1 = """def F_(t, y_, p_, out=None):
+    _F_ = out if out is not None else np.zeros((2, ))
     h = y_[0:1]
     v = y_[1:2]
     g = p_["g"]
-    _F_ = np.zeros((2, ))
     _F_[0:1] = v
     _F_[1:2] = g
     return _F_
@@ -226,7 +226,8 @@ expected_J_sp2 = """def J_(y_, p_):
     return sps.coo_array((data, (row, col)), (3, 3)).tocsc()
 """.strip()
 
-expected_F2 = """def F_(y_, p_):
+expected_F2 = """def F_(y_, p_, out=None):
+    _F_ = out if out is not None else np.zeros((3, ))
     x = y_[0:2]
     y = y_[2:3]
     A_data = p_["A_data"]
@@ -236,7 +237,6 @@ expected_F2 = """def F_(y_, p_):
     b = p_["b"]
     c = p_["c"]
     A = p_["A"]
-    _F_ = np.zeros((3, ))
     _F_[0:2] = b - SolCF.csc_matvec(A_data, A_indices, A_indptr, A_shape0, x)
     _F_[2:3] = c - y
     return _F_
@@ -326,12 +326,12 @@ expected_J_sp_fdae = """def J_(t, y_, p_, y_0):
     return sps.coo_array((data, (row, col)), (6, 6)).tocsc()
 """.strip()
 
-expected_F_fdae = """def F_(t, y_, p_, y_0):
+expected_F_fdae = """def F_(t, y_, p_, y_0, out=None):
+    _F_ = out if out is not None else np.zeros((6, ))
     p = y_[0:3]
     q = y_[3:6]
     p_tag_0 = y_0[0:3]
     q_tag_0 = y_0[3:6]
-    _F_ = np.zeros((6, ))
     _F_[0:2] = -p_tag_0[0:2] + p[1:3]
     _F_[2:4] = p_tag_0[1:3] - p[0:2]
     _F_[4:5] = p_tag_0[0] - p[2]

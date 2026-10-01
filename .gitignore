@@ -30,3 +30,6 @@ Solverz/_version.py
 /AGENTS.md
 # Claude Code harness per-session lock files (ScheduleWakeup, /loop)
 .claude/*.lock
+
+# rendered modules a printer test leaves behind
+Solverz/code_printer/python/module/test/Solverz_test*/

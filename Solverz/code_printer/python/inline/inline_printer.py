@@ -17,8 +17,9 @@ def print_F(eqs_type: str,
             nstep: int = 0):
     fp = print_F_J_prototype(eqs_type,
                              'F_',
-                             nstep)
-    body = []
+                             nstep,
+                             out=True)
+    body = [residual_buffer(EqnAddr.total_size)]
     body.extend(print_var(var_addr,
                           nstep)[0])
     param_decla = print_param(PARAM, output_sparse=False)[0]
@@ -29,7 +30,7 @@ def print_F(eqs_type: str,
                                      False))
     temp = iVar('_F_', internal_use=True)
     body.extend([Return(temp)])
-    fd = FunctionDefinition.from_FunctionPrototype(fp, body)
+    fd = PyFunctionDefinition.from_FunctionPrototype(fp, body)
     return pycode(fd, fully_qualified_modules=False)
 
 
