@@ -147,7 +147,8 @@ class Integrator:
     ``interp`` and the algorithm's interpolant describe it through these
     fields, never through ``u``, which an event may replace. The accepted
     state is committed into ``uprev`` at the start of the next attempt, so
-    between two ``step()`` calls both ends of the step are available.
+    between two ``step()`` calls both ends of the step are available; after
+    a call that failed only its end is, as ``u``.
 
     The services ``F``, ``f``, ``J``, ``F0``, ``J0``, ``dFdt``, ``W`` and
     ``implicit`` count every evaluation, factorization and solve they make
@@ -460,7 +461,9 @@ class Integrator:
         """Advance by one accepted step; ``False`` once the run is over.
 
         Between two calls, ``t`` and ``u`` are the end of the step just
-        taken, and ``interp`` evaluates inside it.
+        taken, and ``interp`` evaluates inside it. After a call that failed,
+        ``u`` is the state at ``t``, the end of the last accepted step, and
+        ``interp`` accepts only ``tq == t``.
         """
         if self.finished:
             return False
@@ -521,7 +524,7 @@ class Integrator:
             # after a failed attempt loopfooter has already divided dt
         reason = self.policy.check_error(self)
         if reason is not None:
-            self._fail(reason)
+            self._fail_attempt(reason)
             return False
         self.iter += 1
         self.policy.fix_dt_at_bounds(self)
@@ -548,7 +551,7 @@ class Integrator:
             if opts.adaptive:
                 self.dt = self.dt / opts.failfactor
             else:
-                self._fail('the step failed at a fixed step size: ' + self._stepfail_reason)
+                self._fail_attempt('the step failed at a fixed step size: ' + self._stepfail_reason)
             return
         if self._skip_step:
             self.accept_step = True
@@ -557,7 +560,7 @@ class Integrator:
             self.q = self.controller.stepsize(self)
             self.accept_step = self.controller.accepts(self)
         elif not self._all_finite(self.u):
-            self._fail('the state is not finite')
+            self._fail_attempt('the state is not finite')
             return
         else:
             self.accept_step = True
@@ -785,6 +788,21 @@ class Integrator:
         print(f"{self.alg.scheme}: {reason} at t = {float(self.t)!r}; "
               f"the solution is returned up to t = {float(self.sol.last_t)!r}.")
 
+    def _fail_attempt(self, reason):
+        """``_fail`` from the attempt loop, between the commit of the last
+        accepted step and the acceptance of the next.
+
+        There ``uprev`` holds the state at ``t``, which the commit copied from
+        ``u``, or the initial state before the first step, while ``u`` and the
+        algorithm's cache may hold a rejected attempt. The step that ended at
+        ``t`` can therefore no longer be interpolated: ``u`` becomes the state
+        at ``t`` again, and ``interp`` accepts only ``tq == t``.
+        """
+        np.copyto(self.u, self.uprev)
+        self.u_step = self.u
+        self._interp_valid = False
+        self._fail(reason)
+
     def _all_finite(self, u):
         fin = self._fin
         np.isfinite(u, out=fin)
@@ -853,10 +871,11 @@ class Integrator:
 
         ``tq`` must lie in ``[tprev, t]``; the two ends return copies of
         ``uprev`` and ``u`` exactly, and after the state or the model changed
-        outside a step only ``tq == t`` is accepted. Otherwise the algorithm's
-        ``addsteps`` runs once per step and its interpolant is evaluated at
-        ``theta = (tq - tprev) / dt_step``, which may exceed 1 by one rounding
-        after a step that landed on a stop time.
+        outside a step, or after a ``step()`` that failed, only ``tq == t`` is
+        accepted. Otherwise the algorithm's ``addsteps`` runs once per step
+        and its interpolant is evaluated at ``theta = (tq - tprev) /
+        dt_step``, which may exceed 1 by one rounding after a step that landed
+        on a stop time.
         """
         if out is None:
             out = np.empty(self.n)
@@ -864,8 +883,8 @@ class Integrator:
             np.copyto(out, self.u)
             return out
         if not self._interp_valid:
-            raise ValueError(f"the state was changed at t = {self.t!r} after the last step; "
-                             f"only tq == t can be interpolated until the next step")
+            raise ValueError(f"only tq == t = {self.t!r} can be interpolated, since the state was changed "
+                             f"or the run failed after the last step")
         if not self.tprev <= tq <= self.t:
             raise ValueError(f"tq = {tq!r} lies outside the last step [{self.tprev!r}, {self.t!r}]")
         if tq == self.tprev:

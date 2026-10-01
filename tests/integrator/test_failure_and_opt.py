@@ -9,10 +9,12 @@ more than 100 attempts in a row, an error of ``NaN`` makes the next step
 fixed step overflows, the initial values have no consistent completion or
 a singular algebraic Jacobian, or the residual divides by zero; a residual
 that raises an exception of its own propagates, and an accepted step ends a
-streak of rejections. ``Opt`` and ``y0`` are never written, the argument
-errors are raised before any step, an empty span gives one row, and the
-counters are the calls the model sees, those of ``DaeIc`` and ``dF/dt``
-included.
+streak of rejections. After ``step()`` failed, ``u`` is the state at ``t``,
+the end of the last accepted step, and ``interp`` accepts only ``tq == t``,
+whatever the failing attempts left in ``u``. ``Opt`` and ``y0`` are never
+written, the argument errors are raised before any step, an empty span gives
+one row, and the counters are the calls the model sees, those of ``DaeIc``
+and ``dF/dt`` included.
 
 I5, in the default configuration: each reason of a failure in its exact
 line, and an error or a state that is not finite turned into ``EEst =
@@ -346,6 +348,80 @@ def test_a_model_error_while_saving_fails_the_run(capsys):
     # without a grid nothing is interpolated
     sol = _FailingAddsteps()(dae, [0, 1], y0, Opt())
     assert sol.stats.ret == 'success'
+
+
+class _Spoils(_Const):
+    """Halves the state on its first ``good`` attempts; every later attempt
+    leaves ``bad`` in ``u`` and then raises ``StepFailure`` if ``raises``."""
+
+    scheme = 'spoils'
+
+    def __init__(self, good, bad, raises):
+        super().__init__(0.0)
+        self.good, self.bad, self.raises = good, bad, raises
+        self.legacy_compat = False
+        self.k = 0
+
+    def perform_step(self, integ, cache):
+        self.k += 1
+        if self.k <= self.good:
+            np.multiply(integ.uprev, 0.5, out=integ.u)
+        else:
+            integ.u[:] = self.bad
+            if self.raises:
+                raise StepFailure('it spoils the state')
+        integ.EEst = np.float64(0.0)
+
+
+def _state_after_failure(integ):
+    """Run ``integ`` to its failure; ``u`` must be the last saved row, at
+    ``t``, and ``interp`` must accept only ``tq == t``."""
+    while integ.step():
+        pass
+    assert integ.failed and integ.step() is False
+    sol = integ.postamble()
+    _failed(sol)
+    assert sol.T[-1] == integ.t == sol.stats.t_fail
+    assert _byte_equal(integ.u, sol.Y[-1]) and _byte_equal(integ.interp(integ.t), sol.Y[-1])
+    for tq in (integ.tprev, 0.5 * (integ.tprev + integ.t)):
+        if tq != integ.t:
+            with pytest.raises(ValueError, match='only tq == t'):
+                integ.interp(tq)
+    return sol
+
+
+@pytest.mark.i4
+@pytest.mark.parametrize('case', ['adaptive', 'first_step', 'fixed_step', 'not_finite'])
+def test_a_failed_step_leaves_the_state_at_t(capsys, case):
+    """A failure inside the attempt loop follows the commit of the last
+    accepted step, which overwrote ``uprev``, and attempts that left their
+    trial state in ``u``. ``u`` is then the state at ``t`` again, the end of
+    the last accepted step, and ``interp`` accepts only ``tq == t``: here the
+    attempts after two accepted halvings, or from the start, leave ``NaN``
+    or ``inf`` in ``u``, and fail by halving the step, at a fixed step, or by
+    a state that is not finite at a fixed step."""
+    dae, y0 = _decay(_F_decay)
+    good = 0 if case == 'first_step' else 2
+    alg = _Spoils(good, np.inf if case == 'not_finite' else np.nan, raises=case != 'not_finite')
+    # hmax keeps the accepted steps at 0.25, which an error of zero would lengthen
+    opt = Opt(fix_h=True, hinit=0.25) if case in ('fixed_step', 'not_finite') else Opt(hinit=0.25, hmax=0.25)
+    sol = _state_after_failure(init(dae, [0, 1], y0, alg=alg, opt=opt))
+    assert _byte_equal(sol.T, np.array([0.0, 0.25, 0.5][:good + 1]))
+    assert _byte_equal(sol.Y[-1], 0.5 ** good * y0)
+    _one_line(capsys, 'spoils')
+
+
+@pytest.mark.i4
+@pytest.mark.parametrize('legacy_compat', [True, False], ids=['compat', 'default'])
+def test_a_blow_up_through_step_leaves_the_state_at_t(capsys, legacy_compat):
+    """``x' = x**2`` from 1: the rejected attempts before the failure near
+    the pole leave their trial state in ``u``, and the Rosenbrock cache
+    holds their stages."""
+    dae, y0 = _blowup()
+    capsys.readouterr()
+    sol = _state_after_failure(init(dae, [0, 2], y0, alg=Rodas4(legacy_compat=legacy_compat)))
+    assert sol.stats.nreject > 0
+    _one_line(capsys, 'rodas4')
 
 
 @pytest.mark.i4
