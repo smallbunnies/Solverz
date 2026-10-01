@@ -442,7 +442,10 @@ def test_a_singular_iteration_matrix_fails_the_attempt(backend):
     # a zero row of W divides by zero in the row scaling, which raises under
     # np.seterr(all='raise') and fails the attempt as well
     M = csc_array(np.array([[1.0, 0.0], [0.0, 0.0]]))
-    integ = Integrator(_linear(_F_decay, J, M), [0, 1], np.ones(2), Rodas4(legacy_compat=True), Opt())
+    # from a consistent start, since DaeIc cannot solve 0 = -y[1] with J = 0
+    integ = Integrator(_linear(_F_decay, J, M), [0, 1], np.array([1.0, 0.0]), Rodas4(legacy_compat=True),
+                       Opt())
+    assert not integ.failed
     integ.t, integ.dt = 0.0, 0.1
     with np.errstate(all='raise'):
         integ.perform_step()

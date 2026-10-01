@@ -427,25 +427,32 @@ class Integrator:
         ``DaeIc`` runs on a proxy of the model whose residual and Jacobian
         are the counted services, and with the backend that was global at
         initialization, so that a later call outside the caller's ``with
-        linsolver(...)`` block uses the same one. Four failures end the run:
+        linsolver(...)`` block uses the same one. Five failures end the run:
         ``'Need Better y0'``, a ``LinAlgError`` or a ``RuntimeError`` from a
-        singular algebraic Jacobian, and a ``StepFailure`` from an arithmetic
-        error of ``F`` or ``J``. Any other exception is a programming error
-        and propagates; a ``RuntimeError`` raised by the model itself cannot
-        be told apart from a solver failure.
+        singular algebraic Jacobian, a ``StepFailure`` from an arithmetic
+        error of ``F`` or ``J``, and a result that is not finite. Any other
+        exception is a programming error and propagates; a ``RuntimeError``
+        raised by the model itself cannot be told apart from a solver
+        failure.
         """
         proxy = SimpleNamespace(M=self.M, p=self.p, F=self._daeic_F, J=self._daeic_J)
         try:
             with linsolver(self._daeic_backend):
-                return DaeIc(proxy, y, t, self.opts.rtol), None
+                y = DaeIc(proxy, y, t, self.opts.rtol)
         # LinAlgError is a ValueError, so it is caught first
         except (np.linalg.LinAlgError, RuntimeError, StepFailure) as e:
-            error = e
+            error = f"{type(e).__name__}: {e}"
         except ValueError as e:
             if e.args != ('Need Better y0',):
                 raise
-            error = e
-        return None, f"DaeIc found no consistent initial values ({type(error).__name__}: {error})"
+            error = f"{type(e).__name__}: {e}"
+        else:
+            # a singular sparse algebraic Jacobian raises nothing: spsolve warns
+            # and returns NaN, and DaeIc can return the NaN it reached
+            if self._all_finite(y):
+                return y, None
+            error = "it returned a state that is not finite"
+        return None, f"DaeIc found no consistent initial values ({error})"
 
     # -- the loop -----------------------------------------------------------
 

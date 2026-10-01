@@ -77,6 +77,25 @@ def _decay(F):
     return nDAE(csc_array(np.eye(2)), F, lambda t, y, p: csc_array(-np.eye(2)), {})
 
 
+def _singular_algebraic_block(dense, J=None):
+    """``x' = -x``, ``0 = (z - 1)**2 + 1e-3`` from ``x = z = 1``, where the
+    algebraic Jacobian ``2 (z - 1)`` is exactly zero, so ``DaeIc`` meets a
+    singular matrix at its first solve."""
+    M = csc_array(([1.0], ([0], [0])), shape=(2, 2))
+
+    def F(t, y, p, out=None):
+        out = np.empty(2) if out is None else out
+        out[0] = -y[0]
+        out[1] = (y[1] - 1.0) ** 2 + 1e-3
+        return out
+
+    def jacobian(t, y, p):
+        A = np.array([[-1.0, 0.0], [0.0, 2.0 * (y[1] - 1.0)]])
+        return A if dense else csc_array(A)
+
+    return nDAE(M, F, jacobian if J is None else J, {}), np.ones(2)
+
+
 class _Const(Algorithm):
     """Keeps the state and reports the same error at every attempt."""
 
@@ -175,6 +194,42 @@ def test_initial_values_without_a_consistent_completion(capsys, sparse):
     assert _byte_equal(sol.T, np.array([0.0])) and _byte_equal(sol.Y, y0[None, :])
     assert sol.stats.t_fail == 0 and sol.stats.nstep == 0
     assert 'DaeIc found no consistent initial values' in _one_line(capsys, 'rodas4')
+
+
+@pytest.mark.i4
+@pytest.mark.filterwarnings('ignore:Matrix is exactly singular')
+@pytest.mark.parametrize('legacy_compat', [True, False], ids=['compat', 'default'])
+@pytest.mark.parametrize('dense', [False, True], ids=['sparse', 'dense'])
+def test_a_singular_algebraic_jacobian_at_t0_fails_the_run(capsys, dense, legacy_compat):
+    """The dense solve raises ``LinAlgError``. The sparse one falls back to
+    ``spsolve``, which warns and returns ``NaN``, and ``DaeIc`` then returns
+    a state that is not finite, which fails the run as well."""
+    dae, y0 = _singular_algebraic_block(dense)
+    capsys.readouterr()
+    sol = Rodas4(legacy_compat=legacy_compat)(dae, [0, 1], y0, Opt())
+    _failed(sol)
+    assert _byte_equal(sol.T, np.array([0.0])) and _byte_equal(sol.Y, y0[None, :])
+    assert sol.stats.t_fail == 0 and (sol.stats.nstep, sol.stats.nreject) == (0, 0)
+    reason = 'LinAlgError: Singular matrix' if dense else 'it returned a state that is not finite'
+    assert _one_line(capsys, 'rodas4') == (f"rodas4: DaeIc found no consistent initial values ({reason}) "
+                                           f"at t = 0.0; the solution is returned up to t = 0.0.")
+
+
+@pytest.mark.i4
+def test_a_runtime_error_inside_daeic_fails_the_run(capsys):
+    """A ``RuntimeError``, which a sparse factorization raises on a singular
+    matrix, here raised by the Jacobian that ``DaeIc`` evaluates."""
+    def J(t, y, p):
+        raise RuntimeError('Factor is exactly singular')
+
+    dae, y0 = _singular_algebraic_block(False, J)
+    capsys.readouterr()
+    sol = Rodas4()(dae, [0, 1], y0, Opt())
+    _failed(sol)
+    assert _byte_equal(sol.T, np.array([0.0])) and sol.stats.nstep == 0
+    assert _one_line(capsys, 'rodas4') == ("rodas4: DaeIc found no consistent initial values (RuntimeError: "
+                                           "Factor is exactly singular) at t = 0.0; the solution is returned "
+                                           "up to t = 0.0.")
 
 
 class _FailingAddsteps(_Const):
