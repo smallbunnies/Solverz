@@ -10,12 +10,17 @@ algorithms of the other traits: explicit, and without an error estimate.
 Each check rejects an algorithm broken in the way the check guards against,
 and each broken algorithm below passes every earlier check; an algebraic
 variable left wrong by the step, or interpolated wrongly, is rejected
-although ``x`` stays accurate. The checks ``Opt`` and ``y0`` are shown
+although ``x`` stays accurate. A table that holds only the order conditions
+of linear models, and a stage evaluated at a wrong time, lose their order
+on the nonlinear and on the time-dependent model of the order check, and a
+kept Newton starting value fails the history check on either linear
+solver. The checks ``Opt`` and ``y0`` are shown
 alone. The contract gives no algorithm access to the caller's ``Opt`` or
 ``y0``, so ``y0`` fails only with a core that writes the initial state. An
 algorithm with a state across calls breaks the repeatability that ``Opt``
 checks, but the two calls of ``saveat`` meet it first.
 """
+import math
 import re
 from types import SimpleNamespace
 
@@ -249,6 +254,38 @@ class _Heun(Algorithm):
         return s.y0 + 0.5 * s.h * (k1 + k2), 0.5 * s.h * (k2 - k1)
 
 
+_G = 1.0 - math.sqrt(2.0) / 2.0
+
+
+class _SDIRK2(Algorithm):
+    """Alexander's two-stage, stiffly accurate, L-stable SDIRK of order 2, with
+    the stages at ``t + g h`` and ``t + h``; ``M (y1 - yhat) = g h (k2 - k1)``,
+    ``yhat`` the embedded first-order step, passed through ``W``."""
+
+    scheme = 'sdirk2'
+    order = 2
+    error_order = 2
+    adaptive = True
+
+    def stage_times(self, s):
+        return s.t + _G * s.h, s.t + s.h
+
+    def start(self, s):
+        """The starting value of the Newton iteration of the first stage; ``None`` is ``y0``."""
+        return None
+
+    def perform_step(self, s):
+        t1, t2 = self.stage_times(s)
+        My0 = s.M @ s.y0
+        Y1, k1 = s.implicit(t1, _G, My0, y=self.start(s), slope=True)
+        Y2, k2 = s.implicit(t2, _G, My0 + (1 - _G) * s.h * k1, y=Y1, slope=True)
+        self.end_slope(s, k2)
+        return Y2, s.W(_G).solve(_G * s.h * (k2 - k1))
+
+    def end_slope(self, s, k2):
+        pass
+
+
 class _FsalTrapezoid(Trapezoid):
     """The trapezoidal rule whose ``f0`` is the slope that ``implicit`` returned
     at the end of the last accepted step, first same as last; it does not
@@ -281,8 +318,8 @@ class _ClearedFsalTrapezoid(_FsalTrapezoid):
 @pytest.mark.filterwarnings('ignore:overflow encountered:RuntimeWarning')
 @pytest.mark.parametrize('alg, skipped', [(_Heun(), ('algebraic event', 'inconsistent start')),
                                           (_ExplicitEuler(), ('algebraic event', 'inconsistent start')),
-                                          (_ClearedFsalTrapezoid(), ())],
-                         ids=['explicit', 'fixed_step', 'history_cleared'])
+                                          (_ClearedFsalTrapezoid(), ()), (_SDIRK2(), ())],
+                         ids=['explicit', 'fixed_step', 'history_cleared', 'sdirk2'])
 def test_toy_algorithms_pass_the_kit(alg, skipped):
     """An explicit algorithm runs on E and skips the algebraic event and the
     inconsistent start; one without an error estimate runs with the fixed
@@ -292,7 +329,7 @@ def test_toy_algorithms_pass_the_kit(alg, skipped):
     results = check_algorithm(alg)
     assert tuple(results) == tuple(c for c in CHECKS[:-1] if c not in skipped)
     main = ('E',) if alg.explicit else ('A', 'P')
-    assert tuple(results['order']) == main
+    assert tuple(results['order']) == tuple(results['interpolant']) == main + ('T',)
     print(f"{alg.scheme}: {results['order']}, failure {results['failure']}")
 
 
@@ -344,6 +381,44 @@ class _Overclaimed(Rodas4):
 
 def test_order_rejects_an_order_the_method_does_not_reach():
     assert 'is below 5 - 0.3' in _fails(_Overclaimed(), 'order')
+
+
+def _typo_rodas4():
+    """Rodas4 entered by its alpha and beta tables, with 0.1 moved from
+    ``alpha[5, 4]`` to ``alpha[5, 0]``. The row sums of alpha, which are the
+    stage times, and the sums ``alpha + gamma`` are those of Rodas4, and a
+    Rosenbrock step on a model linear in ``y`` reads the table only through
+    these, so only a nonlinear model shows the typo, which breaks an order
+    condition of order 4."""
+    ref = Rodas_param('rodas4')
+    alpha = ref.alpha.T.copy()
+    alpha[5, 0] += 0.1
+    alpha[5, 4] -= 0.1
+
+    class TypoRodas4(Rosenbrock):
+        scheme = 'typo_rodas4'
+        tableau = RosenbrockTableau.from_hairer(ref.gamma, alpha, beta=ref.beta, b=ref.b, bd=ref.bd,
+                                                pord=ref.pord, c=ref.c, d=ref.d, e=ref.e)
+
+    return TypoRodas4()
+
+
+def test_order_rejects_a_table_that_holds_only_the_linear_order_conditions():
+    assert 'on A the largest errors' in _fails(_typo_rodas4(), 'order')
+
+
+class _WrongStageTimes(_SDIRK2):
+    """Evaluates both stages at the start of the step, which only a model
+    whose residual depends on time shows."""
+
+    scheme = 'wrong_stage_times'
+
+    def stage_times(self, s):
+        return s.t, s.t
+
+
+def test_order_rejects_a_stage_at_a_wrong_time():
+    assert 'on T the largest errors' in _fails(_WrongStageTimes(), 'order')
 
 
 def _algebraic(integ):
@@ -517,8 +592,32 @@ def test_inconsistent_start_rejects_an_estimate_of_the_algebraic_residual():
     assert "ret = 'failed'" in _fails(_WithoutD(), 'inconsistent start')
 
 
-def test_history_rejects_data_kept_across_a_modification():
-    assert 'reset_history must clear' in _fails(_FsalTrapezoid(), 'history')
+class _StaleNewtonStart(_SDIRK2):
+    """Starts the Newton iteration of the first stage from ``y0 + g h D k2``,
+    ``k2`` the end slope of the last accepted step, and does not clear it
+    when the model changes."""
+
+    scheme = 'stale_newton_start'
+
+    def alloc(self, integ):
+        return SimpleNamespace(slope=None, candidate=None)
+
+    def start(self, s):
+        c = s.cache
+        if s.new_step:
+            c.slope = c.candidate
+        return None if c.slope is None else s.y0 + _G * s.h * (s.D * c.slope)
+
+    def end_slope(self, s, k2):
+        s.cache.candidate = k2
+
+
+@pytest.mark.parametrize('alg', [_FsalTrapezoid(), _StaleNewtonStart()], ids=['slope', 'newton_start'])
+def test_history_rejects_data_kept_across_a_modification(alg):
+    """A kept Newton starting value changes the result only within the
+    Newton tolerance, which the nonlinear ``w`` of A makes larger than
+    rounding, so it is rejected on either linear solver."""
+    assert 'reset_history must clear' in _fails(alg, 'history')
 
 
 class _LoudRejection(Rodas4):

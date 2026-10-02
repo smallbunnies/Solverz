@@ -168,15 +168,15 @@ check_algorithm(MyMethod())
 | Check | What it asserts |
 |---|---|
 | contract | `perform_step` has the signature of `inplace`; `order`, `error_order` and `interp_order` are positive; an explicit method refuses a DAE |
-| order | on fixed-step runs with `h = 2**-1` to `2**-6`, the order measured from the largest error over every variable, the algebraic ones included, reaches `order - order_tol`, on a DAE whose rows of `M` are aligned with the variables and on one whose rows are not |
-| interpolant | the interpolant returns the start of the step exactly and its end within `1e-10` relative, and its order, measured from the largest error over every variable inside the steps, reaches `interp_order - order_tol` |
+| order | on fixed-step runs with `h = 2**-1` to `2**-6`, the order measured from the largest error over every variable, the algebraic ones included, reaches `order - order_tol`, on a nonlinear DAE whose rows of `M` are aligned with the variables, on the same DAE with rows that are not, and on a DAE whose residual depends on time, so that a table that holds only the order conditions of linear models, or a stage evaluated at a wrong time, fails |
+| interpolant | the interpolant returns the start of the step exactly and its end within `1e-10` relative, and its order, measured from the largest error over every variable inside the steps of the same runs, reaches `interp_order - order_tol` |
 | saveat | neither an output grid nor interpolation between steps changes the steps, and every saved node is the interpolant's value there |
 | tstops | stop times are landed on exactly |
 | events | a terminal event with two identical components, on a ball that starts on their root, stops at one time near the impact, records both, reports nothing at `t0`, and returns its state as the last row |
 | events on a grid | the rows before a terminal event are those of the same run without the event |
 | algebraic event | a terminal event where the algebraic variable `z = sin t` reaches 0.5 stops the run near `pi/6`, located on the interpolant of `z`; an explicit method skips it |
 | inconsistent start | a start with a small algebraic residual that `DaeIc` leaves in place succeeds at `atol = 1e-10`; an explicit method skips it |
-| history | a run changed at 0.5 by a callback equals, after 0.5, two calls split there |
+| history | a run changed at 0.5 by a callback equals, after 0.5, two calls split there, on a nonlinear DAE, on which a Newton iteration started from a kept value stops at another solution within its tolerance |
 | failure | a solution that blows up ends the run as failed with one printed line and no exception |
 | out | a residual without `out` gives the result of one with it |
 | Opt | ten calls with one `Opt` leave it unchanged and give one result |

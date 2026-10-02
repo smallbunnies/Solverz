@@ -16,6 +16,7 @@ import uuid
 from types import SimpleNamespace
 
 import numpy as np
+from scipy.sparse import csc_array
 
 from Solverz.num_api.num_eqn import nDAE
 from Solverz.integrator.algorithm import check_style
@@ -65,7 +66,8 @@ def check_algorithm(alg, *, order_tol=0.3, rendered=False):
     on the declared traits: an explicit algorithm runs on an ODE, and an
     algorithm without an error estimate with the fixed step ``2**-6``. The
     orders measured from the errors of every variable, the algebraic ones
-    included, must reach the declared ``order`` and ``interp_order`` within
+    included, on a nonlinear model and on a model whose residual depends on
+    time, must reach the declared ``order`` and ``interp_order`` within
     ``order_tol``. ``rendered=True`` adds the comparison with a model
     rendered by ``module_printer``, which compiles it with Numba.
     """
@@ -116,16 +118,16 @@ def _byte_equal(a, b):
     return a.dtype == b.dtype and a.shape == b.shape and a.tobytes() == b.tobytes()
 
 
-# the exact solution of every variable of A, P and E with k = 1
-_EXACT = {'x': lambda t: 0.5 * (np.exp(-t) + np.sin(t) - np.cos(t)), 'z': np.sin, 's': np.sin, 'c': np.cos}
+# the exact solution of every variable of A, P, E and T with k = 1
+_EXACT = {'x': lambda t: 0.5 * (np.exp(-t) + np.sin(t) - np.cos(t)), 'z': np.sin, 's': np.sin, 'c': np.cos,
+          'w': lambda t: np.tanh(0.25 * (1.0 - np.cos(t)))}
 
 
-def _exact(y0v):
-    """The exact solution of A, P or E, whose ``Vars`` is ``y0v``: a function
-    of ``t`` that returns one row per time, its entries in the order of
-    ``y0v``."""
-    columns = [(_EXACT[var], int(idx[0])) for var, idx in y0v.a.v.items()]
-    n = int(y0v.a.total_size)
+def _exact(columns, n):
+    """The exact solution of a model of ``n`` variables, ``columns`` the pairs of
+    a name of ``_EXACT`` and the variable's index in ``y``: a function of ``t``
+    that returns one row per time."""
+    columns = [(_EXACT[var], j) for var, j in columns]
 
     def exact(t):
         t = np.asarray(t, dtype=np.float64)
@@ -163,17 +165,23 @@ def _succeeded(sol, what):
 def _symbolic(sz, name):
     """The symbolic model ``name`` and its ``Vars``.
 
-    A: ``x' = -x + z``, ``0 = z - k s``, ``s' = c``, ``c' = -s`` from ``x = z =
-    s = 0``, ``c = 1``, with ``k = 1``; the forcing is carried by an
-    oscillator, so that ``dF/dt`` is zero and cannot limit a measured order,
-    and ``x(t) = (exp(-t) + sin t - cos t)/2``, ``z(t) = s(t) = sin t``,
-    ``c(t) = cos t``. P: A with its equations
-    declared as ``c'``, ``z``, ``x'``, ``s'``, so that the rows of ``M`` are not
-    aligned with the variables. E: A without ``z``, declared as ``c'``, ``x'``,
-    ``s'``, so that ``M`` is a permutation. A_delta: A from ``z = 1e-7``,
-    whose algebraic residual lies below the threshold of ``DaeIc`` and stays.
-    B: the bouncing ball from ``[0, 20]``. C: ``x' = x**3`` from 1, which
-    blows up at ``t = 0.5`` with no real continuation.
+    A: ``x' = -x + z``, ``0 = z - k s``, ``s' = c``, ``c' = -s``, ``w' = z (1 -
+    w**2)/4`` from ``x = z = s = w = 0``, ``c = 1``, with ``k = 1``; the
+    forcing is carried by an oscillator, so that ``dF/dt`` is zero and cannot
+    limit a measured order, and ``x(t) = (exp(-t) + sin t - cos t)/2``,
+    ``z(t) = s(t) = sin t``, ``c(t) = cos t``, ``w(t) = tanh((1 - cos t)/4)``.
+    ``w`` makes the model nonlinear: on a linear model a Rosenbrock step
+    reads its table only through the sums ``alpha + gamma`` and the stage
+    times, and a Newton iteration reaches one solution from any starting
+    value. The factor 1/4 keeps the Newton iteration of an implicit step of
+    ``h = 1/2`` within its ten iterations at the tolerances of the order
+    check. P: A with its equations declared as ``c'``, ``w'``, ``z``, ``x'``,
+    ``s'``, so that the rows of ``M`` are not aligned with the variables. E:
+    A without ``z``, ``w' = k s (1 - w**2)/4``, declared as ``c'``, ``x'``, ``s'``, ``w'``, so that ``M`` is a
+    permutation. A_delta: A from ``z = 1e-7``, whose algebraic residual lies
+    below the threshold of ``DaeIc`` and stays. B: the bouncing ball from
+    ``[0, 20]``. C: ``x' = x**3`` from 1, which blows up at ``t = 0.5`` with
+    no real continuation.
     """
     Var, Param, Ode, Eqn = sz.Var, sz.Param, sz.Ode, sz.Eqn
     m = sz.Model()
@@ -183,13 +191,16 @@ def _symbolic(sz, name):
             m.z = Var('z', 1e-7 if name == 'A_delta' else 0.0)
         m.s = Var('s', 0.0)
         m.c = Var('c', 1.0)
+        m.w = Var('w', 0.0)
         m.k = Param('k', 1.0)
         if name == 'E':
             m.fc = Ode('fc', -m.s, m.c)
             m.fx = Ode('fx', -m.x + m.k * m.s, m.x)
             m.fs = Ode('fs', m.c, m.s)
+            m.fw = Ode('fw', m.k * m.s * (1 - m.w ** 2) / 4, m.w)
         elif name == 'P':
             m.fc = Ode('fc', -m.s, m.c)
+            m.fw = Ode('fw', m.z * (1 - m.w ** 2) / 4, m.w)
             m.gz = Eqn('gz', m.z - m.k * m.s)
             m.fx = Ode('fx', -m.x + m.z, m.x)
             m.fs = Ode('fs', m.c, m.s)
@@ -198,6 +209,7 @@ def _symbolic(sz, name):
             m.gz = Eqn('gz', m.z - m.k * m.s)
             m.fs = Ode('fs', m.c, m.s)
             m.fc = Ode('fc', -m.s, m.c)
+            m.fw = Ode('fw', m.z * (1 - m.w ** 2) / 4, m.w)
     elif name == 'B':
         m.x = Var('x', [0.0, 20.0])
         m.f1 = Ode('f1', m.x[1], m.x[0])
@@ -208,6 +220,40 @@ def _symbolic(sz, name):
     else:
         raise ValueError(f"unknown model {name!r}")
     return m.create_instance()
+
+
+def _forced(explicit):
+    """T: ``x' = -x + z``, ``0 = z - sin t`` from ``x = z = 0``, the ``x`` and
+    ``z`` of A with the forcing written as explicit time, so that the time of
+    every stage enters the residual; ``x' = -x + sin t`` for an explicit
+    algorithm. Solverz has no symbol for time, so the model is built by hand.
+    ``(dae, y0, columns)``, ``columns`` as ``_exact`` takes them."""
+    if explicit:
+        M = csc_array(([1.0], ([0], [0])), shape=(1, 1))
+
+        def F(t, y, p, out=None):
+            if out is None:
+                out = np.empty(1)
+            out[0] = -y[0] + math.sin(t)
+            return out
+
+        def J(t, y, p):
+            return csc_array(([-1.0], ([0], [0])), shape=(1, 1))
+
+        return nDAE(M, F, J, {}), np.zeros(1), [('x', 0)]
+    M = csc_array(([1.0], ([0], [0])), shape=(2, 2))
+
+    def F(t, y, p, out=None):
+        if out is None:
+            out = np.empty(2)
+        out[0] = -y[0] + y[1]
+        out[1] = y[1] - math.sin(t)
+        return out
+
+    def J(t, y, p):
+        return csc_array(([-1.0, 1.0, 1.0], ([0, 0, 1], [0, 1, 1])), shape=(2, 2))
+
+    return nDAE(M, F, J, {}), np.zeros(2), [('x', 0), ('z', 1)]
 
 
 class _Kit:
@@ -223,11 +269,17 @@ class _Kit:
         # the models the checks that name A or P use
         self.main = ('E',) if self.explicit else ('A', 'P')
         self.base = self.main[0]
+        # the models of the order and interpolant checks
+        self.order_models = self.main + ('T',)
         self._models = {}
         self._memo = {}
 
     def build(self, name):
-        """``(dae, y0, Vars)`` of a new instance of the model ``name``."""
+        """``(dae, y0, Vars)`` of a new instance of the model ``name``; the
+        hand-built T has no ``Vars``."""
+        if name == 'T':
+            dae, y0, _ = _forced(self.explicit)
+            return dae, y0, None
         with contextlib.redirect_stdout(io.StringIO()):
             sdae, y0 = _symbolic(self.sz, name)
             dae = self.sz.made_numerical(sdae, y0, sparse=True)
@@ -242,6 +294,14 @@ class _Kit:
     def vars(self, name):
         """The ``Vars`` of the model ``name``."""
         return self._built(name)[2]
+
+    def exact(self, name):
+        """The exact solution of the model ``name``, as ``_exact`` returns it."""
+        if name == 'T':
+            columns = _forced(self.explicit)[2]
+            return _exact(columns, len(columns))
+        y0v = self.vars(name)
+        return _exact([(var, int(idx[0])) for var, idx in y0v.a.v.items()], int(y0v.a.total_size))
 
     def _built(self, name):
         if name not in self._models:
@@ -293,7 +353,9 @@ def _contract(kit):
 
 
 def _fixed_step_runs(kit):
-    """Per main model, the runs with ``h = 2**-k``, ``k = 1..6``, through ``step()``.
+    """Per model of the order check, the runs with ``h = 2**-k``, ``k = 1..6``,
+    through ``step()``: A and P, or E, and T, on which a step that evaluates
+    a stage at a wrong time loses its order.
 
     Each run gives the largest error over its saved rows and the largest
     error interpolated at ``theta`` 0.25, 0.5 and 0.75 of every step, both
@@ -303,9 +365,9 @@ def _fixed_step_runs(kit):
     interpolant check, so that the order check reads only the steps.
     """
     runs = {}
-    for name in kit.main:
+    for name in kit.order_models:
         dae, y0 = kit.model(name)
-        exact = _exact(kit.vars(name))
+        exact = kit.exact(name)
         run = SimpleNamespace(errors=[], interior=[], end_deviation=0.0, fault=None)
         for k in ORDER_STEPS:
             opt = kit.opt(fix_h=True, hinit=2.0 ** -k, rtol=1e-12, atol=1e-14)
@@ -523,7 +585,9 @@ def _history(kit):
 
     The modification protocol returns the run to the state of a new call, so
     every row from the change on is byte-equal between the two unless the
-    algorithm keeps data across it.
+    algorithm keeps data across it. ``w`` makes the stage equations
+    nonlinear, so that a Newton iteration from a kept starting value stops
+    at another solution, within its tolerance, on either linear solver.
     """
     dae, y0, _ = kit.build(kit.base)
     opt = kit.opt(fix_h=True, hinit=H_FIX)
