@@ -10,11 +10,15 @@ magnitude.
 
 I4: within a run, ``F(t, y0)`` and ``dF/dt`` are evaluated once per step
 and kept on its retries, which the residuals ``vdp`` receives show.
+
+I5: the first step of a run on ``forced`` hands its stages the ``'ode23s'``
+quotient in the default configuration, within the same bound, and the
+legacy quotient in the legacy-compatible one, which exceeds it.
 """
 import numpy as np
 import pytest
 
-from Solverz.integrator import Rodas4
+from Solverz.integrator import Rodas4, init
 from Solverz.integrator.derivative import DFDT_POLICIES, SQRT_EPS, dfdt_legacy, dfdt_ode23s
 from Solverz.num_api.num_eqn import nDAE
 from Solverz.solvers.daesolver.rodas.rodas import dfdt
@@ -157,3 +161,22 @@ def test_F0_and_dFdt_are_evaluated_once_per_step(model):
         assert at_start[0] == t and at_start[-1] == t + ddt
         starts += len(at_start)
     assert starts == 1 + 2 * st.nstep
+
+
+@pytest.mark.i5
+@pytest.mark.parametrize('legacy_compat', [False, True], ids=['default', 'legacy_compat'])
+def test_each_configuration_takes_its_own_policy_in_a_run(model, legacy_compat):
+    """The bound of ``test_legacy_is_inaccurate_at_t0`` on the quotient that
+    the first step of a run at ``t = 0`` used, with the step it was taken
+    for, which the first attempt sets when it is accepted. The legacy
+    quotient is wrong by half on the algebraic row, which the short first
+    step of ``rtol = 1e-6`` scales to eight times the bound."""
+    dae, y0 = model('forced')
+    integ = init(dae, [0, 1], y0, alg=Rodas4(legacy_compat=legacy_compat), opt=Opt(rtol=1e-6, atol=1e-8))
+    assert integ.step() and integ.tprev == 0.0 and integ.stats.nreject == 0
+    err = np.abs(integ.dt_step * (integ.dFdt() - np.array([0.0, -1.0])))
+    bound = 4 * SQRT_EPS * max(1.0, np.max(np.abs(integ.uprev)))
+    if legacy_compat:
+        assert err[1] > bound, (err, bound)
+    else:
+        assert np.all(err <= bound), (err, bound)
