@@ -208,7 +208,10 @@ class IterationMatrix:
     bits differ from legacy's under KLU, whose factors depend on the order of
     the rows within a column; the KLU analysis and the SuperLU ordering are
     computed once per pattern instead of whenever a value becomes exactly
-    zero.
+    zero. The first assembly in a process in which no Numba function has run
+    yet also starts Numba, about 0.1 s from a filled cache. The chain is not
+    taken until then, since the last bits of a run would then depend on what
+    the process ran before it.
 
     The pattern is checked at every assembly. ``M`` and ``J`` with the arrays
     of the previous assembly, as every Jacobian of a rendered model has, are

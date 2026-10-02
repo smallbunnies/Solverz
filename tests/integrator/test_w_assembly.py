@@ -4,9 +4,12 @@ Against the SciPy chain of legacy Rodas, which the legacy-compatible
 configuration keeps: every entry that the chain stores has the same bits,
 every entry that it drops is an explicit zero, and ``rscale`` is the same, on
 the models of ``models.py`` inline and rendered and on hand-built matrices
-with a singular ``M``, duplicates in ``J``, exact cancellation and
-non-finite entries. The pattern is recognized by memory for a rendered
-``J`` and by value otherwise, rebuilt when ``J`` changes its pattern, and
+with a singular ``M``, duplicates in ``M`` and in ``J``, summed in storage
+order and found also when they are not adjacent, exact cancellation and
+non-finite entries, and at every assembly on one pattern. The pattern is
+recognized by memory for a rendered ``J``, only for the whole of a buffer,
+and by value otherwise, rebuilt when ``J`` changes its indices or only its
+``indptr`` and when the rows of ``M`` change in place before ``reset``, and
 the values of ``M`` are read at every assembly, also after
 ``model_modified``. Two factorizations of different ``gamma`` alive in one
 attempt do not disturb each other. The read-only pattern arrays shared by
@@ -133,6 +136,18 @@ def _discriminating(rng, dtgamma, m=None):
     raise AssertionError('no discriminating pair found')
 
 
+def _order_sensitive(rng, scale):
+    """Three values whose scaled sum in storage order, ``(s a + s b) + s c``,
+    differs from the sum in reverse order, so that an assembly that sums
+    duplicates in another order than SciPy is detected."""
+    for _ in range(10000):
+        a, b, c = rng.uniform(-3.0, 3.0, 3)
+        x, y, z = scale * a, scale * b, scale * c
+        if (x + y) + z != (z + y) + x:
+            return a, b, c
+    raise AssertionError('no order-sensitive triple found')
+
+
 def _hand_built(dtgamma):
     """``(M, J)`` of order 4: ``M`` singular with a stored zero, ``J`` with
     unsorted rows, duplicates where ``M`` is absent, zero and one, and a
@@ -153,16 +168,65 @@ def _hand_built(dtgamma):
     return M, J
 
 
-@pytest.mark.parametrize('dt', [1e-3, 0.37], ids=['1e-3', '0.37'])
-def test_duplicates_in_J_are_summed_after_scaling_as_by_the_chain(dt):
-    for gamma in GAMMAS:
-        M, J = _hand_built(dt * gamma)
-        before = _snapshot(J.data, J.indices, J.indptr)
-        im = _matrix(4)
-        Wm, rscale, _ = im.build(M, J, dt, gamma)
-        assert im._pattern.j_dup
-        _check(Wm, rscale, M, J, dt, gamma)
-        assert _unchanged(before, J.data, J.indices, J.indptr)
+def _three_duplicates(dtgamma):
+    """``(M, J)`` of order 3: three duplicates of ``J`` at ``(0, 0)``, where
+    ``M`` stores nothing, whose scaled sum depends on its order."""
+    a, b, c = _order_sensitive(np.random.default_rng(3), dtgamma)
+    M = csc_array((np.array([1.0, 1.0]), np.array([1, 2], dtype=np.int32),
+                   np.array([0, 0, 1, 2], dtype=np.int32)), shape=(3, 3))
+    J = csc_array((np.array([a, b, c, 0.7, -0.4, 0.3, 1.1]), np.array([0, 0, 0, 1, 2, 1, 2], dtype=np.int32),
+                   np.array([0, 3, 5, 7], dtype=np.int32)), shape=(3, 3))
+    return M, J
+
+
+def _duplicates_apart(dtgamma):
+    """``(M, J)`` of order 3: the only duplicates of ``J``, rows 0, 1, 0 of
+    column 0, are not adjacent in storage, at the position where ``M`` is 1,
+    with values for which subtracting them one by one differs from
+    subtracting their sum."""
+    a, b = _discriminating(np.random.default_rng(5), dtgamma, m=1.0)
+    M = csc_array(np.diag([1.0, 1.0, 1.0]))
+    J = csc_array((np.array([a, 0.6, b, 0.8, -0.2, 1.4]), np.array([0, 1, 0, 1, 2, 2], dtype=np.int32),
+                   np.array([0, 3, 5, 6], dtype=np.int32)), shape=(3, 3))
+    return M, J
+
+
+def _duplicates_in_M(dtgamma):
+    """``(M, J)`` of order 3: three duplicates of ``M`` at ``(0, 0)``, whose
+    sum depends on its order, and an entry of ``J`` there; ``J`` has no
+    duplicates."""
+    a, b, c = _order_sensitive(np.random.default_rng(9), 1.0)
+    M = csc_array((np.array([a, b, c, 1.0, 1.0]), np.array([0, 0, 0, 1, 2], dtype=np.int32),
+                   np.array([0, 3, 4, 5], dtype=np.int32)), shape=(3, 3))
+    J = csc_array(np.array([[2.0, 1.0, 0.0], [1.0, -3.0, 0.5], [0.0, 0.5, 1.0]]))
+    return M, J
+
+
+NON_CANONICAL = [_hand_built, _three_duplicates, _duplicates_apart, _duplicates_in_M]
+
+
+@pytest.mark.parametrize('make', NON_CANONICAL, ids=[f.__name__.strip('_') for f in NON_CANONICAL])
+def test_duplicates_in_M_and_J_are_summed_as_by_the_chain(make):
+    """Every assembly is made on one ``IterationMatrix``, for two values of
+    ``dt`` and of ``gamma``: the pattern, and with it the scratch for the
+    sums of the duplicates of ``J``, is shared by all of them, as within a
+    run, and each must give the chain's values."""
+    im = pat = None
+    for dt in (1e-3, 0.37):
+        for gamma in GAMMAS:
+            M, J = make(dt * gamma)
+            if im is None:
+                im = _matrix(M.shape[0])
+            before = _snapshot(M.data, M.indices, M.indptr, J.data, J.indices, J.indptr)
+            Wm, rscale, _ = im.build(M, J, dt, gamma)
+            if pat is None:
+                pat = im._pattern
+            assert im._pattern is pat
+            j_key = _keys(J)
+            assert pat.j_dup == (np.unique(j_key).size < j_key.size)
+            _check(Wm, rscale, M, J, dt, gamma)
+            assert _unchanged(before, M.data, M.indices, M.indptr, J.data, J.indices, J.indptr)
+    assert im._pattern.j_dup == (make is not _duplicates_in_M)
 
 
 def test_exact_cancellation_and_a_zero_row():
@@ -275,18 +339,46 @@ def test_a_J_of_another_pattern_rebuilds_the_union(monkeypatch):
     C[1, 0], C[2, 0] = 0.0, 1.0
     J4 = csc_array(C)
     assert _byte_equal(J4.indptr, J3.indptr) and not _byte_equal(J4.indices, J3.indices)
+    # the indices of J5 with another indptr, in new arrays
+    J5 = csc_array((np.array([2.0, 1.0, 0.5, 1.5]), np.array([0, 1, 2, 2], dtype=np.int32),
+                    np.array([0, 2, 3, 4], dtype=np.int32)), shape=(3, 3))
+    J6 = csc_array((np.array([2.0, -3.0, 0.5, 1.5]), np.array([0, 1, 2, 2], dtype=np.int32),
+                    np.array([0, 1, 3, 4], dtype=np.int32)), shape=(3, 3))
+    assert _byte_equal(J6.indices, J5.indices) and not _byte_equal(J6.indptr, J5.indptr)
     calls = _counting(monkeypatch)
     im = _matrix(3)
     patterns = []
-    for J in (J1, J1, J2, J3, J3, J4):
+    for J in (J1, J1, J2, J3, J3, J4, J5, J6):
         Wm, rscale, _ = im.build(M, J, 0.37, GAMMAS[0])
         _check(Wm, rscale, M, J, 0.37, GAMMAS[0])
         patterns.append(im._pattern)
-    p1, p1b, p2, p3, p3b, p4 = patterns
+    p1, p1b, p2, p3, p3b, p4, p5, p6 = patterns
     assert p1b is p1 and p2 is not p1 and p3 is not p2 and p3b is p3 and p4 is not p3
+    assert p5 is not p4 and p6 is not p5
     assert p2.indices.size == p1.indices.size + 1 and _byte_equal(p3.indices, p1.indices)
-    # J1 to J1 and J3 to J3 by memory; J2, J3 and J4 compared once each
-    assert len(calls) == 3
+    # J1 to J1 and J3 to J3 by memory; J2, J3, J4, J5 and J6 compared once each
+    assert len(calls) == 5
+
+
+def test_a_view_of_another_part_of_one_buffer_is_another_pattern(monkeypatch):
+    """The indices of ``J2`` are a view of the same buffer as those of
+    ``J1``, of the same size, and the two share one ``indptr``: only the
+    whole of a buffer is recognized by memory, so ``J2`` is compared by
+    value and rebuilds the union."""
+    M = csc_array(np.diag([1.0, 0.0, 1.0]))
+    buf = np.array([0, 1, 2, 2, 1, 2, 0, 2], dtype=np.int32)
+    indptr = np.array([0, 2, 3, 4], dtype=np.int32)
+    J1 = csc_array((np.array([2.0, 1.0, 0.5, 1.5]), buf[:4], indptr), shape=(3, 3))
+    J2 = csc_array((np.array([1.0, -3.0, 0.5, 1.5]), buf[4:], indptr), shape=(3, 3))
+    assert J1.indptr is J2.indptr and J1.indices.base is buf and J2.indices.base is buf
+    calls = _counting(monkeypatch)
+    im = _matrix(3)
+    Wm, rscale, _ = im.build(M, J1, 0.37, GAMMAS[0])
+    _check(Wm, rscale, M, J1, 0.37, GAMMAS[0])
+    p1 = im._pattern
+    Wm, rscale, _ = im.build(M, J2, 0.37, GAMMAS[0])
+    _check(Wm, rscale, M, J2, 0.37, GAMMAS[0])
+    assert im._pattern is not p1 and len(calls) == 1 and calls[0] is J2
 
 
 def test_the_values_of_M_are_read_at_every_assembly():
@@ -301,6 +393,24 @@ def test_the_values_of_M_are_read_at_every_assembly():
         Wm, rscale, _ = im.build(dae.M, J, 0.1, GAMMAS[0])
         _check(Wm, rscale, dae.M, J, 0.1, GAMMAS[0])
         assert im._pattern is pat
+
+
+def test_rows_of_M_changed_in_place_are_seen_after_reset():
+    """After ``reset`` the pattern of ``M`` is compared by value with copies
+    taken when the union was built, so a change of its index arrays in
+    place, which leaves their memory where it was, rebuilds the union."""
+    M = csc_array(np.diag([1.0, 0.0, 1.0]))
+    J = csc_array(np.array([[2.0, 1.0, 0.0], [1.0, -3.0, 0.5], [0.0, 0.5, 1.0]]))
+    im = _matrix(3)
+    Wm, rscale, _ = im.build(M, J, 0.37, GAMMAS[0])
+    _check(Wm, rscale, M, J, 0.37, GAMMAS[0])
+    pat = im._pattern
+    # the entry of column 2 moves from row 2 to row 0, where J stores nothing
+    M.indices[1] = 0
+    im.reset()
+    Wm, rscale, _ = im.build(M, J, 0.37, GAMMAS[0])
+    _check(Wm, rscale, M, J, 0.37, GAMMAS[0])
+    assert im._pattern is not pat
 
 
 class _Recorder:
