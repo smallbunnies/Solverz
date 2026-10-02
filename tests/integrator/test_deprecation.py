@@ -136,7 +136,7 @@ def test_the_integrator_algorithms_do_not_warn():
 
 
 def test_the_pyproject_filter_matches_the_message():
-    text = PYPROJECT.read_text()
+    text = PYPROJECT.read_text(encoding='utf-8')
     entries = re.findall(r'^filterwarnings\s*=\s*\[(.*)\]\s*$', text, flags=re.MULTILINE)
     assert len(entries) == 1
     filters = re.findall(r'"([^"]*)"', entries[0])

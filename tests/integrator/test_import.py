@@ -47,8 +47,10 @@ def _absolute(node, path):
 
 def _module_level_imports(path):
     """Absolute names imported by the statements that run at import time,
-    including those under a module-level ``if`` or ``try``."""
-    tree = ast.parse(path.read_text(), filename=str(path))
+    including those under a module-level ``if`` or ``try``. The file is
+    parsed from its bytes, so that its encoding is the one of PEP 263 and
+    not the locale's."""
+    tree = ast.parse(path.read_bytes(), filename=str(path))
     names = []
     stack = list(tree.body)
     while stack:
@@ -69,8 +71,9 @@ def _all_imports(path, source=None):
     """Absolute names of every import in ``path``, or in ``source`` read as
     that file; relative imports are resolved, and ``from X import y`` also
     gives ``X.y``, since ``y`` may be a submodule, as in ``from Solverz
-    import integrator``."""
-    text = path.read_text() if source is None else source
+    import integrator``. The file is parsed from its bytes, as in
+    ``_module_level_imports``."""
+    text = path.read_bytes() if source is None else source
     for node in ast.walk(ast.parse(text, filename=str(path))):
         if isinstance(node, ast.Import):
             yield from (a.name for a in node.names)
@@ -103,6 +106,24 @@ def test_no_module_outside_the_integrator_imports_it():
             continue
         for name in _all_imports(path):
             assert not _is_integrator(name), f"{rel} imports {name}"
+
+
+def test_the_scans_do_not_read_in_the_locale_encoding(tmp_path, monkeypatch):
+    """The Windows runners of CI read text in cp1252 by default, which cannot
+    decode the byte 0x9d of the UTF-8 closing quote that some legacy
+    docstrings hold; the default is emulated here."""
+    path = tmp_path / 'quoted.py'
+    path.write_bytes('"""See \u201cRodas\u201d."""\nimport Solverz.integrator\n'.encode('utf-8'))
+    read_text = Path.read_text
+
+    def cp1252(self, encoding=None, errors=None, **kwargs):
+        return read_text(self, encoding='cp1252' if encoding is None else encoding, errors=errors, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', cp1252)
+    with pytest.raises(UnicodeDecodeError):
+        path.read_text()
+    assert _module_level_imports(path) == ['Solverz.integrator']
+    assert any(_is_integrator(name) for name in _all_imports(path))
 
 
 @pytest.mark.parametrize('source', [
