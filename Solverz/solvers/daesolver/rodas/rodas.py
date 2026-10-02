@@ -1,7 +1,19 @@
+import os
+import sys
 import warnings
 
 from Solverz.solvers.daesolver.utilities import *
 from Solverz.solvers.daesolver.rodas.param import Rodas_param
+
+_NOT_CALLER = (os.path.abspath(__file__), os.path.abspath(dae_io_parser.__code__.co_filename))
+
+
+def _caller_stacklevel():
+    """Stack level of the first frame outside this module and the dae_io_parser wrapper."""
+    frame, level = sys._getframe(1), 1
+    while frame is not None and os.path.abspath(frame.f_code.co_filename) in _NOT_CALLER:
+        frame, level = frame.f_back, level + 1
+    return level
 
 
 @dae_io_parser
@@ -61,6 +73,13 @@ def Rodas(dae: nDAE,
     .. [2] Steinebach, Order-reduction of ROW-methods for DAEs and method of lines applications. Preprint-Nr. 1741, FB Mathematik, TH Darmstadt, 1995
     .. [3] Steinebach, “Construction of rosenbrock-wanner method rodas5p and numerical benchmarks within the julia differential equations package,” BIT, vol. 63, no. 27, Jun 2023.
     """
+    warnings.warn("Rodas is deprecated. Use Rodas3, Rodas4, Rodasp or Rodas5P from "
+                  "Solverz.integrator, called as Rodas4()(dae, tspan, y0, opt); the class "
+                  "selects the method, not opt.scheme. Rodas4(legacy_compat=True) and the "
+                  "other three reproduce Rodas on adaptive runs without events, given the "
+                  "class that matches opt.scheme and an Opt that no earlier Rodas call has "
+                  "changed; the user guide lists the conditions.",
+                  DeprecationWarning, stacklevel=_caller_stacklevel())
 
     if opt is None:
         opt = Opt()

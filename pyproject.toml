@@ -43,6 +43,7 @@ classifiers = [
 
 [tool.pytest.ini_options]
 addopts = "-vv"
+filterwarnings = ["ignore:Rodas is deprecated:DeprecationWarning"]
 
 [project.urls]
 Homepage = "https://github.com/smallbunnies/Solverz"
