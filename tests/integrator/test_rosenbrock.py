@@ -274,19 +274,28 @@ def test_an_unknown_norm_is_refused(model):
 @pytest.mark.parametrize('scheme', SCHEMES)
 def test_the_default_configuration_takes_the_legacy_step_on_an_autonomous_model(model, scheme):
     """``dF/dt`` is exactly zero under both policies when ``F`` does not
-    depend on ``t``, so the step is legacy's and only the norm differs."""
+    depend on ``t``, so the step is legacy's and only the norm differs, once
+    ``W`` is assembled by legacy's chain. The default assembly on the union
+    pattern hands the factorization the same values with the rows of each
+    column sorted, where the chain emits them descending; KLU's factors then
+    differ in their last bits, so that step agrees with legacy's to rounding."""
     dae, y0 = model('vdp')
     kwargs = dict(scheme=scheme, rtol=1e-6, atol=1e-9)
     attempts = []
     legacy_run(dae, [0, 20], y0.copy(), Opt(**kwargs), attempts)
     integ = Integrator(dae, [0, 20], y0, Rosenbrock.from_scheme(scheme), Opt(**kwargs))
-    assert not integ.opts.legacy_compat
+    union = Integrator(dae, [0, 20], y0, Rosenbrock.from_scheme(scheme), Opt(**kwargs))
+    assert not integ.opts.legacy_compat and integ.linalg.fixed_pattern
+    integ.linalg.fixed_pattern = False
     for a in attempts:
         _replay(integ, a)
         assert _byte_equal(integ.u, a.ynew)
         scale = 1e-9 + 1e-6 * np.maximum(np.abs(a.ynew), np.abs(a.y0))
         assert _byte_equal(integ.EEst, np.max(np.abs(integ.cache.utilde / scale)))
         assert not integ.dFdt().any()
+        _replay(union, a)
+        assert np.max(np.abs(union.u - a.ynew)) <= 1e-12 * np.max(np.abs(a.ynew))
+    assert integ.linalg._pattern is None and union.linalg._pattern is not None
     assert any(a.reject > 0 for a in attempts)
 
 
