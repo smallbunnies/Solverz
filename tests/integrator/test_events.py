@@ -52,6 +52,11 @@ def _event(value, terminal, direction):
     return event
 
 
+def _ball_state(t):
+    """The state of the ball, from height 0 with velocity 20, at ``t``."""
+    return np.array([20.0 * t - 0.5 * G * t * t, 20.0 - G * t])
+
+
 def _level_times(level):
     """The two times at which the ball, from height 0 with velocity 20, passes ``level``."""
     root = np.sqrt(20.0 ** 2 - 2 * G * level)
@@ -194,6 +199,9 @@ def test_components_at_te_and_before_it(model, rootfind):
     np.testing.assert_allclose(sol.te, [_level_times(15.0)[1]] + 2 * [_level_times(10.0)[1]], rtol=1e-9)
     assert sol.te[1] == sol.te[2] == sol.T[-1] and sol.te[0] < sol.te[1]
     assert _byte_equal(sol.ye[1], sol.ye[2]) and _byte_equal(sol.Y[-1], sol.ye[-1])
+    # the crossing of 15 is logged with the state at its own root, which
+    # the interpolant gives exactly for the quadratic flight of the ball
+    np.testing.assert_allclose(sol.ye[0], _ball_state(sol.te[0]), rtol=0, atol=1e-9)
     if rootfind == 'left':
         assert sol.ye[1][0] >= 10
     else:
@@ -417,6 +425,7 @@ def test_every_recorded_crossing_before_te_in_one_step(model, legacy_compat):
     assert abs(sol.T[-1] - 3.9) <= 1e-15
     np.testing.assert_allclose(sol.te, [up, down], rtol=1e-9)
     assert sol.ie.tolist() == [0, 0]
+    np.testing.assert_allclose(sol.ye, [_ball_state(up), _ball_state(down)], rtol=0, atol=1e-9)
 
 
 @pytest.mark.i6a
@@ -990,6 +999,29 @@ def test_callbacks_crossing_at_the_same_te(model):
     assert sol.te[1] == te and sol.ye[1][1] < 0
     k = np.flatnonzero(sol.T == te)
     assert k.size == 2 and _byte_equal(sol.Y[k[0]], sol.ye[1]) and sol.Y[k[1]][1] == -sol.ye[1][1]
+
+
+@pytest.mark.i6b
+def test_crossings_are_logged_with_the_state_before_any_affect(model):
+    """The recording callback follows the one whose affect reverses the
+    velocity at the descent through 10, so it logs its crossing at ``te``
+    after that affect has run, and still with the state at ``te`` before
+    any change: the row saved before the affect. Its crossing of 15 earlier
+    in the step is logged with the state at its own root."""
+    dae, y0 = model('ball')
+
+    def reverse(integ, idx):
+        integ.u[1] = -integ.u[1]
+
+    c = ContinuousCallback(lambda t, y, integ: y[0] - 10, reverse, direction=-1)
+    b = ContinuousCallback(lambda t, y, integ: np.array([y[0] - 15, y[0] - 10]), direction=-1, record=True)
+    sol = solve(dae, [0, 5], y0, callbacks=[c, b])
+    assert sol.stats.ret == 'success' and sol.ie.tolist() == [0, 1]
+    te = sol.te[1]
+    np.testing.assert_allclose(sol.te, [_level_times(15.0)[1], _level_times(10.0)[1]], rtol=1e-9)
+    np.testing.assert_allclose(sol.ye, [_ball_state(sol.te[0]), _ball_state(te)], rtol=0, atol=1e-9)
+    k = np.flatnonzero(sol.T == te)
+    assert k.size == 2 and _byte_equal(sol.Y[k[0]], sol.ye[1]) and sol.Y[k[1]][1] == -sol.ye[1][1] > 0
 
 
 class _LinearRodas4(Rosenbrock):
