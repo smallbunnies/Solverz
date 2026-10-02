@@ -136,6 +136,11 @@ def test_the_core_raises_on_a_broken_contract(model):
     for alg, m, y, o, message in cases:
         with pytest.raises(TypeError, match=re.escape(message)):
             solve(m, [0, 1], y, alg=alg, opt=o)
+    # a class passed without parentheses is named, in every entry point
+    for entry in (solve, init):
+        for cls in (Rodas4, ImplicitEuler):
+            with pytest.raises(TypeError, match=re.escape(f'pass an instance such as {cls.__name__}()')):
+                entry(ode, [0, 1], y0, cls)
     # with opt.fix_h the estimate of an adaptive algorithm is not read, and a
     # missing one is no error
     sol = solve(ode, [0, 1], y0, alg=_Step(lambda y, err, n: y), opt=Opt(fix_h=True, hinit=2 ** -6))

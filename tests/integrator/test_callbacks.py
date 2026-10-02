@@ -573,7 +573,8 @@ def test_a_daeic_failure_after_an_affect_that_terminates(capsys, kind):
 
 def test_model_modified_after_a_failure_does_nothing(capsys):
     """After the run failed there is nothing to modify: the call neither runs
-    ``DaeIc`` again nor prints a second line."""
+    ``DaeIc`` again nor prints a second line. ``terminate()`` leaves the run
+    failed, and ``interp`` accepts only ``t``, whose state ``DaeIc`` rejected."""
     dae, y0 = _unsolvable()
     integ = init(dae, [0, 1], y0, callbacks=[preset_time_callback([0.5], _set_k(1.0))])
     while integ.step():
@@ -584,4 +585,10 @@ def test_model_modified_after_a_failure_does_nothing(capsys):
     integ.model_modified()
     assert (integ.model_epoch, integ.stats.nfeval) == (epoch, nfeval) and _byte_equal(integ.u, u)
     assert capsys.readouterr().out == ''
-    assert integ.postamble().stats.ret == 'failed'
+    assert _byte_equal(integ.interp(integ.t), integ.u)
+    with pytest.raises(ValueError, match='only tq == t'):
+        integ.interp(0.5 * (integ.tprev + integ.t))
+    integ.terminate()
+    assert not integ.terminated and integ.retcode == 'failed'
+    sol = integ.postamble()
+    assert sol.stats.ret == 'failed' and sol.stats.succeed is False and sol.T[-1] == 0.5

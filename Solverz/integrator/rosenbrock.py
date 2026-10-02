@@ -28,6 +28,12 @@ class RosenbrockTableau:
     ``dF/dt``; ``b`` and ``bd`` are the weights of the solution and of the
     embedded solution; ``c``, ``d`` and ``e`` are the coefficients of the
     dense output, or ``None``.
+
+    The dense output is the polynomial of the legacy ``ntrp1``,
+    ``y0 + theta*h*K @ (b + (theta - 1)*(c + theta*(d + theta*e)))`` at
+    ``theta = (t - t0)/h``, where column ``i`` of ``K`` is ``k_i/h`` and
+    ``k_i`` is stage ``i`` of Hairer's form ``y1 = y0 + sum_i b_i k_i``. A
+    dense output published in another form is converted to this one.
     """
 
     def __init__(self, *, s, pord, gamma, alpha, gammatilde, a, g, b, bd, c=None, d=None, e=None):
@@ -115,7 +121,8 @@ class Rosenbrock(Algorithm):
     step and their slopes, or ``'linear'``; a class that states a tableau
     and not ``interpolation`` gets ``'ntrp1'`` when the tableau has ``c``,
     ``d`` and ``e`` and ``'linear'`` otherwise, whatever its parent states,
-    since the parent's choice describes the parent's tableau.
+    since the parent's choice describes the parent's tableau. For the same
+    reason such a class has ``interp_order = 1`` unless it states its own.
 
     ``legacy_compat=True`` selects the configuration that reproduces legacy
     Rodas. The argument is keyword-only, so that a class passed where an
@@ -138,6 +145,8 @@ class Rosenbrock(Algorithm):
                 cls.error_order = tab.pord
             if 'interpolation' not in cls.__dict__:
                 cls.interpolation = 'ntrp1' if _has_dense_output(tab) else 'linear'
+            if 'interp_order' not in cls.__dict__:
+                cls.interp_order = 1
         if cls.interpolation not in _INTERPOLATIONS:
             raise TypeError(f"{cls.__name__}.interpolation is {cls.interpolation!r}; "
                             f"it must be one of {_INTERPOLATIONS}")
@@ -186,7 +195,7 @@ class Rosenbrock(Algorithm):
             setattr(c, name, np.empty(n))
         if self.interpolation == 'hermite':
             c.F1, c.s0, c.s1 = np.empty(n), np.empty(n), np.empty(n)
-            c.pairing, c.pairing_epoch = None, None
+            c.pairing, c.pairing_epoch, c.gather = None, None, None
         return c
 
     def perform_step(self, integ, cache):
@@ -264,13 +273,22 @@ class Rosenbrock(Algorithm):
         if c.pairing_epoch != integ.model_epoch:
             c.pairing = _pairing(integ.M)
             c.pairing_epoch = integ.model_epoch
+            # F0[rows] / Mv would allocate two vectors per slope and step
+            c.gather = None if c.pairing is None else np.empty(c.pairing[0].size)
         np.subtract(integ.u_step, integ.uprev, out=c.s0)
         np.divide(c.s0, integ.dt_step, out=c.s0)
         np.copyto(c.s1, c.s0)
         if c.pairing is not None:
             rows, cols, Mv = c.pairing
-            c.s0[cols] = F0[rows] / Mv
-            c.s1[cols] = c.F1[rows] / Mv
+            g = c.gather
+            # mode='clip' gathers straight into g; 'raise' would buffer it.
+            # rows holds valid indices, so no index is clipped.
+            np.take(F0, rows, out=g, mode='clip')
+            np.divide(g, Mv, out=g)
+            c.s0[cols] = g
+            np.take(c.F1, rows, out=g, mode='clip')
+            np.divide(g, Mv, out=g)
+            c.s1[cols] = g
 
     def interpolant(self, integ, cache, theta, out):
         """The state at ``tprev + theta * dt_step``, into ``out``.

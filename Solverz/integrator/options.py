@@ -12,7 +12,15 @@ __all__ = ['IntegratorOptions']
 
 def _frozen(x):
     """A scalar unchanged; an array as a read-only float64 copy, so that a
-    later write to the caller's array cannot reach a running integration."""
+    later write to the caller's array cannot reach a running integration.
+
+    A 0-d array is copied with its dtype, which the arithmetic of legacy
+    Rodas sees, and made read-only as well.
+    """
+    if isinstance(x, np.ndarray) and x.ndim == 0:
+        a = x.copy()
+        a.flags.writeable = False
+        return a
     if np.ndim(x) == 0:
         return x
     a = np.array(x, dtype=np.float64)
@@ -62,10 +70,10 @@ class IntegratorOptions:
     def from_opt(cls, opt, alg, tspan):
         """Read ``opt`` for the algorithm ``alg`` on ``tspan``.
 
-        Raises ``ValueError`` for ``t0 > tend``, for a ``hinit`` that is not
-        ``None`` and not positive, for a ``tspan`` of more than two entries
-        that does not increase strictly in the default configuration, and for
-        a run with a fixed step and no ``hinit``.
+        Raises ``ValueError`` for ``t0 > tend``, for a ``hinit`` or a
+        ``hmax`` that is not ``None`` and not positive, for a ``tspan`` of
+        more than two entries that does not increase strictly in the default
+        configuration, and for a run with a fixed step and no ``hinit``.
         """
         if opt is None:
             opt = Opt()
@@ -81,6 +89,10 @@ class IntegratorOptions:
         hinit = opt.hinit
         if hinit is not None and hinit <= 0:
             raise ValueError(f"opt.hinit = {hinit!r} is not positive")
+        # a step bounded by hmax <= 0 is raised to the smallest step at every
+        # attempt, and the run would advance by 16 ulp per step without end
+        if opt.hmax is not None and not opt.hmax > 0:
+            raise ValueError(f"opt.hmax = {opt.hmax!r} is not positive")
         dense = len(ts) > 2
         if dense and not legacy and not np.all(ts[1:] > ts[:-1]):
             raise ValueError("a tspan of more than two entries must increase strictly")

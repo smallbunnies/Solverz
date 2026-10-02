@@ -15,6 +15,9 @@ proposed for an attempt ends the run, and why; ``fix_dt_at_bounds`` and
 the step the controller proposes; ``savevalues`` for the rows of an accepted
 step; ``handle_tstop`` and ``at_end`` whether the run is over.
 ``initial_dt`` bounds the algorithm's first step.
+
+Every ``rodas.py:N`` refers to legacy Rodas at commit ``056e87a``, before its
+deprecation warning moved its lines.
 """
 import heapq
 import math

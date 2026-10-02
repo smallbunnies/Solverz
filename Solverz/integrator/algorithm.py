@@ -149,6 +149,9 @@ def _style_error(alg, inplace):
 def check_style(alg):
     """Raise ``TypeError`` unless ``alg`` defines ``perform_step`` with the
     signature of its ``inplace`` style."""
+    if isinstance(alg, type):
+        # a class passed without parentheses would fail below on the metaclass
+        raise TypeError(f"alg is the class {alg.__name__}; pass an instance such as {alg.__name__}()")
     cls = type(alg)
     inplace = bool(alg.inplace)
     checked = _STYLE.get(cls)

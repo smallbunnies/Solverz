@@ -1,4 +1,8 @@
-"""``IntegratorOptions.from_opt`` reads ``Opt`` once and never writes to it."""
+"""``IntegratorOptions.from_opt`` reads ``Opt`` once and never writes to it.
+
+Every ``rodas.py:N`` refers to legacy Rodas at commit ``056e87a``, before its
+deprecation warning moved its lines.
+"""
 import dataclasses
 from types import SimpleNamespace
 
@@ -111,6 +115,13 @@ def test_array_tolerances_are_read_only_copies():
     assert o.atol[0] == 1e-8
     o = IntegratorOptions.from_opt(Opt(atol=[1, 2]), _alg(), [0, 1])
     assert o.atol.dtype == np.float64
+    # a 0-d array is an array too, and keeps its dtype
+    rtol = np.array(1e-6, dtype=np.float32)
+    o = IntegratorOptions.from_opt(Opt(rtol=rtol), _alg(), [0, 1])
+    assert o.rtol is not rtol and not o.rtol.flags.writeable
+    assert o.rtol.dtype == np.float32 and o.rtol.tobytes() == rtol.tobytes()
+    rtol[()] = 1.0
+    assert o.rtol == np.float32(1e-6)
 
 
 def test_adaptive():

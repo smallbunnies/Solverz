@@ -17,8 +17,9 @@ configuration stretches its last step to ``tend``.
 
 The negative control runs two calls on one model from different initial
 states and compares each with its own legacy call, so that anything one call
-leaves behind for the next shows as a difference; under the row matching of
-KLU the two first analyses differ, so that a carried analysis shows too.
+leaves behind for the next shows as a difference where it changes a
+trajectory; under the row matching of KLU the two first analyses differ, so
+that a carried analysis shows too.
 """
 import numpy as np
 import pytest

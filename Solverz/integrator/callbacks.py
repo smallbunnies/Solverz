@@ -21,8 +21,19 @@ _EPS = float(np.spacing(1.0))
 
 def _same_sign(a, b):
     """Whether ``a`` and ``b`` have the same sign; ``False`` when either is
-    zero or ``NaN``, as ``np.sign(a) == np.sign(b)`` for nonzero ``b``."""
+    zero or ``NaN``, as ``np.sign(a) == np.sign(b)`` for nonzero ``b``.
+
+    The signs are compared, not the product ``a * b``, which underflows to
+    zero when both values lie below about ``1e-162``.
+    """
     return (a > 0.0 and b > 0.0) or (a < 0.0 and b < 0.0)
+
+
+def _crossed(g, ref):
+    """Whether ``g`` is zero or of the sign opposite to the nonzero ``ref``,
+    elementwise; ``False`` where either is ``NaN``, as ``g * ref <= 0``
+    without its underflow."""
+    return (g == 0) | ((g > 0) & (ref < 0)) | ((g < 0) & (ref > 0))
 
 
 def find_root(g, tl, tr, gl, gr, side, tstart):
@@ -43,7 +54,10 @@ def find_root(g, tl, tr, gl, gr, side, tstart):
     for it in range(500):
         if math.nextafter(tl, math.inf) >= tr:
             break
-        tm = tr - gr * (tr - tl) / (gr - gl)
+        # gr - gl is zero only when the Illinois halving has taken both to
+        # zero; the bisection below then takes over
+        d = gr - gl
+        tm = tr - gr * (tr - tl) / d if d != 0.0 else tl
         # the bisection bounds the count near that of plain bisection when
         # regula falsi stalls on one end of the bracket
         if it % 3 == 2 or not (tl < tm < tr):
@@ -168,7 +182,8 @@ class DiscreteCallback:
     """A change of the run at the end of an accepted step where a condition holds.
 
     ``condition(t, y, integ)`` returns a bool and is evaluated after every
-    accepted step, after the continuous callbacks. Where it holds,
+    accepted step, after the continuous callbacks, unless the run has been
+    terminated. Where it holds,
     ``affect(integ)`` runs; it may change ``integ.u``, entries of
     ``integ.dae.p`` and ``integ.dae.M.data``, and may call
     ``integ.terminate()``, and the core then makes the state consistent
@@ -365,7 +380,7 @@ def _brackets(st, integ):
         gk = st.value(integ, tau)
         g, r = gk[tracked], ref[tracked]
         left = (r == 0) & (g != 0)
-        crossed = (r != 0) & (g * r <= 0)
+        crossed = (r != 0) & _crossed(g, r)
         if left.any():
             w = tracked[left]
             ref[w] = gk[w]
@@ -413,7 +428,7 @@ def _nudge(st, integ, i, top, gl, gr):
     tprev = integ.tprev
     tn = tprev + st.cb.repeat_nudge * (integ.t - tprev)
     gn = float(st.value(integ, tn)[i])
-    if gn * gl > 0 and tn < top:
+    if _same_sign(gn, gl) and tn < top:
         found = [_Crossing(st, i, tn, top, gn, gr)]
         return found if st.acting[i] else found + _scan(st, integ, i, top, gr)
     return _scan(st, integ, i, tn, gn)
@@ -431,7 +446,7 @@ def _scan(st, integ, i, tb, gb):
         gk = float(st.value(integ, tau)[i])
         if ref == 0.0:
             ref = gk
-        elif gk * ref <= 0.0:
+        elif _crossed(gk, ref):
             if st.allows(i, ref):
                 found.append(_Crossing(st, i, tb, tau, gb, gk))
                 if st.acting[i]:

@@ -7,7 +7,6 @@ and hide it elsewhere. The integrator's algorithms do not warn. The filter of
 ``pyproject.toml`` hides the warning in the test suite, which calls legacy
 Rodas on purpose, and must match the start of the message.
 """
-import re
 import sys
 import warnings
 from pathlib import Path
@@ -135,12 +134,11 @@ def test_the_integrator_algorithms_do_not_warn():
     assert _deprecations(record) == []
 
 
-def test_the_pyproject_filter_matches_the_message():
-    text = PYPROJECT.read_text(encoding='utf-8')
-    entries = re.findall(r'^filterwarnings\s*=\s*\[(.*)\]\s*$', text, flags=re.MULTILINE)
-    assert len(entries) == 1
-    filters = re.findall(r'"([^"]*)"', entries[0])
-    assert 'ignore:Rodas is deprecated:DeprecationWarning' in filters
+def test_the_pyproject_filter_matches_the_message(pytestconfig):
+    # read through pytest, so that a line outside [tool.pytest.ini_options],
+    # which pytest does not apply, fails the test
+    assert pytestconfig.inipath is not None and pytestconfig.inipath.resolve() == PYPROJECT.resolve()
+    assert 'ignore:Rodas is deprecated:DeprecationWarning' in pytestconfig.getini('filterwarnings')
     action, message, _ = 'ignore:Rodas is deprecated:DeprecationWarning'.split(':')
 
     dae, y0 = models.build('dae_test')

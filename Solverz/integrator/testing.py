@@ -385,7 +385,7 @@ def _fixed_step_runs(kit):
             sol = integ.solve()
             _succeeded(sol, f"the run on {name} with h = 2**-{k}")
             run.errors.append(float(np.max(np.abs(sol.Y - exact(sol.T)))))
-            run.interior.append(worst)
+            run.interior.append(float(worst))
         runs[name] = run
     return runs
 
@@ -520,10 +520,13 @@ def _events(kit):
              f"the components recorded are {sol.ie!r}, not [0, 1]")
     te = sol.te
     _require(np.all(te > sol.T[0]), "an event is reported at the initial time")
-    _require(te[0] == te[1], f"the two identical components cross at {te[0]!r} and {te[1]!r}")
-    _require(abs(te[0] - te_exact) <= tol,
-             f"the impact is found at {te[0]!r}, {abs(te[0] - te_exact):.3e} from {te_exact!r}")
-    _require(sol.T[-1] == te[0], f"the run ends at {sol.T[-1]!r}, not at the event time {te[0]!r}")
+    t0, t1 = float(te[0]), float(te[1])
+    _require(t0 == t1, f"the two identical components cross at {t0!r} and {t1!r}")
+    # every step is saved, so the crossing step starts at the row before te
+    _require(abs(t0 - te_exact) <= tol,
+             f"the impact is found at {t0!r}, {abs(t0 - te_exact):.3e} from {te_exact!r}, in the "
+             f"step that starts at {float(sol.T[-2])!r}")
+    _require(sol.T[-1] == t0, f"the run ends at {float(sol.T[-1])!r}, not at the event time {t0!r}")
     _require(_byte_equal(sol.Y[-1], sol.ye[0]), "the last row is not the recorded state of the event")
     return {'te': float(te[0]), 'deviation': float(abs(te[0] - te_exact))}
 
@@ -564,7 +567,8 @@ def _algebraic_event(kit):
                                             f"reaches 0.5")
     te = float(sol.te[0])
     _require(abs(te - te_exact) <= tol,
-             f"z reaches 0.5 at {te!r}, {abs(te - te_exact):.3e} from {te_exact!r}")
+             f"z reaches 0.5 at {te!r}, {abs(te - te_exact):.3e} from {te_exact!r}, in the step "
+             f"that starts at {float(sol.T[-2])!r}")
     _require(sol.T[-1] == te and _byte_equal(sol.Y[-1], sol.ye[0]),
              "the run does not end at the event with its recorded state")
     return {'te': te, 'deviation': abs(te - te_exact)}

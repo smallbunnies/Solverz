@@ -460,10 +460,15 @@ class Integrator:
     def step(self):
         """Advance by one accepted step; ``False`` once the run is over.
 
+        The call that takes the step ending the run, at ``tend``, at a
+        terminal event or after ``terminate()``, also returns ``False``, so a
+        loop ``while integ.step()`` does not see that step in its body.
         Between two calls, ``t`` and ``u`` are the end of the step just
         taken, and ``interp`` evaluates inside it. After a call that failed,
-        ``u`` is the state at ``t``, the end of the last accepted step, and
-        ``interp`` accepts only ``tq == t``.
+        ``interp`` accepts only ``tq == t``. ``u`` is then the state at
+        ``t``, the end of the last accepted step, when an attempt failed, and
+        the state the step or a callback left at ``t`` when the model or
+        ``DaeIc`` failed after the step was accepted.
         """
         if self.finished:
             return False
@@ -489,7 +494,12 @@ class Integrator:
         return self.postamble()
 
     def terminate(self):
-        """End the run after the current callback, or before the next step."""
+        """End the run after the current callback, or before the next step.
+
+        A run that has failed has no next step, and stays failed.
+        """
+        if self.failed:
+            return
         self.terminated = True
         self.retcode = 'terminated'
         self.finished = True
@@ -784,8 +794,14 @@ class Integrator:
         return to_daesol(self.sol, self.events, self.stats, self._address)
 
     def _fail(self, reason):
-        """End the run as failed and print one line; the rows saved so far are its result."""
+        """End the run as failed and print one line; the rows saved so far are its result.
+
+        ``interp`` then accepts only ``tq == t``: after a failure in the
+        modification protocol ``u`` is the state that ``DaeIc`` rejected, and
+        after a model error in ``addsteps`` the interpolant does not exist.
+        """
         self.failed = True
+        self._interp_valid = False
         self.finished = True
         self.retcode = 'failed'
         self.stats.ret = 'failed'
@@ -806,7 +822,6 @@ class Integrator:
         """
         np.copyto(self.u, self.uprev)
         self.u_step = self.u
-        self._interp_valid = False
         self._fail(reason)
 
     def _all_finite(self, u):

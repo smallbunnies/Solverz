@@ -6,6 +6,9 @@ is never written. ``stepsize`` runs after every adaptive attempt that did
 not fail and returns the quantity ``q`` that ``on_accept`` or ``on_reject``
 then receives. For ``IController`` and ``PIController`` ``q`` is the inverse
 growth factor of OrdinaryDiffEq.jl, so the next step is ``dt / q``.
+
+Every ``rodas.py:N`` refers to legacy Rodas at commit ``056e87a``, before its
+deprecation warning moved its lines.
 """
 import numpy as np
 

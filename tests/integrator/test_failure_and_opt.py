@@ -520,6 +520,12 @@ def test_argument_errors():
     for hinit in (0, 0.0, -0.1):
         with pytest.raises(ValueError, match='is not positive'):
             alg(dae, [0, 1], y0, Opt(hinit=hinit))
+    # the default configuration would raise every step to the smallest step
+    # without end, and legacy fails at once
+    for hmax in (0, 0.0, -1.0, float('nan')):
+        for method in (alg, Rodas4()):
+            with pytest.raises(ValueError, match=r'^opt.hmax = .* is not positive$'):
+                method(dae, [0, 1], y0, Opt(hmax=hmax))
     for tstops in ([0.5], np.array([0.25, 0.5])):
         for entry in (solve, init):
             with pytest.raises(ValueError, match='has no tstops'):

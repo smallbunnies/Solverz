@@ -5,6 +5,9 @@ and propose ``dt / q``; after a rejection neither grows the step until the
 next acceptance. ``LegacyRodasController`` evaluates the expressions of
 legacy Rodas with its ``facmax`` state. Each case includes ``EEst`` of 0,
 ``inf`` and ``NaN``, and the bounds of the proposed step.
+
+Every ``rodas.py:N`` refers to legacy Rodas at commit ``056e87a``, before its
+deprecation warning moved its lines.
 """
 from types import SimpleNamespace
 

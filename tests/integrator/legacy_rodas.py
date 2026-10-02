@@ -12,6 +12,9 @@ The transcription keeps legacy's side effects on ``opt``: ``hmax`` is written
 when it is ``None``, and ``facmax``, the growth cap of the step-size
 controller, is written after every attempt. Like legacy Rodas, a call
 therefore needs an ``Opt`` of its own to be reproducible.
+
+Every ``rodas.py:N`` refers to legacy Rodas at commit ``056e87a``, before its
+deprecation warning moved its lines.
 """
 from types import SimpleNamespace
 from typing import Any, NamedTuple

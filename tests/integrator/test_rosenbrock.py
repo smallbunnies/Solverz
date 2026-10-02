@@ -9,6 +9,9 @@ legacy's step on an autonomous model, where the two ``dF/dt`` policies
 agree; the slopes of the Rodas3 interpolant in both configurations; the
 contract of ``interp``; the dispatch of one attempt in both styles, with its
 failures and its contract errors; and the residual service.
+
+Every ``rodas.py:N`` refers to legacy Rodas at commit ``056e87a``, before its
+deprecation warning moved its lines.
 """
 import functools
 from types import SimpleNamespace
@@ -175,8 +178,15 @@ def test_a_subclass_takes_its_traits_from_its_tableau():
     class KeptRodas3(Rodas3):
         scheme = 'kept'
 
+    class StatedRodas4(Rodas4):
+        tableau = plain
+        interp_order = 2
+
     assert (PlainRodas4.interpolation, DenseRodas3.interpolation) == ('linear', 'ntrp1')
     assert KeptRodas3.interpolation == 'hermite' and KeptRodas3.tableau is Rodas3.tableau
+    # and so does the order of the interpolant, which the class may state
+    assert (PlainRodas4.interp_order, DenseRodas3.interp_order, KeptRodas3.interp_order) == (1, 1, 2)
+    assert StatedRodas4.interp_order == 2
     with pytest.raises(TypeError, match='has no c, d and e'):
         class NoDense(Rosenbrock):
             tableau = plain

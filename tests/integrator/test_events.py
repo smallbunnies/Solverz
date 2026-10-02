@@ -358,6 +358,25 @@ def test_a_zero_at_a_step_end_is_reported_once(model, hmax):
 
 
 @pytest.mark.i6a
+@pytest.mark.parametrize('scale', [1e-170, -1e-170])
+@pytest.mark.parametrize('constant', [True, False])
+def test_tiny_values_of_one_sign_do_not_cross(model, scale, constant):
+    """The product of two values below about ``1e-162`` underflows to zero,
+    so a test of the product would see a crossing at every sample, and the
+    secant step of a constant condition would divide by zero."""
+    dae, y0 = model('ball')
+    if constant:
+        def condition(t, y, integ):
+            return scale
+    else:
+        def condition(t, y, integ):
+            return scale * (1.0 + t)
+    cb = ContinuousCallback(condition, terminal=True, record=True)
+    sol = solve(dae, [0, 1], y0, callbacks=[cb])
+    assert sol.stats.ret == 'success' and sol.te is None and sol.T[-1] == 1.0
+
+
+@pytest.mark.i6a
 @pytest.mark.parametrize('legacy_compat', CONFIGS)
 def test_a_crossing_just_after_the_start_of_a_long_step(model, legacy_compat):
     """The ball passes ``2e-9`` about ``1e-10`` after the start of a first
@@ -859,6 +878,36 @@ def test_ten_bounces_in_one_call(model):
     print(f"max relative deviation of the bounce times: from legacy "
           f"{np.max(np.abs(sol.te / LEGACY_BOUNCES - 1)):.2e}, from the exact times "
           f"{np.max(np.abs(sol.te / exact - 1)):.2e}")
+
+
+@pytest.mark.i6b
+@pytest.mark.parametrize('method', [Rodas3, Rodas4])
+def test_the_state_and_the_next_step_after_an_affect(model, method):
+    """After an affect at ``te`` inside the accepted step, ``interp(t)``
+    returns the changed state ``u``, not the interpolant of the step as
+    computed, whose velocity still points down, and the next step is
+    proposed with the length of the step that contained the event."""
+    dae, y0 = model('ball')
+
+    def bounce(integ, idx):
+        integ.u[1] = -0.9 * integ.u[1]
+
+    cb = ContinuousCallback(lambda t, y, integ: y[0], bounce, direction=-1, rootfind='left')
+    integ = init(dae, [0, 27], y0, alg=method(), callbacks=[cb])
+    events = inside = 0
+    while not integ.finished:
+        epoch = integ.model_epoch
+        integ.step()
+        if integ.model_epoch == epoch:
+            continue
+        events += 1
+        assert integ.dtpropose == integ.dt_step
+        if integ.t < integ.t_step:
+            inside += 1
+            computed = integ._interpolate((integ.t - integ.tprev) / integ.dt_step, np.empty(integ.n))
+            assert computed[1] < 0 < integ.u[1]
+            assert _byte_equal(integ.interp(integ.t), integ.u)
+    assert integ.solve().stats.ret == 'success' and events == 10 and inside >= 9
 
 
 def _bounded(integ, nsteps=1000):

@@ -33,7 +33,7 @@ An algorithm is a subclass of `Solverz.integrator.Algorithm`.
 | `controller(self, opts)` | `IController(opts, self)` | the step-size controller of a run |
 | `initial_dt(self, integ)` | `hinit`, else `1e-6 * (tend - t0)` | the first step |
 
-`Integrator` raises `TypeError` before the first step when `perform_step` is missing or does not take one parameter after `self` with `inplace = False` or two with `inplace = True`. In the formula style it raises `TypeError` when `y` or `err` is not a vector of the length of the state, when an adaptive method returns no error estimate, and when a method that declares `adaptive = False` returns one without `opt.fix_h`. These are programming errors and are reported at once.
+`Integrator` raises `TypeError` before the first step when `perform_step` is missing or does not take one parameter after `self` with `inplace = False` or two with `inplace = True`. In the formula style it raises `TypeError` when `y` or `err` is not a vector of the length of the state, when an adaptive method returns no error estimate, and when a method that declares `adaptive = False` returns one, with or without `opt.fix_h`; `opt.fix_h` makes the core ignore the estimate of an adaptive method only. These are programming errors and are reported at once.
 
 A method without an error estimate declares `adaptive = False`. It then runs with the fixed step `opt.hinit`, which is required, and lands exactly on the stop times and on `tend`. A failed step of such a run fails the run, since the step cannot shrink.
 
@@ -112,7 +112,7 @@ class Trapezoid(Algorithm):
 | `s.implicit(t, gamma, rhs, y=None, out=None, slope=False)` | the `y` with `M y - h*gamma*F(t, y) = rhs`, from `y` or `y0`; with `slope=True`, `(y, k)` with `k = (M y - rhs) / (h*gamma)`, which equals `F(t, y)` to the Newton tolerance |
 | `s.error_norm(e)` | the scalar error of the vector `e` that the controller reads |
 
-The services count every evaluation, factorization and solve in `Stats`; an algorithm never touches `Stats`. `out=` is accepted wherever a vector is returned and is never required; with it, `F` and `f` allocate nothing. The same services exist on the Integrator as `integ.F`, `integ.f`, `integ.D()`, `integ.F0()`, `integ.J`, `integ.J0()`, `integ.dFdt`, `integ.W`, `integ.implicit` and `integ.error_norm`, for in-place algorithms.
+The services count every evaluation, factorization and solve in `Stats`; an algorithm never touches `Stats`. `out=` is accepted wherever a vector is returned and is never required; with it, `F` and `f` allocate nothing. The same services exist on the Integrator as `integ.F`, `integ.f`, `integ.D()`, `integ.F0()`, `integ.J`, `integ.J0()`, `integ.dFdt`, `integ.W`, `integ.implicit` and `integ.error_norm`, for in-place algorithms. `s.F0` and `s.J0` are properties and `s.dFdt` is a method, since it takes `out`; on the Integrator all three are methods, `integ.F0()`, `integ.J0()` and `integ.dFdt()`.
 
 `s.implicit` runs a simplified Newton iteration with the matrix `s.W(gamma)`. It stops when the estimated Newton error is one percent of the tolerance, in the tolerance-weighted root mean square norm, and raises `StepFailure` when the iteration diverges, converges too slowly or produces a value that is not finite. The factorization is computed once per `gamma` per attempt, so several `implicit` calls with one `gamma` share it; an SDIRK method is one `s.implicit(..., slope=True)` call per stage.
 
@@ -142,7 +142,7 @@ class MyRos(Rosenbrock):
         b=[...], bd=[...], pord=3)
 ```
 
-`perform_step`, the controller, the norm and the interpolant come from `Rosenbrock`. The dense output of the table is used when `c`, `d` and `e` are given, and the linear interpolant otherwise. `order` and `error_order` are the table's `pord`.
+`perform_step`, the controller, the norm and the interpolant come from `Rosenbrock`. The dense output of the table is used when `c`, `d` and `e` are given, and the linear interpolant otherwise; `interpolation = 'hermite'` selects the cubic Hermite interpolant between the two ends of the step and their slopes, which needs no coefficients. The dense output is the polynomial `y0 + theta*h*K @ (b + (theta - 1)*(c + theta*(d + theta*e)))` at `theta = (t - t0)/h`, the form of the legacy `ntrp1`, where column `i` of `K` is `k_i/h` and `k_i` is stage `i` of Hairer's form `y1 = y0 + sum_i b_i k_i`. A dense output published in another form, such as Hairer's `d_ij`, is converted to this one before it is passed. `order` and `error_order` are the table's `pord`, and `interp_order` is 1 unless the class states it, also when the class derives from a method such as `Rodas4`.
 
 ## The controller
 
