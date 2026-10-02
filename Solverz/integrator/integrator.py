@@ -773,7 +773,9 @@ class Integrator:
         """Close the run and build its ``daesol``."""
         if self._pbar is not None:
             self._pbar.close()
-        if self.terminated and self.sol.last_t != self.t:
+        # a run that failed after it was terminated returns the rows saved
+        # before the failure, which the printed line names
+        if self.terminated and not self.failed and self.sol.last_t != self.t:
             self.sol.push(self.t, self.u.copy())
         if self.retcode is None:
             self.retcode = 'success'

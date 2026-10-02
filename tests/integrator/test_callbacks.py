@@ -544,6 +544,33 @@ def test_a_daeic_failure_after_a_callback(capsys, grid, kind):
     assert lines[0].endswith('at t = 0.5; the solution is returned up to t = 0.5.')
 
 
+@pytest.mark.parametrize('kind', ['discrete', 'continuous'])
+def test_a_daeic_failure_after_an_affect_that_terminates(capsys, kind):
+    """The affect sets ``k = 1`` and ends the run, and no row is saved at 0.5.
+    ``DaeIc`` then fails, and the failure decides the result: no row of the
+    state it rejected follows the rows saved so far, which end where the
+    printed line says."""
+    dae, y0 = _unsolvable()
+    capsys.readouterr()
+    tspan = np.linspace(0, 1, 4)
+
+    def kill(integ, idx=None):
+        _set_k(1.0)(integ)
+        integ.terminate()
+
+    if kind == 'discrete':
+        cb = preset_time_callback([0.5], kill, save_positions=(False, False))
+    else:
+        cb = ContinuousCallback(lambda t, y, integ: t - 0.5, kill, terminal=True, rootfind='right',
+                                save_positions=(False, False))
+    sol = solve(dae, tspan, y0, callbacks=[cb])
+    assert sol.stats.ret == 'failed' and sol.stats.succeed is False and sol.stats.t_fail == 0.5
+    assert _byte_equal(sol.T, tspan[:2])
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1 and lines[0].startswith('rodas4: DaeIc found no consistent initial values')
+    assert lines[0].endswith(f"at t = 0.5; the solution is returned up to t = {float(sol.T[-1])!r}.")
+
+
 def test_model_modified_after_a_failure_does_nothing(capsys):
     """After the run failed there is nothing to modify: the call neither runs
     ``DaeIc`` again nor prints a second line."""
