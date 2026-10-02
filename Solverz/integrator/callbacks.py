@@ -16,6 +16,7 @@ import numpy as np
 __all__ = ['ContinuousCallback', 'DiscreteCallback', 'preset_time_callback']
 
 _ROOTFIND = ('left', 'right')
+_EPS = float(np.spacing(1.0))
 
 
 def _same_sign(a, b):
@@ -98,7 +99,8 @@ class ContinuousCallback:
     which the component has crossed or is zero. ``save_positions`` saves the
     state before and after the event at ``te``. After an event at the start
     of a step, a re-crossing by the same component within ``repeat_nudge``
-    of the step is the event already reported.
+    of the step is the event already reported, unless a change at the event
+    moved the component off its value there.
     """
 
     def __init__(self, condition, affect=None, *, direction=0, terminal=False, record=False,
@@ -211,11 +213,12 @@ class _ContinuousState:
     condition at the start of the current step and ``g1`` at its end, the
     condition's values at the times evaluated in the current step, and the
     components that fired at the last event with its time, which the
-    modification protocol stores for the repeat nudge.
+    modification protocol stores for the repeat nudge, with their values at
+    the event before any change.
     """
 
     __slots__ = ('cb', 'order', 'm', 'g0', 'g1', 'down', 'up', 'terminal', 'acting',
-                 'record_only', 'relevant', 'values', 'fired', 'fired_t')
+                 'record_only', 'relevant', 'values', 'fired', 'fired_t', 'fired_g')
 
     def __init__(self, cb, order, integ):
         self.cb = cb
@@ -230,6 +233,7 @@ class _ContinuousState:
         self.values = {}
         self.fired = None
         self.fired_t = None
+        self.fired_g = None
 
     def restart(self, integ):
         """The bottom values at ``(t, u)``, after the state or the model changed."""
@@ -348,7 +352,11 @@ def _brackets(st, integ):
     if tracked.size == 0:
         return []
     acting = st.acting
-    fired = st.fired if st.cb.rootfind == 'left' and st.fired is not None and st.fired_t == tprev else None
+    fired = None
+    if st.cb.rootfind == 'left' and st.fired is not None and st.fired_t == tprev:
+        # a component that a change at the event moved off its value there
+        # has left the surface, so a crossing near the start is a new one
+        fired = st.fired[_unmoved(st.g0[st.fired], st.fired_g)]
     ref = st.g0.copy()
     found = []
     first = True
@@ -383,10 +391,17 @@ def _brackets(st, integ):
     return found
 
 
+def _unmoved(g, ge):
+    """Whether each value ``g`` at the start of the step is the value ``ge``
+    of the event, within ten units of rounding of the larger of the two."""
+    return np.abs(g - ge) <= 10 * _EPS * np.maximum(np.abs(g), np.abs(ge))
+
+
 def _nudge(st, integ, i, top, gl, gr):
     """The crossings of component ``i`` of a ``'left'`` callback that fired at
-    the start of the step, whose first crossing lies in the bracket from the
-    start to ``top``, with the values ``gl`` and ``gr`` at its ends.
+    the start of the step, and that no change at the event moved off its
+    value there, whose first crossing lies in the bracket from the start to
+    ``top``, with the values ``gl`` and ``gr`` at its ends.
 
     The condition is evaluated at ``tn``, ``repeat_nudge`` of the step after
     its start. If the component has not crossed by ``tn``, which lies before

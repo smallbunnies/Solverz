@@ -662,6 +662,7 @@ def _nudged(condition, repeat_nudge, interp_points, fired):
     st = _ContinuousState(cb, 0, integ)
     integ.t = 1.0
     st.fired, st.fired_t = np.array(fired), 0.0
+    st.fired_g = st.g0[st.fired]
     return {c.i: (c.bottom, c.top) for c in _brackets(st, integ)}
 
 
@@ -672,7 +673,8 @@ def test_the_repeat_nudge():
     and when ``tn`` lies at or after the top of its bracket, the next
     bracket after ``tn`` is searched. A component that did not fire keeps
     its bracket. The nudge takes effect once the modification protocol
-    stores the fired components, so the stored state is set here."""
+    stores the fired components and their values at the event, so the
+    stored state is set here, with the values left unchanged."""
     def condition(t):
         return np.array([0.05 - t, 0.3 - t, 0.3 - t])
 
@@ -918,6 +920,39 @@ def test_a_later_change_at_the_same_time_keeps_the_stored_components(model, late
     sol = _bounded(integ)
     assert sol.stats.ret == 'success' and len(at) == 1
     assert sol.te.tolist() == at and sol.ie.tolist() == [0]
+
+
+@pytest.mark.i6b
+@pytest.mark.parametrize('rootfind', ['left', 'right'])
+def test_an_affect_that_moves_the_component_off_the_surface_ends_the_nudge(model, rootfind):
+    """The affect at the descent through 15 puts the ball back at 16 with the
+    velocity -2000, so it crosses 15 again about ``1/2000`` later, inside
+    the first percent of the next step, which has the length of the
+    crossing step. The component is no longer at its value at the event, so
+    with ``'left'`` the repeat nudge does not take that crossing for the
+    one already reported, and its affect ends the run."""
+    dae, y0 = model('ball')
+    at = []
+
+    def affect(integ, idx):
+        at.append(integ.t)
+        if len(at) == 1:
+            integ.u[0], integ.u[1] = 16.0, -2000.0
+        else:
+            integ.terminate()
+
+    cb = ContinuousCallback(lambda t, y, integ: y[0] - 15, affect, direction=-1, record=True,
+                            rootfind=rootfind)
+    integ = init(dae, [0, 5], y0, callbacks=[cb])
+    while not at:
+        assert integ.step()
+    integ.step()
+    sol = integ.postamble()
+    assert sol.stats.ret == 'terminated' and len(at) == 2
+    assert sol.te.tolist() == at and sol.ie.tolist() == [0, 0]
+    np.testing.assert_allclose(at[1] - at[0], 1 / 2000, rtol=1e-3)
+    # the second crossing lies where the nudge reads a crossing as the event already reported
+    assert at[1] - at[0] < cb.repeat_nudge * integ.dt_step
 
 
 @pytest.mark.i6b

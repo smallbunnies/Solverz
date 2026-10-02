@@ -166,7 +166,7 @@ sol = solve(nbball, [0, 30], y0, opt=Opt(rtol=1e-6, atol=1e-8), callbacks=[groun
 - The crossing is then located on the interpolant, to two adjacent floats, without a tolerance parameter. Its accuracy is that of the interpolant.
 - **A component that is exactly zero at the start of a step does not cross there.** Nothing is therefore reported at the initial point of a call, and a run that starts exactly on a surface begins cleanly. A component that is zero at the start of a step and moves away from zero is not an event; its next crossing is, also when it lies in the same step.
 - The earliest crossing of a component that acts on the run, because it is terminal or its callback has an `affect`, is one event instant `te` for all callbacks. Every component of any callback that crosses at `te` is handled there, and recorded crossings before `te` are logged in increasing time. After such an event, the next step is proposed with the length of the step that contained it.
-- After an event found with `'left'`, a re-crossing by the same component within the first fraction `repeat_nudge` of the next step is the event already reported, not a new one.
+- After an event found with `'left'`, a re-crossing by the same component within the first fraction `repeat_nudge` of the next step is the event already reported, not a new one, as long as no change at the event moved the component off its value there. A component that an `affect`, or the consistent initialization after it, moved away from the surface is followed from the start of the next step, so a crossing it makes right away is reported.
 
 ### The cost of events
 

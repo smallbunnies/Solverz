@@ -654,6 +654,9 @@ class Integrator:
                 at_te.setdefault(c.st.order, []).append(c.i)
         self.policy.savevalues(self)
         handled = [(states[k], at_te[k]) for k in sorted(at_te)]
+        # the values at te before any change, against which the repeat nudge
+        # tells a component left on the surface from one an affect moved off it
+        fired = [(st, idx, st.value(self, te)[idx]) for st, idx in handled if st.cb.rootfind == 'left']
         if any(st.cb.save_positions[0] for st, _ in handled) and self.sol.last_t != te:
             self.sol.push(te, self.u.copy())
         affected = False
@@ -668,7 +671,7 @@ class Integrator:
                     self._freeze_step()
                     affected = True
                 st.cb.affect(self, np.array(idx, dtype=np.int64))
-        if affected and not self._modification_protocol(handled):
+        if affected and not self._modification_protocol(fired):
             return True
         if any(st.cb.save_positions[1] for st, _ in handled):
             self.sol.push(te, self.u.copy())
@@ -718,9 +721,10 @@ class Integrator:
         consistent; ``F0``, ``J0`` and ``dF/dt`` are evaluated anew at the
         next attempt and the algorithm clears its history; the bottom values
         of the continuous callbacks are taken at the changed state. ``fired``
-        holds the components of each continuous callback that crossed at
-        ``t``, which a ``'left'`` callback keeps for the repeat nudge of the
-        next step. The next commit makes ``u`` the start of the next step.
+        holds, for each ``'left'`` continuous callback that crossed at ``t``,
+        its components that crossed and their values before any change,
+        which the callback keeps for the repeat nudge of the next step. The
+        next commit makes ``u`` the start of the next step.
         """
         self._detach()
         dae = self.dae
@@ -743,10 +747,10 @@ class Integrator:
         self.alg.reset_history(self, self.cache)
         for st in self.continuous_callbacks:
             st.restart(self)
-        for st, idx in fired:
-            if st.cb.rootfind == 'left':
-                st.fired = np.array(idx, dtype=np.int64)
-                st.fired_t = self.t
+        for st, idx, g in fired:
+            st.fired = np.array(idx, dtype=np.int64)
+            st.fired_g = g
+            st.fired_t = self.t
         return True
 
     def _freeze_step(self):
